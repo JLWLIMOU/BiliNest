@@ -205,6 +205,17 @@ npx electron .
 
 ---
 
+## 开源依赖与许可（Third-party licenses）
+
+本项目在 `public/vendor/` 中内置了以下以 MIT 许可证发布的开源组件，其完整许可证文本随文件一同分发：
+
+| 组件 | 版本 | 作者 | 许可证 | 用途 |
+| --- | --- | --- | --- | --- |
+| [ArtPlayer](https://github.com/zhw2590582/ArtPlayer) | v5.4.0 | Harvey Zhao | MIT（见 `vendor/ARTPLAYER_LICENSE`） | 页内视频播放器内核 |
+| [qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator) | — | Kazuhiko Arase | MIT（见 `public/vendor/qrcode.js` 文件头） | 登录二维码渲染 |
+
+本项目本身以 MIT 许可证发布（见仓库根目录 `LICENSE`）。
+
 ## 安全与合规声明
 
 - 代码**不硬编码任何敏感信息**；Cookie / OAuth 密钥全部来自用户输入 / 环境变量；
