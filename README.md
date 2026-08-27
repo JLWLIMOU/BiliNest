@@ -7,6 +7,18 @@
 
 > 只看你指定的收藏夹 / 手动添加的视频 / 本地文件，**没有推荐、首页、评论、点赞、动态**。画质切换、弹幕、字幕全部在页面内完成，永不跳转 B 站官网。
 
+## 它解决什么痛点？
+
+你大概遇到过这些情况：
+
+- **想学习却总被带偏**：打开 B 站本来要听课，结果被首页推荐、动态、热门一路刷下去，半小时过去啥也没看。
+- **收藏夹等于吃灰**：存了一堆“以后学”的视频，混在推荐流里找不到，也更不记得看到第几 P。
+- **官方播放页太吵**：满屏评论、相关推荐、三连按钮，根本没法专注，想关还关不干净。
+- **进度总丢**：多 P / 合集看到哪集、哪一分，下次打开全忘了，从头再来。
+- **第三方工具不放心**：要么要把 Cookie 交给别人，要么只是换皮播放器——画质一高就跳回官网。
+
+BiliPure 的思路很简单：**只把你指定的内容留下来，其它的全删掉**。没有推荐、没有评论、没有动态；登录态只存在你自己的浏览器里，播放地址走本机代理获取，画质切换在页面内完成，永不跳官网。
+
 ---
 
 ## English
@@ -16,6 +28,10 @@
 - **Local-first & private**: a tiny zero-dependency Node proxy on `127.0.0.1` forwards only whitelisted read-only Bilibili APIs. Your credentials stay in your own browser; requests never touch any third party.
 - **Zero install of dependencies**: pure Node 18+ built-ins + static frontend, no `npm install` needed.
 - **Cross-platform**: works on Windows, macOS and Linux.
+
+### Why BiliPure?
+
+Bilibili is great for studying, but its home feed, comments and recommendations are engineered to keep you scrolling. BiliPure strips all of that away: you pick exactly what to watch (a folder, a few videos, or local files), and the app remembers your progress across multi-part series — so you actually finish what you start.
 
 ### Quick start
 
