@@ -50,24 +50,31 @@ See the Chinese section below for login methods, usage and the full feature list
 
 ---
 
-## 快速开始
+## 快速开始（三步）
 
-需要 **Node.js 18 或更高版本**（本仓库零第三方依赖，无需 `npm install`）。
+本程序是**纯本地**运行的，不需要部署到任何服务器；装好 Node 后启动即可。
 
-> 没装 Node？到 [nodejs.org](https://nodejs.org) 下载 **LTS** 版，一路「下一步」安装完，在终端输入 `node -v` 能看到版本号（≥ 18）即成功。
+### 第一步：安装 Node.js（只需一次）
+1. 打开 https://nodejs.org ，点击绿色的 **LTS** 按钮下载安装包；
+2. 双击安装包，一路点「下一步 / Next」直到完成（不用改任何选项）；
+3. 验证：按 `Win+R` 输入 `cmd` 回车，执行 `node -v`，能看到 `v18.x` 或更高即成功。
+   > macOS / Linux 用户：在终端执行同样命令；Mac 也可 `brew install node`。
 
-### 启动（三选一）
+### 第二步：获取本程序
+- 方式 A（推荐）：到本仓库右侧 **Releases** 页面，下载 `Source code (zip)` 并解压；
+- 方式 B：已装 git 则执行 `git clone https://github.com/JLWLIMOU/bilipure.git`。
 
-1. **Windows 一键启动**：双击项目根目录的 `launcher.vbs`（自动启动本地服务并打开浏览器；无黑窗口）。
-2. **macOS / Linux 一键启动**：在终端运行 `./start.sh`（首次需 `chmod +x start.sh`）。
-3. **通用方式（任意系统）**：
+### 第三步：启动
+- **Windows**：进入文件夹，**双击 `launcher.vbs`**（自动起服务并打开浏览器，无黑窗口）；
+- **macOS / Linux**：终端进入文件夹，先 `chmod +x start.sh`，再 `./start.sh`；
+- **通用**：在文件夹内打开终端，执行 `npm start`。
 
-   ```bash
-   cd bilipure
-   npm start
-   ```
+启动后浏览器会自动打开 **http://127.0.0.1:4173**；若没自动打开，手动访问该地址即可。
 
-然后浏览器打开 **http://127.0.0.1:4173**。
+### 打不开 / 快速排查
+- 页面提示「未检测到本地代理服务」：说明服务未启动，请先双击 `launcher.vbs` / `./start.sh` / `npm start`，再刷新页面；
+- 收藏夹为空：需在右上角「设置」里**扫码登录** B 站账号后，才能读取收藏夹；
+- 更多见下方「常见问题（FAQ）」。
 
 ### 桌面快捷方式（推荐日常使用，Windows）
 
