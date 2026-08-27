@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BiliPure · 登录完成</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: #f7f7f5; color: #1d1d1f;
+      display: flex; align-items: center; justify-content: center;
+      min-height: 100vh; margin: 0;
+    }
+    .box { background: #fff; border: 1px solid #e6e6e1; border-radius: 16px; padding: 28px 36px; max-width: 420px; }
+    h1 { font-size: 18px; margin: 0 0 8px; }
+    p { font-size: 14px; color: #6e6e73; margin: 0; line-height: 1.7; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h1>BiliPure</h1>
+    <p id="msg">正在完成登录…</p>
+  </div>
+  <script>
+    // 领取一次性会话令牌，并通过 postMessage 交还给打开弹窗的应用窗口
+    (function () {
+      var claim = new URLSearchParams(location.search).get('claim') || '';
+      var msg = document.getElementById('msg');
+      fetch('/api/oauth/claim?token=' + encodeURIComponent(claim))
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (!d || !d.data || !d.data.sid) {
+            throw new Error((d && d.message) || '登录失败');
+          }
+          if (window.opener) {
+            window.opener.postMessage({ type: 'bilipure-oauth', sid: d.data.sid }, '*');
+          }
+          msg.textContent = '登录成功，请回到 BiliPure 窗口继续使用。';
+          setTimeout(function () { window.close(); }, 800);
+        })
+        .catch(function (e) {
+          msg.textContent = '登录失败：' + e.message;
+        });
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+# 依赖与构建产物（本仓库零依赖，保留条目以防未来引入）
+node_modules/
+dist/
+build/
+
+# 环境变量（含敏感信息，切勿提交）
+.env
+.env.*
+!.env.example
+
+# 日志与系统文件
+*.log
+.DS_Store
+Thumbs.db

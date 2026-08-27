@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="BiliPure —— 无干扰 B 站学习播放器：只看你指定的收藏夹，没有推荐、搜索与评论。">
+  <title>BiliPure · 无干扰学习播放器</title>
+  <!--
+    内容安全策略：只允许加载本应用文件、B 站封面图与官方嵌入播放器。
+    这样即使某个接口数据被注入，也无法引入第三方脚本。
+  -->
+  <meta http-equiv="Content-Security-Policy" content="
+    default-src 'self';
+    script-src 'self';
+    style-src 'self' 'unsafe-inline';
+    img-src 'self' data: http://*.hdslb.com https://*.hdslb.com http://*.biliimg.com https://*.biliimg.com https://*.bilivideo.com;
+    frame-src https://player.bilibili.com https://passport.bilibili.com;
+    media-src 'self' blob: https://*.bilivideo.com http://*.bilivideo.com;
+    connect-src 'self' http://127.0.0.1:* https://api.bilibili.com https://app.bilibili.com;
+    base-uri 'none';
+    form-action 'none';
+  ">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232f6fed'/%3E%3Cpath d='M10 12h4l2-3 2 3h4v10h-12z' fill='%23fff'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <!-- 顶部栏：应用名 + 两个入口（内容源 / 设置）+ 主题切换 -->
+    <header class="topbar">
+      <div id="btnHome" class="brand" role="button" tabindex="0" title="返回主页" aria-label="返回主页">
+        <span class="brand-dot" aria-hidden="true"></span>
+        <span class="brand-name">BiliPure</span>
+        <span class="brand-tag">无干扰学习</span>
+      </div>
+      <div class="topbar-actions">
+        <button id="btnTheme" class="icon-btn" type="button" title="切换深色 / 浅色模式" aria-label="切换主题">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path class="icon-sun" d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M18.4 5.6L17 7M7 17l-1.4 1.4"/>
+            <circle class="icon-sun" cx="12" cy="12" r="4"/>
+            <path class="icon-moon" d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>
+          </svg>
+        </button>
+        <button id="btnSettings" class="icon-btn" type="button" title="设置：登录 / 外观 / 数据" aria-label="设置">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+        </button>
+        <button id="btnSource" class="btn primary" type="button" title="切换收藏夹或添加视频">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+            <path d="M12 11v4M10 13h4"/>
+          </svg>
+          <span>内容源</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- 未检测到本地代理时的提示条 -->
+    <div id="backendBanner" class="banner" hidden>
+      未检测到本地代理服务：收藏夹与 B 站接口暂不可用。建议运行 <code>npm start</code> 后访问
+      <code>http://127.0.0.1:4173</code>（当前可预览界面）。
+      <button id="btnRetryBackend" class="btn ghost small" type="button">重试</button>
+    </div>
+
+    <main id="main">
+      <!-- 主页：继续学习 / 添加的视频 / 学习收藏夹 -->
+      <section id="dashboardView" class="view">
+        <div id="dashboard" class="dashboard"></div>
+      </section>
+
+      <!-- 收藏夹视频列表 -->
+      <section id="homeView" class="view" hidden>
+        <div class="home-head">
+          <div>
+            <button id="btnBackHome" type="button" class="btn ghost small">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M19 12H5M12 19l-7-7 7-7"/>
+              </svg>
+              <span>返回主页</span>
+            </button>
+            <h1 id="sourceTitle" class="page-title">…</h1>
+            <p id="sourceMeta" class="muted">…</p>
+          </div>
+          <div class="home-tools">
+            <input id="folderSearch" class="search-input" type="search" placeholder="搜索本收藏夹的视频…" autocomplete="off" aria-label="搜索本收藏夹的视频">
+            <label class="sort-wrap">
+              <span class="muted small">排序</span>
+              <select id="sortSelect" class="select" aria-label="排序方式">
+                <option value="add">添加时间</option>
+                <option value="pub">发布时间</option>
+                <option value="star">星级</option>
+                <option value="play">播放量</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div id="videoGrid" class="grid" aria-live="polite"></div>
+        <div id="loadMoreWrap" class="load-more" hidden>
+          <button id="btnLoadMore" class="btn ghost" type="button">加载更多</button>
+        </div>
+      </section>
+
+      <!-- 二级浏览页：栏目的全部内容（翻页 / 排序 / 搜索） -->
+      <section id="browseView" class="view" hidden>
+        <div class="home-head">
+          <div>
+            <button id="btnBrowseBack" type="button" class="btn ghost small">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M19 12H5M12 19l-7-7 7-7"/>
+              </svg>
+              <span>返回</span>
+            </button>
+            <h1 id="browseTitle" class="page-title">…</h1>
+          </div>
+          <label class="sort-wrap">
+            <span class="muted small">排序</span>
+            <select id="browseSort" class="select" aria-label="排序方式"></select>
+          </label>
+        </div>
+        <input id="browseSearch" class="search-input browse-search" type="search" placeholder="搜索…" autocomplete="off" aria-label="搜索">
+        <div id="browseGrid" class="grid" aria-live="polite"></div>
+        <div id="browsePager" class="pager" hidden>
+          <button id="btnBrowsePrev" class="btn ghost small" type="button">上一页</button>
+          <span id="browsePageInfo" class="muted small"></span>
+          <button id="btnBrowseNext" class="btn ghost small" type="button">下一页</button>
+        </div>
+      </section>
+
+      <!-- 播放页：官方嵌入播放器（仅视频、弹幕、字幕，无推荐无评论） -->
+      <section id="playerView" class="view" hidden>
+        <div class="player-head">
+          <button id="btnBack" class="btn ghost" type="button">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M19 12H5M12 19l-7-7 7-7"/>
+            </svg>
+            <span>返回列表</span>
+          </button>
+        </div>
+
+        <!-- 类似 B 站官网：左侧播放器+标题，右侧选集列表 -->
+        <div id="playerLayout" class="player-layout">
+          <div class="player-main">
+            <div id="playerShell" class="player-shell">
+              <!-- 播放器（ArtPlayer 内核）：弹幕画布与字幕层挂载在播放器内部，全屏时保持可见 -->
+              <div id="customPlayer" class="player-frame" hidden></div>
+              <!-- 官方嵌入播放器：仅作为播放地址获取失败时的降级方案 -->
+              <iframe
+                id="biliFrame"
+                class="player-frame"
+                title="B站视频播放器"
+                scrolling="no"
+                frameborder="0"
+                hidden
+                allowfullscreen
+                allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+                referrerpolicy="origin"
+              ></iframe>
+            </div>
+
+            <div class="player-meta">
+              <h2 id="playerTitle" class="player-title">…</h2>
+              <div class="meta-row">
+                <span id="playerUp" class="muted"></span>
+                <span id="favBadge" class="badge" hidden>已收藏（不可操作）</span>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- 选集：多P / 合集（右侧栏，可滚动） -->
+          <div id="episodePanel" class="episode-panel" hidden>
+            <h3 class="episode-title">选集</h3>
+            <div id="episodeList" class="episode-list"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- 模态框与提示容器 -->
+  <div id="modalRoot"></div>
+  <div id="toastRoot" class="toast-root" aria-live="polite"></div>
+
+  <!-- 本地视频文件选择的兜底方案（File System Access API 不可用时使用） -->
+  <input type="file" id="fileInput" accept="video/*" multiple hidden>
+
+  <!-- 本地化的 MIT 协议二维码生成库（qrcode-generator） -->
+  <script src="vendor/qrcode.js"></script>
+  <!-- 本地化的 MIT 协议播放器内核（ArtPlayer v5.4.0，许可证见 vendor/ARTPLAYER_LICENSE） -->
+  <script src="vendor/artplayer.min.js"></script>
+  <script src="storage.js"></script>
+  <script src="api.js"></script>
+  <script src="localfiles.js"></script>
+  <script src="player.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
