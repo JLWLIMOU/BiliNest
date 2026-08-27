@@ -35,10 +35,17 @@ window.BiliPurePlayer = (function () {
   var MAX_FRESH_TRIES = 2;
   // 当前清晰度文件在 CDN 缺失时，自动尝试其他清晰度的次数上限
   var MAX_QUALITY_TRIES = 2;
+  // 弹幕分段：官方网页端每 6 分钟一包、每包最多 6000 条。
+  // 上限 250 包 ≈ 25 小时视频，防止异常视频无限拉取。
+  var MAX_DANMAKU_SEGMENTS = 250;
+  // 段间请求间隔：分段请求仍会打到 B 站，礼貌性限速，降低触发风控的概率
+  var DANMAKU_SEGMENT_DELAY_MS = 120;
   // 字幕字号与播放器宽度的比例系数（随窗口 / 全屏等比缩放）
   var SUB_SIZE_FACTORS = { sm: 0.020, md: 0.024, lg: 0.030, xl: 0.038 };
   // 字幕请求序号：快速切换视频时，用序号丢弃旧视频的过期字幕结果
   var subtitleSeq = 0;
+  // 弹幕请求序号：与字幕同理，防止旧视频的弹幕覆盖新视频
+  var danmakuSeq = 0;
 
   var state = {
     art: null,              // ArtPlayer 实例（懒加载，只创建一次）
@@ -54,6 +61,7 @@ window.BiliPurePlayer = (function () {
     active: [],             // 正在显示的弹幕
     lanes: [],              // 弹幕轨道占用
     danmakuOn: true,        // 弹幕默认开启
+    playing: false,         // 播放状态（由 video:play/pause 事件维护）
     rafId: 0,
     subtitleBody: [],
     subtitleOn: false,      // 字幕默认关闭，由用户手动开启
@@ -252,14 +260,28 @@ window.BiliPurePlayer = (function () {
       if (state.art) resizeSubtitleFont();
     });
     art.on('video:play', function () {
+      // 注意：不要用 art.playing 判断“是否在播放”来启动弹幕循环——
+      // ArtPlayer 的 playing 依赖 currentTime>0 且 readyState>2，
+      // 视频刚开始播放（currentTime 仍为 0）时会误判为 false，
+      // 导致弹幕动画永远不启动。这里统一用我们自己维护的 state.playing。
+      state.playing = true;
       hideEndOverlay(); // 用户重新播放时隐藏结束浮层
-      if (state.danmakuOn && state.danmaku.length) startRender();
+      if (state.danmakuOn) startRender();
     });
     art.on('video:pause', function () {
-      stopRender();
+      state.playing = false;
+      // 暂停时冻结弹幕：保留画布最后一帧，方便阅读（播放时继续滚动）
+      freezeRender();
+      updateSubtitle(); // 暂停时也按当前时间刷新字幕，避免停留在上一句的空白间隙
       window.dispatchEvent(new CustomEvent('bilipure-pause'));
     });
+    art.on('video:seeked', function () {
+      updateSubtitle(); // 拖动进度后立即刷新字幕
+      // 暂停中拖动进度：重画当前时间点的静态弹幕，而不是保留旧画面的弹幕
+      if (!state.playing && state.danmakuOn && state.danmaku.length) drawFrame();
+    });
     art.on('video:ended', function () {
+      state.playing = false;
       stopRender();
       window.dispatchEvent(new CustomEvent('bilipure-ended'));
       showEndOverlay();
@@ -792,45 +814,127 @@ window.BiliPurePlayer = (function () {
   }
 
   /* ---------------- 弹幕 ---------------- */
+  function sleep(ms) {
+    return new Promise(function (resolve) { setTimeout(resolve, ms); });
+  }
+
+  /**
+   * 加载弹幕：优先官方网页端的分段 protobuf 方案（完整度远高于 XML），
+   * 失败时回退旧 XML 接口（实时弹幕池，不完整但至少可用）。
+   */
   async function loadDanmaku(cid) {
+    var mySeq = ++danmakuSeq;
+    var list = null;
     try {
-      var xml = await api.danmakuXml(cid, creds());
-      var doc = new DOMParser().parseFromString(xml, 'application/xml');
-      var items = doc.querySelectorAll('d');
-      var list = [];
-      for (var i = 0; i < items.length; i++) {
-        var p = (items[i].getAttribute('p') || '').split(',');
-        var text = (items[i].textContent || '').trim();
-        if (p.length < 4 || !text) continue;
+      list = await fetchDanmakuSegments(cid, mySeq);
+    } catch (e) {
+      list = null; // 分段接口失败 → 回退 XML
+    }
+    if (mySeq !== danmakuSeq) return; // 已切到其它视频，丢弃过期结果
+    if (!list) {
+      try {
+        list = await fetchDanmakuXml(cid);
+      } catch (e) {
+        /* 弹幕加载失败不阻塞播放 */
+      }
+    }
+    if (mySeq !== danmakuSeq) return;
+    if (!list) list = [];
+    list.sort(function (a, b) { return a.time - b.time; });
+    state.danmaku = list;
+    state.danmakuIdx = 0;
+    // 播放中 → 启动动画；暂停中 → 补画一帧静态弹幕
+    if (state.danmakuOn && state.art) startRender();
+  }
+
+  /**
+   * 分段拉取完整弹幕（官方网页端方案）。
+   * 从第 1 包开始，每包 6 分钟、最多 6000 条；返回不足 6000 条即最后一包。
+   * @returns {Promise<Array<{time,mode,size,color,text}>>}
+   */
+  async function fetchDanmakuSegments(cid, mySeq) {
+    var list = [];
+    var firstOk = false;
+    for (var i = 1; i <= MAX_DANMAKU_SEGMENTS; i++) {
+      var data = null;
+      try {
+        data = await api.danmakuSegments(cid, i, creds());
+      } catch (e) {
+        if (mySeq !== danmakuSeq) throw new Error('stale');
+        break; // 后续分段请求失败：保留已拉到的弹幕，不再继续
+      }
+      if (mySeq !== danmakuSeq) throw new Error('stale'); // 已切换视频，中止拉取
+      var elems = (data && data.elems) || [];
+      firstOk = true;
+      for (var j = 0; j < elems.length; j++) {
+        var e = elems[j];
+        var text = String(e.content || '').trim();
+        if (!text) continue;
+        var mode = Number(e.mode) || 1;
+        // 高级/代码/BAS 弹幕（mode 8+）自研画布无法还原其特殊效果，跳过避免显示乱码
+        if (mode > 7) continue;
         list.push({
-          time: parseFloat(p[0]) || 0,
-          mode: parseInt(p[1], 10) || 1,
-          size: parseInt(p[2], 10) || 25,
-          color: parseInt(p[3], 10) || 0xffffff,
+          time: (Number(e.progress) || 0) / 1000, // 毫秒 → 秒
+          mode: mode,
+          size: Number(e.fontsize) || 25,
+          color: Number(e.color) || 0xffffff,
           text: text
         });
       }
-      list.sort(function (a, b) { return a.time - b.time; });
-      state.danmaku = list;
-      state.danmakuIdx = 0;
-      if (state.danmakuOn && state.art && state.art.playing) startRender();
-    } catch (e) {
-      /* 弹幕加载失败不阻塞播放 */
+      // 未满 6000 条说明已是最后一包（官方每包最多 6000）
+      if (elems.length < 6000) break;
+      if (i < MAX_DANMAKU_SEGMENTS) await sleep(DANMAKU_SEGMENT_DELAY_MS);
     }
+    return firstOk ? list : null; // 第一段就失败 → 让调用方回退 XML
   }
 
+  /** 旧 XML 弹幕（仅实时弹幕池，不完整），作为分段接口失败时的兜底 */
+  async function fetchDanmakuXml(cid) {
+    var xml = await api.danmakuXml(cid, creds());
+    var doc = new DOMParser().parseFromString(xml, 'application/xml');
+    var items = doc.querySelectorAll('d');
+    var list = [];
+    for (var i = 0; i < items.length; i++) {
+      var p = (items[i].getAttribute('p') || '').split(',');
+      var text = (items[i].textContent || '').trim();
+      if (p.length < 4 || !text) continue;
+      list.push({
+        time: parseFloat(p[0]) || 0,
+        mode: parseInt(p[1], 10) || 1,
+        size: parseInt(p[2], 10) || 25,
+        color: parseInt(p[3], 10) || 0xffffff,
+        text: text
+      });
+    }
+    return list;
+  }
+
+  /** 开始弹幕渲染：播放中走动画循环；暂停中只补画一帧静态弹幕 */
   function startRender() {
     if (state.rafId) return;
     if (!els.canvas) return;
     els.canvas.hidden = false;
+    if (!state.playing) {
+      drawFrame(); // 暂停状态：静态帧（暂停时弹幕可阅读）
+      return;
+    }
     state.rafId = requestAnimationFrame(renderLoop);
   }
 
+  /** 暂停时冻结弹幕：保留画布最后一帧，不清屏、不隐藏 */
+  function freezeRender() {
+    cancelAnimationFrame(state.rafId);
+    state.rafId = 0;
+  }
+
+  /** 停止弹幕并彻底清屏（关闭弹幕 / 播放结束 / 切换视频时用） */
   function stopRender() {
     cancelAnimationFrame(state.rafId);
     state.rafId = 0;
     if (els.canvas) {
       var ctx = els.canvas.getContext('2d');
+      // 画布经过 DPR 缩放，先复位变换再清屏，确保彻底清空
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, els.canvas.width, els.canvas.height);
       els.canvas.hidden = true;
     }
@@ -838,14 +942,21 @@ window.BiliPurePlayer = (function () {
 
   function renderLoop() {
     state.rafId = 0;
-    var art = state.art;
-    if (!art || !art.playing || !state.danmakuOn || !els.canvas) return;
+    if (!state.playing || !state.danmakuOn || !els.canvas) return;
+    drawFrame();
+    state.rafId = requestAnimationFrame(renderLoop);
+  }
+
+  /** 绘制一帧弹幕：动画循环与暂停时的静态帧共用同一逻辑 */
+  function drawFrame() {
+    if (!els.canvas || !state.art) return;
     var ctx = els.canvas.getContext('2d');
     sizeCanvas();
     var w = els.canvas.clientWidth;
     var h = els.canvas.clientHeight;
+    if (!w || !h) return;
     ctx.clearRect(0, 0, w, h);
-    var t = art.currentTime;
+    var t = state.art.currentTime;
 
     // 生成到时间点的弹幕
     while (state.danmakuIdx < state.danmaku.length &&
@@ -861,23 +972,45 @@ window.BiliPurePlayer = (function () {
       if (d.mode === 4 || d.mode === 5) {
         // 底部/顶部固定弹幕：停留 4 秒
         if (t - d.start > 4) continue;
-        ctx.fillStyle = d.color;
-        ctx.font = d.px + 'px sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText(d.text, w / 2, d.y);
+        drawDanmaku(ctx, d, w / 2);
+        remain.push(d);
+      } else if (d.mode === 6) {
+        // 逆向弹幕：从左向右移动（与普通弹幕方向相反）
+        var rx = (t - d.start) * d.speed - d.width;
+        if (rx > w) continue;
+        ctx.textAlign = 'left';
+        drawDanmaku(ctx, d, rx);
         remain.push(d);
       } else {
         var x = w - (t - d.start) * d.speed;
         if (x + d.width < 0) continue;
-        ctx.fillStyle = d.color;
-        ctx.font = d.px + 'px sans-serif';
         ctx.textAlign = 'left';
-        ctx.fillText(d.text, x, d.y);
+        drawDanmaku(ctx, d, x);
         remain.push(d);
       }
     }
     state.active = remain;
-    state.rafId = requestAnimationFrame(renderLoop);
+  }
+
+  /** 绘制单条弹幕：先描黑边再填充颜色，保证浅色画面上也可读 */
+  function drawDanmaku(ctx, d, x) {
+    ctx.font = danmakuFont(d.px);
+    ctx.lineJoin = 'round';
+    ctx.miterLimit = 2;
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.9)';
+    // 两层描边（先宽后窄）再填充：轮廓更饱满，细笔画处也不易断裂
+    ctx.lineWidth = Math.max(3, Math.round(d.px / 5));
+    ctx.strokeText(d.text, x, d.y);
+    ctx.lineWidth = Math.max(1.5, Math.round(d.px / 9));
+    ctx.strokeText(d.text, x, d.y);
+    ctx.fillStyle = d.color;
+    ctx.fillText(d.text, x, d.y);
+  }
+
+  /** 弹幕字体：加粗 + 常见中文字体栈，保证清晰度（测量与绘制共用同一字体） */
+  function danmakuFont(px) {
+    return '700 ' + px + 'px "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif';
   }
 
   function spawnDanmaku(d, t, w, h) {
@@ -900,7 +1033,7 @@ window.BiliPurePlayer = (function () {
     }
     // 滚动弹幕：按轨道分配
     var ctx = els.canvas.getContext('2d');
-    ctx.font = px + 'px sans-serif';
+    ctx.font = danmakuFont(px); // 与绘制用同一字体，保证测量宽度一致
     var tw = ctx.measureText(d.text).width;
     var speed = (w + tw) / 8;             // 约 8 秒穿过屏幕
     var duration = (w + tw) / speed;
@@ -955,7 +1088,9 @@ window.BiliPurePlayer = (function () {
   /** 把位置 / 字号设置应用到字幕层 */
   function applySubSettings() {
     if (!els.sub) return;
-    els.sub.style.bottom = subPosToBottom(state.subSettings.pos).toFixed(2) + '%';
+    // 底部偏移存成 CSS 变量，CSS 里再叠加控制条高度（暂停/悬停时自动抬升）
+    els.sub.style.bottom = '';
+    els.sub.style.setProperty('--sub-bottom', subPosToBottom(state.subSettings.pos).toFixed(2) + '%');
     var z = state.subSettings.size || 'md';
     els.sub.classList.remove('sub-size-sm', 'sub-size-md', 'sub-size-lg', 'sub-size-xl');
     els.sub.classList.add('sub-size-' + z);
@@ -1112,8 +1247,10 @@ window.BiliPurePlayer = (function () {
   function reset() {
     cancelAnimationFrame(state.rafId);
     state.rafId = 0;
+    state.playing = false;
     clearPendingRetry();
     subtitleSeq++; // 使尚未完成的字幕请求失效，避免旧视频字幕覆盖新视频
+    danmakuSeq++;  // 同理，使尚未完成的弹幕请求失效
     state.kind = '';
     state.bvid = '';
     state.cid = '';
@@ -1137,6 +1274,7 @@ window.BiliPurePlayer = (function () {
       hideEndOverlay();
       if (els.canvas) {
         var ctx = els.canvas.getContext('2d');
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.clearRect(0, 0, els.canvas.width, els.canvas.height);
         els.canvas.hidden = true;
       }

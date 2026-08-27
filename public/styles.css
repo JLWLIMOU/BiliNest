@@ -634,7 +634,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
   position: absolute;
   left: 6%;
   right: 6%;
-  bottom: 16%;
+  bottom: var(--sub-bottom, 16%);
   text-align: center;
   color: #fff;
   font-size: clamp(14px, 2.2vw, 22px);
@@ -647,6 +647,11 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85), 0 0 6px rgba(0, 0, 0, 0.55);
   pointer-events: none;
   z-index: 2;
+  transition: bottom 0.18s ease;
+}
+/* 暂停 / 悬停时控制条出现，字幕自动抬到控制条上方，避免被遮挡 */
+.art-video-player.art-control-show .subtitle-box {
+  bottom: calc(var(--sub-bottom, 16%) + var(--art-control-height, 46px) + 8px);
 }
 .subtitle-box.sub-size-sm { font-size: clamp(12px, 1.8vw, 18px); }
 .subtitle-box.sub-size-md { font-size: clamp(14px, 2.2vw, 22px); }

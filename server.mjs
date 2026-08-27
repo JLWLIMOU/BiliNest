@@ -29,6 +29,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const LOG_FILE = path.join(__dirname, 'bilipure.log');
+const PORT_FILE = path.join(__dirname, 'bilipure.port');
 
 // ---------- 基础配置（全部来自环境变量，不硬编码任何敏感信息） ----------
 const HOST = process.env.BILIPURE_HOST || '127.0.0.1';
@@ -50,6 +51,26 @@ function log(...args) {
     fs.appendFileSync(LOG_FILE, line + '\n', 'utf8');
   } catch (e) {
     /* 日志写入失败不应影响服务 */
+  }
+}
+
+/* ------------------------------------------------------------------
+ * 端口文件：把实际监听的端口写成纯数字文本（bilipure.port），
+ * 供 launcher.vbs / start.sh 打开正确地址（默认端口被占用时会顺延）。
+ * ------------------------------------------------------------------ */
+function writePortFile(port) {
+  try {
+    fs.writeFileSync(PORT_FILE, String(port), 'utf8');
+  } catch (e) {
+    log(`[port] 写入端口文件失败：${e.message}`);
+  }
+}
+
+function removePortFile() {
+  try {
+    if (fs.existsSync(PORT_FILE)) fs.unlinkSync(PORT_FILE);
+  } catch (e) {
+    /* 忽略删除失败 */
   }
 }
 
@@ -220,6 +241,209 @@ async function handleVideoProxy(req, res, url) {
       res.end();
     }
   }
+}
+
+/* ------------------------------------------------------------------
+ * 1.5 弹幕分段接口（protobuf → JSON）
+ *     旧 XML 接口（x/v1/dm/list.so）只返回“实时弹幕池”，数量有限、
+ *     不够完整；官方网页端现在使用分段接口 x/v2/dm/wbi/web/seg.so，
+ *     每 6 分钟一包、每包最多 6000 条，全部拉齐才是完整弹幕。
+ *     该接口返回 protobuf 二进制，这里做零依赖的最小解码（手写 varint），
+ *     只提取弹幕渲染需要的字段，转成 JSON 交给前端。
+ * ------------------------------------------------------------------ */
+
+/** 兼容新旧两种 protobuf 弹幕结构（见 decodeDanmakuElem 内说明） */
+function readVarint(buf, pos) {
+  let result = 0;
+  let shift = 0;
+  while (pos < buf.length) {
+    const byte = buf[pos++];
+    // 逐字节累加：64 位字段的数值精度对跳过无影响，32 位字段完全精确
+    result += (byte & 0x7f) * 2 ** shift;
+    if ((byte & 0x80) === 0) return { value: result, pos };
+    shift += 7;
+    if (shift > 63) break; // 异常数据保护，避免死循环
+  }
+  return { value: result, pos: buf.length };
+}
+
+/** 读取一条 length-delimited（wire type 2）字段的内容字节 */
+function readBytes(buf, pos) {
+  const len = readVarint(buf, pos);
+  const end = len.pos + len.value;
+  if (end > buf.length) return { bytes: null, pos: buf.length };
+  return { bytes: buf.subarray(len.pos, end), pos: end };
+}
+
+/**
+ * 解码一条 DanmakuElem 弹幕。
+ * 两种结构字段 2~5（progress/mode/fontsize/color）完全一致，仅 6 号以后不同：
+ *   - 新结构（网页端现用）：6=midHash(string) 7=content(string) 8=ctime(varint) …
+ *   - 旧结构（早期 seg.so）：6=content(string) 7=midHash(varint) 8=pool(varint) …
+ * 因此 content 优先取 7 号字符串，没有则退回 6 号字符串，两种都兼容。
+ */
+function decodeDanmakuElem(buf) {
+  const fields = {};
+  let pos = 0;
+  while (pos < buf.length) {
+    const tag = readVarint(buf, pos);
+    pos = tag.pos;
+    const field = tag.value >>> 3;
+    const wire = tag.value & 7;
+    if (wire === 0) {
+      const v = readVarint(buf, pos);
+      pos = v.pos;
+      (fields[field] = fields[field] || []).push({ wire, v: v.value });
+    } else if (wire === 2) {
+      const b = readBytes(buf, pos);
+      pos = b.pos;
+      if (b.bytes === null) break;
+      (fields[field] = fields[field] || []).push({ wire, bytes: b.bytes });
+    } else if (wire === 1) {
+      pos += 8; // 64 位定长字段，跳过
+    } else if (wire === 5) {
+      pos += 4; // 32 位定长字段，跳过
+    } else {
+      break; // 未知 wire type，放弃该消息
+    }
+  }
+  const pick = (n, w) => {
+    const arr = fields[n];
+    return arr ? arr.find((x) => x.wire === w) : undefined;
+  };
+  const varint = (n) => {
+    const f = pick(n, 0);
+    return f ? f.v : undefined;
+  };
+  const str = (n) => {
+    const f = pick(n, 2);
+    return f ? f.bytes.toString('utf8') : undefined;
+  };
+  return {
+    progress: varint(2) || 0,        // 出现时间（毫秒）
+    mode: varint(3) || 1,            // 弹幕类型
+    fontsize: varint(4) || 25,       // 字号
+    color: varint(5) || 0xffffff,    // 颜色（十进制 RGB888）
+    content: str(7) ?? str(6) ?? '', // 弹幕内容
+  };
+}
+
+/**
+ * 解码 DmSegMobileReply：
+ *   1 号字段 elems（普通弹幕）、2 号字段 dmdm（补充弹幕）均为
+ *   repeated DanmakuElem，一并提取合并，最大化弹幕完整度。
+ */
+function decodeDmSeg(buf) {
+  const elems = [];
+  let pos = 0;
+  while (pos < buf.length) {
+    const tag = readVarint(buf, pos);
+    pos = tag.pos;
+    const field = tag.value >>> 3;
+    const wire = tag.value & 7;
+    if (field !== 1 && field !== 2) {
+      // 跳过其它字段（长度不确定，按 wire type 跳过）
+      if (wire === 0) {
+        const v = readVarint(buf, pos);
+        pos = v.pos;
+      } else if (wire === 2) {
+        const b = readBytes(buf, pos);
+        pos = b.pos;
+      } else if (wire === 1) {
+        pos += 8;
+      } else if (wire === 5) {
+        pos += 4;
+      } else {
+        break;
+      }
+      continue;
+    }
+    if (wire !== 2) {
+      if (wire === 0) {
+        const v = readVarint(buf, pos);
+        pos = v.pos;
+      } else if (wire === 1) {
+        pos += 8;
+      } else if (wire === 5) {
+        pos += 4;
+      }
+      continue;
+    }
+    const b = readBytes(buf, pos);
+    pos = b.pos;
+    if (b.bytes === null) break;
+    const d = decodeDanmakuElem(b.bytes);
+    if (d.content) elems.push(d);
+  }
+  return elems;
+}
+
+/** 弹幕分段：优先 WBI 签名接口（官方现用），失败退回旧的无签名分段接口 */
+async function handleDanmakuSegments(req, res, url) {
+  if (!rateLimitOk(req.socket.remoteAddress || 'local')) {
+    return sendJson(res, 429, { code: -429, message: '请求过于频繁，请稍后再试' });
+  }
+  const cid = String(url.searchParams.get('cid') || '').trim();
+  const idx = parseInt(url.searchParams.get('segment_index') || '0', 10);
+  if (!/^\d+$/.test(cid) || !Number.isInteger(idx) || idx < 1) {
+    return sendJson(res, 400, { code: -400, message: '参数错误：需要合法的 cid 与 segment_index' });
+  }
+  const cookie = String(req.headers['x-bili-cookie'] || '');
+  const params = new URLSearchParams({
+    type: '1', // 1：视频弹幕
+    oid: cid,
+    segment_index: String(idx),
+  });
+
+  const attempts = [];
+  const signedQuery = await wbiSignQuery(params);
+  if (signedQuery) {
+    attempts.push({ path: '/x/v2/dm/wbi/web/seg.so', qs: signedQuery });
+  }
+  attempts.push({ path: '/x/v2/dm/web/seg.so', qs: params.toString() });
+
+  let lastErr = '';
+  for (const a of attempts) {
+    const headers = { 'User-Agent': UA, Referer: BILI_REFERER, Accept: '*/*' };
+    if (cookie) {
+      headers.Cookie = cookie;
+      if (!cookie.includes('buvid3=')) {
+        const finger = await getFingerprintCookies();
+        if (finger) headers.Cookie = cookie + '; ' + finger;
+      }
+    } else {
+      const finger = await getFingerprintCookies();
+      if (finger) headers.Cookie = finger;
+    }
+    try {
+      const upstream = await fetch(`https://api.bilibili.com${a.path}?${a.qs}`, {
+        headers,
+        signal: AbortSignal.timeout(12_000),
+      });
+      // B 站 CDN 对“该分段没有更多弹幕”返回 304（Not Modified，无响应体）。
+      // 这属于正常结束信号，不是错误：返回空包，前端据此停止继续拉取。
+      if (upstream.status === 304) {
+        log(`[dm-seg] cid=${cid} seg=${idx} empty(304)`);
+        return sendJson(res, 200, { code: 0, message: '0', data: { elems: [] } });
+      }
+      if (upstream.status !== 200) {
+        lastErr = `http=${upstream.status}`;
+        continue;
+      }
+      const buf = Buffer.from(await upstream.arrayBuffer());
+      // 空包 = 该分段没有弹幕（通常意味着已经到末尾）
+      const elems = buf.length ? decodeDmSeg(buf) : [];
+      log(
+        `[dm-seg] cid=${cid} seg=${idx} elems=${elems.length}` +
+        (a.path.includes('wbi') ? ' wbi' : ' legacy')
+      );
+      return sendJson(res, 200, { code: 0, message: '0', data: { elems } });
+    } catch (e) {
+      lastErr = e.message;
+    }
+  }
+  log(`[dm-seg] cid=${cid} seg=${idx} failed: ${lastErr}`);
+  return sendJson(res, 502, { code: -502, message: '弹幕分段获取失败：' + lastErr });
 }
 
 /* ------------------------------------------------------------------
@@ -400,7 +624,9 @@ async function handleQrPoll(req, res, url) {
  * 2. 基础频率限制（防止误用 / 滥用）
  * ------------------------------------------------------------------ */
 const RATE_WINDOW_MS = 10_000;
-const RATE_MAX = 40;
+// 弹幕分段需要按顺序拉多个包（长视频可达数十包），放宽到 120 次/10s；
+// 该限制只是本地保护，B 站自身仍有独立的接口风控。
+const RATE_MAX = 120;
 const rateBuckets = new Map();
 
 function rateLimitOk(ip) {
@@ -486,8 +712,9 @@ async function wbiSignQuery(params) {
 const oauth = {
   clientId: process.env.BILIPURE_OAUTH_CLIENT_ID || '',
   clientSecret: process.env.BILIPURE_OAUTH_CLIENT_SECRET || '',
-  redirectUri:
-    process.env.BILIPURE_OAUTH_REDIRECT_URI || `http://${HOST}:${PORT}/api/oauth/callback`,
+  // 默认回调地址在端口确定后再填充（端口被占用顺延时必须跟着走），
+  // 也可用 BILIPURE_OAUTH_REDIRECT_URI 显式覆盖。
+  redirectUri: process.env.BILIPURE_OAUTH_REDIRECT_URI || '',
 };
 oauth.enabled = Boolean(oauth.clientId && oauth.clientSecret);
 
@@ -845,6 +1072,8 @@ const server = http.createServer((req, res) => {
       if (url.pathname === '/api/qr/poll') return await handleQrPoll(req, res, url);
       // 字幕代理（仅限 hdslb.com）
       if (url.pathname === '/api/subtitle') return await handleSubtitleProxy(res, url);
+      // 弹幕分段（protobuf 解码为 JSON，见 1.5 节）
+      if (url.pathname === '/api/danmaku/segments') return await handleDanmakuSegments(req, res, url);
       // 视频流代理（B 站 CDN 防盗链：浏览器直连会被 403，见 handleVideoProxy）
       if (url.pathname === '/api/video') return await handleVideoProxy(req, res, url);
       // 本机“停止服务”入口：只允许来自 127.0.0.1 / localhost 的请求
@@ -857,6 +1086,7 @@ const server = http.createServer((req, res) => {
         log('[server] shutdown requested, exiting…');
         setTimeout(() => {
           server.close();
+          removePortFile();
           process.exit(0);
         }, 300);
         return;
@@ -878,6 +1108,45 @@ const server = http.createServer((req, res) => {
   })();
 });
 
-server.listen(PORT, HOST, () => {
-  log(`server started at http://${HOST}:${PORT} (OAuth ${oauth.enabled ? 'enabled' : 'disabled'})`);
+/* ------------------------------------------------------------------
+ * 9.1 端口兜底启动
+ *     默认监听 4173；若该端口已被其它进程（另一个 Node、Vite 预览、
+ *     代理软件等）占用，自动顺延尝试 4174、4175 …（最多 50 个）。
+ *     最终端口写入 bilipure.port，供启动脚本打开正确地址。
+ * ------------------------------------------------------------------ */
+const PORT_TRIES = 50;
+
+// 监听成功回调只注册一次：server.listen(port, cb) 的 cb 是 once('listening')，
+// 失败的尝试不会移除它，若放在 startServer 里每次重试都会累积，
+// 最终成功时会重复触发多次。因此这里单独用 on('listening') 挂载。
+server.on('listening', () => {
+  const finalPort = server.address().port;
+  // OAuth 回调地址跟随实际端口（默认端口被占用顺延时尤其重要）
+  if (!oauth.redirectUri) {
+    oauth.redirectUri = `http://${HOST}:${finalPort}/api/oauth/callback`;
+  }
+  writePortFile(finalPort);
+  const extra = finalPort === PORT ? '' : `（${PORT} 被占用，已自动顺延）`;
+  log(
+    `server started at http://${HOST}:${finalPort}${extra}` +
+    ` (OAuth ${oauth.enabled ? 'enabled' : 'disabled'})`
+  );
 });
+
+function startServer(port) {
+  server.once('error', (err) => {
+    // 已成功监听后的运行时错误不应触发重绑，直接忽略
+    if (server.listening) return;
+    if ((err.code === 'EADDRINUSE' || err.code === 'EACCES') && port < PORT + PORT_TRIES) {
+      log(`[port] ${port} 被占用（${err.code}），自动改用 ${port + 1}`);
+      startServer(port + 1);
+    } else {
+      log(`[server] 启动失败：${err.message}`);
+      removePortFile();
+      process.exit(1);
+    }
+  });
+  server.listen(port, HOST);
+}
+
+startServer(PORT);

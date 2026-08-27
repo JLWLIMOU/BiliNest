@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # BiliPure 启动脚本（macOS / Linux）
 # 启动本地代理（server.mjs），并在默认浏览器打开应用。
+# 若默认端口 4173 被占用，server.mjs 会自动顺延端口并写入 bilipure.port，
+# 本脚本读取实际端口后再打开浏览器。
 # 用法：  ./start.sh
 set -e
 
@@ -12,12 +14,32 @@ if ! command -v node >/dev/null 2>&1; then
   exit 1
 fi
 
+# 启动前清掉旧的端口文件，避免读到上一次运行残留
+PORT_FILE="bilipure.port"
+DEF_PORT=4173
+URL=""
+rm -f "$PORT_FILE"
+
 node server.mjs &
 SERVER_PID=$!
-# 等代理起来再开浏览器
-sleep 1.5
 
-URL="http://127.0.0.1:4173"
+# 等待端口文件出现（最多 20 秒），拿到实际端口
+for ((i = 0; i < 40; i++)); do
+  if [ -s "$PORT_FILE" ]; then
+    P=$(tr -d '[:space:]' < "$PORT_FILE")
+    case "$P" in
+      ''|*[!0-9]*) ;;
+      *) URL="http://127.0.0.1:$P"; break ;;
+    esac
+  fi
+  sleep 0.5
+done
+
+# 兜底：端口文件未生成时用默认端口（服务可能恰好起在 4173）
+if [ -z "$URL" ]; then
+  URL="http://127.0.0.1:$DEF_PORT"
+fi
+
 if command -v xdg-open >/dev/null 2>&1; then
   xdg-open "$URL" >/dev/null 2>&1 || true
 elif command -v open >/dev/null 2>&1; then
@@ -26,5 +48,5 @@ else
   echo "请手动在浏览器打开 $URL"
 fi
 
-echo "BiliPure 本地服务已启动（PID $SERVER_PID）。按 Ctrl+C 停止。"
+echo "BiliPure 本地服务已启动（$URL，PID $SERVER_PID）。按 Ctrl+C 停止。"
 wait "$SERVER_PID"

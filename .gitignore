@@ -10,5 +10,6 @@ build/
 
 # 日志与系统文件
 *.log
+bilipure.port
 .DS_Store
 Thumbs.db

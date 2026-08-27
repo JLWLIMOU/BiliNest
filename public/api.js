@@ -17,20 +17,35 @@ window.BiliPureAPI = (function () {
   async function init() {
     var candidates = [];
     if (location.protocol === 'http:' || location.protocol === 'https:') {
-      candidates.push('');
+      candidates.push({ base: '', timeout: 2500 });
     }
-    candidates.push(DEFAULT_BACKEND);
+    // 默认端口 4173 可能被其它程序占用，服务会自动顺延端口；
+    // 这里从默认端口开始扫描一段顺延区间，保证页面与后端总能配对。
+    var defaultPort = 4173;
+    try { defaultPort = Number(new URL(DEFAULT_BACKEND).port) || 4173; } catch (e) { /* 保持默认 */ }
+    for (var p = defaultPort; p <= defaultPort + 10; p++) {
+      candidates.push({ base: 'http://127.0.0.1:' + p, timeout: 500 });
+    }
 
     for (var i = 0; i < candidates.length; i++) {
-      var base = candidates[i];
+      var c = candidates[i];
+      var base = c.base;
       try {
         var ctrl = new AbortController();
-        var timer = setTimeout(function () { ctrl.abort(); }, 2500);
+        var timer = setTimeout(function () { ctrl.abort(); }, c.timeout);
         var res = await fetch(base + '/api/health', { signal: ctrl.signal });
         clearTimeout(timer);
         if (res.ok) {
+          // 校验响应确实是 BiliPure（防止端口被其它程序占用时误连）
+          var info = null;
+          try {
+            info = await res.json();
+          } catch (e) {
+            /* 非 JSON 视为不匹配 */
+          }
+          if (!info || info.app !== 'bilipure') continue;
           backendBase = base;
-          backendInfo = await res.json();
+          backendInfo = info;
           return {
             ok: true,
             base: base,
@@ -187,6 +202,34 @@ window.BiliPureAPI = (function () {
   }
 
   /**
+   * 弹幕分段（官方网页端方案，完整度远高于 XML 实时弹幕池）：
+   * 由本地服务 /api/danmaku/segments 代为请求 x/v2/dm/{wbi/}web/seg.so，
+   * 并把 protobuf 二进制解码为 JSON；每 6 分钟一包、每包最多 6000 条。
+   * @returns {Promise<{elems: Array<{progress,mode,fontsize,color,content}>}>}
+   */
+  async function danmakuSegments(cid, segmentIndex, creds) {
+    var base = backendBase !== null ? backendBase : '';
+    var qs =
+      'cid=' + encodeURIComponent(cid) +
+      '&segment_index=' + encodeURIComponent(segmentIndex);
+    var headers = {};
+    var c = creds || {};
+    if (c.cookie) headers['X-Bili-Cookie'] = c.cookie;
+    if (c.sid) headers['X-Bilipure-Sid'] = c.sid;
+    var res = await fetch(base + '/api/danmaku/segments?' + qs, { headers: headers });
+    var json = null;
+    try {
+      json = await res.json();
+    } catch (e) {
+      /* 非 JSON 响应 */
+    }
+    if (!res.ok || (json && json.code !== undefined && json.code !== 0)) {
+      throw new Error((json && json.message) || '弹幕分段请求失败（HTTP ' + res.status + '）');
+    }
+    return (json && json.data) || { elems: [] };
+  }
+
+  /**
    * 播放器配置（CC 字幕列表等）。
    * 注意：旧接口 /x/player/v2 存在返回“其它视频字幕”的已知不稳定问题，
    * 统一改用官方现用的 WBI 签名版 /x/player/wbi/v2（响应结构一致）。
@@ -263,6 +306,7 @@ window.BiliPureAPI = (function () {
     playurl: playurl,
     pagelist: pagelist,
     danmakuXml: danmakuXml,
+    danmakuSegments: danmakuSegments,
     playerV2: playerV2,
     subtitleJson: subtitleJson,
     parseVideoRef: parseVideoRef

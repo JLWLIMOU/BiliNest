@@ -87,6 +87,12 @@ See the Chinese section below for login methods, usage and the full feature list
 
 启动后浏览器会自动打开 **http://127.0.0.1:4173**；若没自动打开，手动访问该地址即可。
 
+> **端口占用自动顺延**：若 4173 已被其它程序（另一个 Node 进程、Vite 预览、代理软件等）占用，
+> 服务不会启动失败，而是自动顺延到 4174、4175 …（最多 50 个）并写入 `bilipure.port`；
+> `launcher.vbs` / `start.sh` 会读取该文件自动打开**实际端口**。
+> 用 `npm start` 手动启动时，日志会打印实际地址，例如
+> `server started at http://127.0.0.1:4174（4173 被占用，已自动顺延）`。
+
 ### 打不开 / 快速排查
 - 页面提示「未检测到本地代理服务」：说明服务未启动，请先双击 `launcher.vbs` / `./start.sh` / `npm start`，再刷新页面；
 - 收藏夹为空：需在右上角「设置」里**扫码登录** B 站账号后，才能读取收藏夹；
@@ -134,6 +140,7 @@ node --env-file=.env server.mjs
 ```
 
 需要配置 `BILIPURE_OAUTH_CLIENT_ID`、`BILIPURE_OAUTH_CLIENT_SECRET`、`BILIPURE_OAUTH_REDIRECT_URI=http://127.0.0.1:4173/api/oauth/callback`。重启后「设置」中出现「使用 B 站 OAuth 登录」。
+注意：若 4173 被占用而端口顺延，**未显式配置**回调地址时会自动跟随实际端口；若显式配置了固定回调地址，则需与顺延后的端口保持一致，否则 OAuth 回调会失败。
 
 ---
 
@@ -190,7 +197,7 @@ bilipure/
 
 ### 播放器说明（ArtPlayer 内核）
 
-自研播放器通过本地代理请求官方 `x/player/wbi/playurl` 接口（带应用内登录态），拿到 progressive MP4 直链交给 **ArtPlayer v5**（MIT）播放：画质菜单来自 `accept_quality`，切换仅重新请求地址、不离开页面；弹幕用官方 `x/v1/dm/list.so` + Canvas 渲染（只显示、不能发送）；CC 字幕用 `x/player/v2`；播放地址失败自动降级官方嵌入播放器。B 站 CDN 防盗链由 `/api/video` 代理统一带正确 Referer 转发。
+自研播放器通过本地代理请求官方 `x/player/wbi/playurl` 接口（带应用内登录态），拿到 progressive MP4 直链交给 **ArtPlayer v5**（MIT）播放：画质菜单来自 `accept_quality`，切换仅重新请求地址、不离开页面；弹幕用官方网页端的分段 protobuf 接口 `x/v2/dm/wbi/web/seg.so`（每 6 分钟一包、每包最多 6000 条，完整度远高于旧 XML 的“实时弹幕池”），本地服务解码为 JSON 后交给 Canvas 渲染（只显示、不能发送），接口失败时自动回退旧 `x/v1/dm/list.so`；CC 字幕用 `x/player/v2`；播放地址失败自动降级官方嵌入播放器。B 站 CDN 防盗链由 `/api/video` 代理统一带正确 Referer 转发。
 
 ---
 
