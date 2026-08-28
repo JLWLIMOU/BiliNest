@@ -110,6 +110,9 @@ const WBI_RETRY_PATHS = new Set(
  *     字幕文件位于 *.hdslb.com，部分浏览器会因 CORS 拦截；
  *     这里提供一个只允许 hdslb.com 域名的受控代理。
  * ------------------------------------------------------------------ */
+const subtitleCache = new Map(); // url -> { body, expires }
+const SUBTITLE_CACHE_TTL = 10 * 60 * 1000;
+
 async function handleSubtitleProxy(res, url) {
   if (!rateLimitOk('subtitle')) {
     return sendJson(res, 429, { code: -429, message: '请求过于频繁，请稍后再试' });
@@ -118,22 +121,46 @@ async function handleSubtitleProxy(res, url) {
   if (!/^https:\/\/([a-z0-9-]+\.)*hdslb\.com\//i.test(target)) {
     return sendJson(res, 403, { code: -403, message: '仅允许代理 hdslb.com 域名' });
   }
-  try {
-    const r = await fetch(target, {
-      headers: { 'User-Agent': UA, Referer: BILI_REFERER },
-      signal: AbortSignal.timeout(15_000),
-    });
-    const body = await r.text();
-    res.writeHead(r.status, {
+  // 字幕文件内容稳定不变，缓存 10 分钟，避免每次播放都回源拉取
+  const cached = subtitleCache.get(target);
+  if (cached && cached.expires > Date.now()) {
+    res.writeHead(200, {
       'Content-Type': 'application/json; charset=utf-8',
       'Cache-Control': 'no-store',
       ...corsHeaders(),
     });
-    res.end(body);
-  } catch (e) {
-    log(`[subtitle] proxy error: ${e.message}`);
-    sendJson(res, 502, { code: -502, message: '字幕加载失败：' + e.message });
+    return res.end(cached.body);
   }
+  let lastErr = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 300 * attempt));
+    try {
+      const r = await fetch(target, {
+        headers: { 'User-Agent': UA, Referer: BILI_REFERER },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (r.status >= 500 || r.status === 429) {
+        lastErr = new Error('upstream ' + r.status);
+        try { await r.arrayBuffer(); } catch (e) { /* ignore */ }
+        continue;
+      }
+      const body = await r.text();
+      if (r.status === 200) {
+        subtitleCache.set(target, { body, expires: Date.now() + SUBTITLE_CACHE_TTL });
+      }
+      res.writeHead(r.status, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store',
+        ...corsHeaders(),
+      });
+      return res.end(body);
+    } catch (e) {
+      lastErr = e;
+      continue;
+    }
+  }
+  log(`[subtitle] proxy error: ${lastErr && lastErr.message}`);
+  sendJson(res, 502, { code: -502, message: '字幕加载失败：' + (lastErr && lastErr.message) });
 }
 
 /* ------------------------------------------------------------------
@@ -159,50 +186,47 @@ async function handleVideoProxy(req, res, url) {
   try {
     parsed = new URL(target);
   } catch {
-    return sendJson(res, 400, { code: -400, message: '无效的视频地址' });
+    return sendJson(res, 400, { code: -400, message: 'invalid video url' });
   }
   if (!/^https?:$/.test(parsed.protocol) || !VIDEO_HOST_OK(parsed.hostname)) {
-    return sendJson(res, 403, { code: -403, message: '仅允许代理 B 站视频域名' });
+    return sendJson(res, 403, { code: -403, message: 'only Bilibili video domains allowed' });
   }
 
-  const headers = { 'User-Agent': UA, Referer: BILI_REFERER };
-  if (req.headers.range) headers.Range = String(req.headers.range);
+  // alt = backup CDN urls from client (durl[0].backup_url); any healthy one wins.
+  const altParam = String(url.searchParams.get('alt') || '');
+  const candidates = [target];
+  if (altParam) {
+    altParam.split('|').forEach(function (a) {
+      try {
+        const u = new URL(a);
+        if (/^https?:$/.test(u.protocol) && VIDEO_HOST_OK(u.hostname) && a !== target) {
+          candidates.push(a);
+        }
+      } catch (e) { /* ignore bad backup */ }
+    });
+  }
 
-  // 上游（B 站 CDN）偶发 5xx/429/网络抖动：代理内部重试几次再决定是否报错，
-  // 这样绝大多数瞬时失败会被吸收，浏览器看到的是一条连续成功的流，不会触发播放器反复重试。
-  // 仅 5xx / 429 可重试；4xx（含 403 防盗链）重试无意义。
-  const MAX_TRIES = 3;
+  const ac = new AbortController();
+  req.on('close', function () { ac.abort(); });
+
   let upstream = null;
+  let chosenHost = parsed.hostname;
   let lastErr = null;
-  let controller = null;
-  // 浏览器断开（暂停 / 跳转 / 切换地址）时取消上游请求，避免连接泄漏
-  req.on('close', () => { if (controller) controller.abort(); });
-  for (let attempt = 0; attempt < MAX_TRIES; attempt++) {
-    if (attempt > 0) await new Promise((r) => setTimeout(r, 300 * attempt));
-    controller = new AbortController();
-    try {
-      const resp = await fetch(target, {
-        headers,
-        redirect: 'follow',
-        signal: controller.signal,
-      });
-      if (resp.status >= 500 || resp.status === 429) {
-        lastErr = new Error('upstream ' + resp.status);
-        try { await resp.arrayBuffer(); } catch (e) { /* 忽略 */ }
-        continue;
-      }
+  for (let ci = 0; ci < candidates.length; ci++) {
+    const cand = candidates[ci];
+    const resp = await fetchVideoUpstream(cand, req, ac.signal);
+    if (resp) {
       upstream = resp;
+      try { chosenHost = new URL(cand).hostname; } catch (e) { chosenHost = parsed.hostname; }
       break;
-    } catch (e) {
-      lastErr = e;
-      continue; // 网络错误重试
     }
+    lastErr = new Error('candidate exhausted: ' + cand);
   }
 
   if (!upstream) {
-    log(`[video-proxy] error: ${lastErr && lastErr.message}`);
+    log('[video-proxy] error: ' + (lastErr && lastErr.message));
     if (!res.headersSent) {
-      sendJson(res, 502, { code: -502, message: '视频代理请求失败：' + (lastErr && lastErr.message) });
+      sendJson(res, 502, { code: -502, message: 'video proxy failed: ' + (lastErr && lastErr.message) });
     } else {
       res.end();
     }
@@ -221,15 +245,15 @@ async function handleVideoProxy(req, res, url) {
     const contentRange = upstream.headers.get('content-range');
     if (contentRange) respHeaders['Content-Range'] = contentRange;
 
-    if (!videoProxyLoggedHosts.has(parsed.hostname)) {
-      videoProxyLoggedHosts.add(parsed.hostname);
+    if (!videoProxyLoggedHosts.has(chosenHost)) {
+      videoProxyLoggedHosts.add(chosenHost);
       log(
-        `[video-proxy] ${req.method} ${parsed.hostname} http=${upstream.status}` +
-        ` range=${req.headers.range ? 'yes' : 'no'}`
+        '[video-proxy] ' + req.method + ' ' + chosenHost + ' http=' + upstream.status +
+        ' range=' + (req.headers.range ? 'yes' : 'no') +
+        (candidates.length > 1 ? ' candidates=' + candidates.length : '')
       );
     }
 
-    // 上游 4xx：读一小段响应体记录下来，便于判断是 CDN 404 还是防盗链 403
     if (upstream.status >= 400) {
       let errBody = '';
       try {
@@ -238,10 +262,8 @@ async function handleVideoProxy(req, res, url) {
           .toString('utf8')
           .replace(/\s+/g, ' ')
           .trim();
-      } catch {
-        /* 忽略 */
-      }
-      log(`[video-proxy] upstream ${upstream.status} body=${errBody}`);
+      } catch (e) { /* ignore */ }
+      log('[video-proxy] upstream ' + upstream.status + ' body=' + errBody);
       const errBuf = Buffer.from(errBody || '');
       delete respHeaders['Content-Length'];
       delete respHeaders['Content-Range'];
@@ -267,152 +289,71 @@ async function handleVideoProxy(req, res, url) {
     }
     res.end();
   } catch (e) {
-    // 传输中途客户端断开（signal 被 abort）等：优雅结束即可
-    log(`[video-proxy] stream error: ${e.message}`);
+    log('[video-proxy] stream error: ' + e.message);
     if (!res.headersSent) {
-      sendJson(res, 502, { code: -502, message: '视频流传输失败：' + e.message });
+      sendJson(res, 502, { code: -502, message: 'video stream failed: ' + e.message });
     } else {
-      try { res.end(); } catch (_) { /* 已结束 */ }
+      try { res.end(); } catch (_) { /* already ended */ }
     }
   }
+}
+
+/** fetch upstream with internal retry on 5xx/429/network jitter. */
+async function fetchVideoUpstream(target, req, parentSignal) {
+  const headers = { 'User-Agent': UA, Referer: BILI_REFERER };
+  if (req.headers.range) headers.Range = String(req.headers.range);
+  const MAX_TRIES = 3;
+  let lastErr = null;
+  for (let attempt = 0; attempt < MAX_TRIES; attempt++) {
+    if (attempt > 0) await new Promise(function (r) { setTimeout(r, 300 * attempt); });
+    const controller = new AbortController();
+    const onClose = function () { controller.abort(); };
+    parentSignal.addEventListener('abort', onClose, { once: true });
+    try {
+      const resp = await fetch(target, {
+        headers: headers,
+        redirect: 'follow',
+        signal: controller.signal,
+      });
+      if (resp.status >= 500 || resp.status === 429) {
+        lastErr = new Error('upstream ' + resp.status);
+        try { await resp.arrayBuffer(); } catch (e) { /* ignore */ }
+        continue;
+      }
+      return resp;
+    } catch (e) {
+      lastErr = e;
+      continue;
+    } finally {
+      parentSignal.removeEventListener('abort', onClose);
+    }
+  }
+  return null;
+}
+/** 弹幕分段抓取：5xx / 429 / 网络抖动内部重试几次，吸收官方接口偶发不稳定 */
+async function fetchDanmakuUpstream(fullUrl, headers) {
+  let lastErr = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 300 * attempt));
+    try {
+      const r = await fetch(fullUrl, { headers, signal: AbortSignal.timeout(12_000) });
+      if (r.status >= 500 || r.status === 429) {
+        lastErr = new Error('upstream ' + r.status);
+        try { await r.arrayBuffer(); } catch (e) { /* ignore */ }
+        continue;
+      }
+      return r;
+    } catch (e) {
+      lastErr = e;
+      continue;
+    }
+  }
+  throw lastErr || new Error('danmaku upstream failed');
 }
 
 /* ------------------------------------------------------------------
- * 1.5 弹幕分段接口（protobuf → JSON）
- *     旧 XML 接口（x/v1/dm/list.so）只返回“实时弹幕池”，数量有限、
- *     不够完整；官方网页端现在使用分段接口 x/v2/dm/wbi/web/seg.so，
- *     每 6 分钟一包、每包最多 6000 条，全部拉齐才是完整弹幕。
- *     该接口返回 protobuf 二进制，这里做零依赖的最小解码（手写 varint），
- *     只提取弹幕渲染需要的字段，转成 JSON 交给前端。
+ * 弹幕分段接口（protobuf → JSON）：见原 1.5 节说明
  * ------------------------------------------------------------------ */
-
-/** 兼容新旧两种 protobuf 弹幕结构（见 decodeDanmakuElem 内说明） */
-function readVarint(buf, pos) {
-  let result = 0;
-  let shift = 0;
-  while (pos < buf.length) {
-    const byte = buf[pos++];
-    // 逐字节累加：64 位字段的数值精度对跳过无影响，32 位字段完全精确
-    result += (byte & 0x7f) * 2 ** shift;
-    if ((byte & 0x80) === 0) return { value: result, pos };
-    shift += 7;
-    if (shift > 63) break; // 异常数据保护，避免死循环
-  }
-  return { value: result, pos: buf.length };
-}
-
-/** 读取一条 length-delimited（wire type 2）字段的内容字节 */
-function readBytes(buf, pos) {
-  const len = readVarint(buf, pos);
-  const end = len.pos + len.value;
-  if (end > buf.length) return { bytes: null, pos: buf.length };
-  return { bytes: buf.subarray(len.pos, end), pos: end };
-}
-
-/**
- * 解码一条 DanmakuElem 弹幕。
- * 两种结构字段 2~5（progress/mode/fontsize/color）完全一致，仅 6 号以后不同：
- *   - 新结构（网页端现用）：6=midHash(string) 7=content(string) 8=ctime(varint) …
- *   - 旧结构（早期 seg.so）：6=content(string) 7=midHash(varint) 8=pool(varint) …
- * 因此 content 优先取 7 号字符串，没有则退回 6 号字符串，两种都兼容。
- */
-function decodeDanmakuElem(buf) {
-  const fields = {};
-  let pos = 0;
-  while (pos < buf.length) {
-    const tag = readVarint(buf, pos);
-    pos = tag.pos;
-    const field = tag.value >>> 3;
-    const wire = tag.value & 7;
-    if (wire === 0) {
-      const v = readVarint(buf, pos);
-      pos = v.pos;
-      (fields[field] = fields[field] || []).push({ wire, v: v.value });
-    } else if (wire === 2) {
-      const b = readBytes(buf, pos);
-      pos = b.pos;
-      if (b.bytes === null) break;
-      (fields[field] = fields[field] || []).push({ wire, bytes: b.bytes });
-    } else if (wire === 1) {
-      pos += 8; // 64 位定长字段，跳过
-    } else if (wire === 5) {
-      pos += 4; // 32 位定长字段，跳过
-    } else {
-      break; // 未知 wire type，放弃该消息
-    }
-  }
-  const pick = (n, w) => {
-    const arr = fields[n];
-    return arr ? arr.find((x) => x.wire === w) : undefined;
-  };
-  const varint = (n) => {
-    const f = pick(n, 0);
-    return f ? f.v : undefined;
-  };
-  const str = (n) => {
-    const f = pick(n, 2);
-    return f ? f.bytes.toString('utf8') : undefined;
-  };
-  return {
-    progress: varint(2) || 0,        // 出现时间（毫秒）
-    mode: varint(3) || 1,            // 弹幕类型
-    fontsize: varint(4) || 25,       // 字号
-    color: varint(5) || 0xffffff,    // 颜色（十进制 RGB888）
-    content: str(7) ?? str(6) ?? '', // 弹幕内容
-  };
-}
-
-/**
- * 解码 DmSegMobileReply：
- *   1 号字段 elems（普通弹幕）、2 号字段 dmdm（补充弹幕）均为
- *   repeated DanmakuElem，一并提取合并，最大化弹幕完整度。
- */
-function decodeDmSeg(buf) {
-  const elems = [];
-  let pos = 0;
-  while (pos < buf.length) {
-    const tag = readVarint(buf, pos);
-    pos = tag.pos;
-    const field = tag.value >>> 3;
-    const wire = tag.value & 7;
-    if (field !== 1 && field !== 2) {
-      // 跳过其它字段（长度不确定，按 wire type 跳过）
-      if (wire === 0) {
-        const v = readVarint(buf, pos);
-        pos = v.pos;
-      } else if (wire === 2) {
-        const b = readBytes(buf, pos);
-        pos = b.pos;
-      } else if (wire === 1) {
-        pos += 8;
-      } else if (wire === 5) {
-        pos += 4;
-      } else {
-        break;
-      }
-      continue;
-    }
-    if (wire !== 2) {
-      if (wire === 0) {
-        const v = readVarint(buf, pos);
-        pos = v.pos;
-      } else if (wire === 1) {
-        pos += 8;
-      } else if (wire === 5) {
-        pos += 4;
-      }
-      continue;
-    }
-    const b = readBytes(buf, pos);
-    pos = b.pos;
-    if (b.bytes === null) break;
-    const d = decodeDanmakuElem(b.bytes);
-    if (d.content) elems.push(d);
-  }
-  return elems;
-}
-
-/** 弹幕分段：优先 WBI 签名接口（官方现用），失败退回旧的无签名分段接口 */
 async function handleDanmakuSegments(req, res, url) {
   if (!rateLimitOk(req.socket.remoteAddress || 'local')) {
     return sendJson(res, 429, { code: -429, message: '请求过于频繁，请稍后再试' });
@@ -450,10 +391,7 @@ async function handleDanmakuSegments(req, res, url) {
       if (finger) headers.Cookie = finger;
     }
     try {
-      const upstream = await fetch(`https://api.bilibili.com${a.path}?${a.qs}`, {
-        headers,
-        signal: AbortSignal.timeout(12_000),
-      });
+      const upstream = await fetchDanmakuUpstream(`https://api.bilibili.com${a.path}?${a.qs}`, headers);
       // B 站 CDN 对“该分段没有更多弹幕”返回 304（Not Modified，无响应体）。
       // 这属于正常结束信号，不是错误：返回空包，前端据此停止继续拉取。
       if (upstream.status === 304) {

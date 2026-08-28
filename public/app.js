@@ -903,6 +903,7 @@
       if (entry.seriesTitle) rec.seriesTitle = entry.seriesTitle;
       if (entry.episodeLabel) rec.episodeLabel = entry.episodeLabel;
       if (entry.episodeCount) rec.episodeCount = entry.episodeCount;
+      if (typeof entry.danmaku === 'number') rec.danmaku = entry.danmaku;
       rec.progress = entry.progress;
       rec.duration = entry.duration;
       rec.watchedAt = entry.watchedAt;
@@ -965,6 +966,7 @@
     var now = Date.now();
     if (!force && now - progressLastSave < 5000) return;
     progressLastSave = now;
+    var dmCount = (window.BiliNestPlayer && BiliNestPlayer.getDanmakuCount) ? BiliNestPlayer.getDanmakuCount() : 0;
     saveHistory({
       key: ctx.key,
       kind: ctx.kind,
@@ -978,6 +980,7 @@
       seriesTitle: ctx.seriesTitle || '',
       episodeLabel: ctx.episodeLabel || '',
       episodeCount: ctx.episodeCount || 0,
+      danmaku: dmCount,
       progress: Math.max(0, Math.round(v.currentTime)),
       duration: Math.round(v.duration || 0),
       watchedAt: now
@@ -1044,6 +1047,7 @@
         seriesTitle: ctx.seriesTitle || '',
         episodeLabel: ctx.episodeLabel || '',
         episodeCount: ctx.episodeCount || 0,
+        danmaku: (window.BiliNestPlayer && BiliNestPlayer.getDanmakuCount) ? BiliNestPlayer.getDanmakuCount() : 0,
         progress: 0,
         duration: dur,
         watchedAt: finishedAt

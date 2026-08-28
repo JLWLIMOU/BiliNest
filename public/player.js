@@ -61,6 +61,7 @@ window.BiliNestPlayer = (function () {
     active: [],             // 正在显示的弹幕
     lanes: [],              // 弹幕轨道占用
     danmakuOn: true,        // 弹幕默认开启
+    pluginDanmaku: [],      // 适配 artplayer-plugin-danmuku 的弹幕数组
     playing: false,         // 播放状态（由 video:play/pause 事件维护）
     rafId: 0,
     subtitleBody: [],
@@ -104,8 +105,13 @@ window.BiliNestPlayer = (function () {
    * 浏览器直连（Referer 为 127.0.0.1）会被 403 → 播放器报“地址不支持”。
    * 因此统一改为请求本地代理 /api/video，由服务器带正确 Referer 转发。
    */
-  function toProxiedUrl(url) {
-    return '/api/video?url=' + encodeURIComponent(url);
+  function toProxiedUrl(url, alts) {
+    var u = '/api/video?url=' + encodeURIComponent(url);
+    // 把备用 CDN 地址一并交给代理：主节点抖动时由服务器“CDN 优选”兜底
+    if (alts && alts.length) {
+      u += '&alt=' + encodeURIComponent(alts.join('|'));
+    }
+    return u;
   }
 
   /* ---------------- ArtPlayer 初始化 ---------------- */
@@ -154,8 +160,6 @@ window.BiliNestPlayer = (function () {
       // 避免某些 fMP4 流在 metadata 预取阶段解析失败导致误报加载错误
       moreVideoAttr: { controls: false, preload: 'auto' },
       layers: [
-        // 弹幕画布：挂在 ArtPlayer 内部 layer 上，全屏时依然覆盖视频
-        { name: 'danmaku', html: '<canvas id="danmakuCanvas" class="danmaku-layer" hidden></canvas>' },
         // CC 字幕层：全屏时同样保持可见
         { name: 'subtitle', html: '<div id="subtitleBox" class="subtitle-box" hidden></div>' },
         // 播放结束浮层：下一集（含倒计时自动连播）/ 重温一遍
@@ -195,7 +199,7 @@ window.BiliNestPlayer = (function () {
           click: function () { if (state.episodeNavHandler) state.episodeNavHandler('next'); }
         },
         {
-          name: 'danmaku',
+          name: 'bdmaku',
           position: 'right',
           index: 5,
           html: '<span class="bilinest-ctl">弹幕</span>',
@@ -237,11 +241,29 @@ window.BiliNestPlayer = (function () {
           selector: [],
           onSelect: function (item) { return selectQuality(item); }
         }
+      ],
+      plugins: [
+        artplayerPluginDanmuku({
+          // 弹幕数据由 loadDanmaku 经 danmakuPlugin().load() 动态注入；
+          // 这里给一个兜底函数，插件初始化时读取一次
+          danmuku: function () { return state.pluginDanmaku || []; },
+          type: 'json',
+          synchronousPlayback: true, // 拖动进度后弹幕索引与视频同步
+          mode: 0,
+          opacity: 1,
+          fontSize: 25,
+          color: '#FFFFFF',
+          antiOverlap: true,
+          display: state.danmakuOn,   // 初始可见性跟随“弹幕开关”
+          theme: 'dark',
+          heatmap: false,
+          beforeEmit: function () { return false; }, // 只读，禁止发送弹幕
+          filter: function () { return true; }
+        })
       ]
     });
 
     state.art = art;
-    els.canvas = els.player.querySelector('#danmakuCanvas');
     els.sub = els.player.querySelector('#subtitleBox');
     els.endOverlay = els.player.querySelector('#endOverlay');
     applySubSettings(); // 字幕位置 / 字号（可能已持久化，先恢复再显示）
@@ -271,35 +293,19 @@ window.BiliNestPlayer = (function () {
       // 导致弹幕动画永远不启动。这里统一用我们自己维护的 state.playing。
       state.playing = true;
       hideEndOverlay(); // 用户重新播放时隐藏结束浮层
-      if (state.danmakuOn) startRender();
     });
     art.on('video:pause', function () {
       state.playing = false;
-      // 暂停时冻结弹幕：保留画布最后一帧，方便阅读（播放时继续滚动）
-      freezeRender();
       updateSubtitle(); // 暂停时也按当前时间刷新字幕，避免停留在上一句的空白间隙
       window.dispatchEvent(new CustomEvent('bilinest-pause'));
     });
     art.on('video:seeked', function () {
       updateSubtitle(); // 拖动进度后立即刷新字幕
-      // 暂停中拖动进度：重画当前时间点的静态弹幕，而不是保留旧画面的弹幕
-      if (!state.playing && state.danmakuOn && state.danmaku.length) drawFrame();
     });
     art.on('video:ended', function () {
       state.playing = false;
-      stopRender();
       window.dispatchEvent(new CustomEvent('bilinest-ended'));
       showEndOverlay();
-    });
-    art.on('video:seeking', function () {
-      // 跳转后清空已显示弹幕，从新位置重新生成
-      state.active = [];
-      state.lanes = [];
-      state.danmakuIdx = 0;
-      while (state.danmakuIdx < state.danmaku.length &&
-             state.danmaku[state.danmakuIdx].time < art.currentTime) {
-        state.danmakuIdx++;
-      }
     });
     art.on('video:timeupdate', function () {
       updateSubtitle();
@@ -341,10 +347,6 @@ window.BiliNestPlayer = (function () {
       }
     });
     art.on('video:error', function () { handleLoadError(); });
-    art.on('fullscreen', function () {
-      // 进入/退出全屏后立即校准弹幕画布尺寸
-      sizeCanvas();
-    });
   }
 
   /**
@@ -365,7 +367,7 @@ window.BiliNestPlayer = (function () {
   /** 切到指定地址；期间屏蔽 video:error，避免切换过程被误判 */
   function switchTo(url) {
     if (!state.art) return;
-    var next = toProxiedUrl(url);
+    var next = toProxiedUrl(url, state.urls);
     state.urlSwitching = true;
     // 新地址与当前相同：switchQuality 会直接跳过，需强制重载
     if (state.art.video.src === next) {
@@ -720,7 +722,7 @@ window.BiliNestPlayer = (function () {
     updateSubtitleControl();
     renderSubSettingsControls();
 
-    state.art.url = toProxiedUrl(state.urls[0]);
+    state.art.url = toProxiedUrl(state.urls[0], state.urls);
 
     // 弹幕与字幕异步加载，失败不阻塞播放
     loadDanmaku(cid);
@@ -823,7 +825,7 @@ window.BiliNestPlayer = (function () {
       state.urlIdx = 0;
       state.urlSwitching = true;
       try {
-        await art.switchQuality(toProxiedUrl(state.urls[0]));
+        await art.switchQuality(toProxiedUrl(state.urls[0], state.urls));
         return label;
       } finally {
         state.urlSwitching = false;
@@ -838,14 +840,16 @@ window.BiliNestPlayer = (function () {
   function toggleDanmaku() {
     state.danmakuOn = !state.danmakuOn;
     updateDanmakuControl();
-    if (state.danmakuOn) startRender();
-    else stopRender();
+    var p = danmakuPlugin();
+    if (p) {
+      if (state.danmakuOn) p.show(); else p.hide();
+    }
   }
 
   function updateDanmakuControl() {
     var art = state.art;
     if (!art) return;
-    var el = art.controls.danmaku;
+    var el = art.controls.bdmaku;
     if (!el) return;
     var span = el.querySelector('.bilinest-ctl');
     if (span) span.classList.toggle('off', !state.danmakuOn);
@@ -880,9 +884,10 @@ window.BiliNestPlayer = (function () {
     if (!list) list = [];
     list.sort(function (a, b) { return a.time - b.time; });
     state.danmaku = list;
-    state.danmakuIdx = 0;
-    // 播放中 → 启动动画；暂停中 → 补画一帧静态弹幕
-    if (state.danmakuOn && state.art) startRender();
+    var arr = toPluginDanmaku(list);
+    state.pluginDanmaku = arr;
+    var p = danmakuPlugin();
+    if (p) p.load(arr);
   }
 
   /**
@@ -947,156 +952,21 @@ window.BiliNestPlayer = (function () {
     return list;
   }
 
-  /** 开始弹幕渲染：播放中走动画循环；暂停中只补画一帧静态弹幕 */
-  function startRender() {
-    if (state.rafId) return;
-    if (!els.canvas) return;
-    els.canvas.hidden = false;
-    if (!state.playing) {
-      drawFrame(); // 暂停状态：静态帧（暂停时弹幕可阅读）
-      return;
-    }
-    state.rafId = requestAnimationFrame(renderLoop);
+  /** 适配 artplayer-plugin-danmuku：取出插件实例（首次加载后可用） */
+  function danmakuPlugin() {
+    return state.art && state.art.plugins ? state.art.plugins.artplayerPluginDanmuku : null;
   }
 
-  /** 暂停时冻结弹幕：保留画布最后一帧，不清屏、不隐藏 */
-  function freezeRender() {
-    cancelAnimationFrame(state.rafId);
-    state.rafId = 0;
-  }
-
-  /** 停止弹幕并彻底清屏（关闭弹幕 / 播放结束 / 切换视频时用） */
-  function stopRender() {
-    cancelAnimationFrame(state.rafId);
-    state.rafId = 0;
-    if (els.canvas) {
-      var ctx = els.canvas.getContext('2d');
-      // 画布经过 DPR 缩放，先复位变换再清屏，确保彻底清空
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.clearRect(0, 0, els.canvas.width, els.canvas.height);
-      els.canvas.hidden = true;
-    }
-  }
-
-  function renderLoop() {
-    state.rafId = 0;
-    if (!state.playing || !state.danmakuOn || !els.canvas) return;
-    drawFrame();
-    state.rafId = requestAnimationFrame(renderLoop);
-  }
-
-  /** 绘制一帧弹幕：动画循环与暂停时的静态帧共用同一逻辑 */
-  function drawFrame() {
-    if (!els.canvas || !state.art) return;
-    var ctx = els.canvas.getContext('2d');
-    sizeCanvas();
-    var w = els.canvas.clientWidth;
-    var h = els.canvas.clientHeight;
-    if (!w || !h) return;
-    ctx.clearRect(0, 0, w, h);
-    var t = state.art.currentTime;
-
-    // 生成到时间点的弹幕
-    while (state.danmakuIdx < state.danmaku.length &&
-           state.danmaku[state.danmakuIdx].time <= t + 0.05) {
-      spawnDanmaku(state.danmaku[state.danmakuIdx], t, w, h);
-      state.danmakuIdx++;
-    }
-
-    // 绘制 + 清理出屏
-    var remain = [];
-    for (var i = 0; i < state.active.length; i++) {
-      var d = state.active[i];
-      if (d.mode === 4 || d.mode === 5) {
-        // 底部/顶部固定弹幕：停留 4 秒
-        if (t - d.start > 4) continue;
-        ctx.textAlign = 'center';
-        drawDanmaku(ctx, d, w / 2);
-        remain.push(d);
-      } else if (d.mode === 6) {
-        // 逆向弹幕：从左向右移动（与普通弹幕方向相反）
-        var rx = (t - d.start) * d.speed - d.width;
-        if (rx > w) continue;
-        ctx.textAlign = 'left';
-        drawDanmaku(ctx, d, rx);
-        remain.push(d);
-      } else {
-        var x = w - (t - d.start) * d.speed;
-        if (x + d.width < 0) continue;
-        ctx.textAlign = 'left';
-        drawDanmaku(ctx, d, x);
-        remain.push(d);
-      }
-    }
-    state.active = remain;
-  }
-
-  /** 绘制单条弹幕：先描黑边再填充颜色，保证浅色画面上也可读 */
-  function drawDanmaku(ctx, d, x) {
-    ctx.font = danmakuFont(d.px);
-    ctx.lineJoin = 'round';
-    ctx.miterLimit = 2;
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.9)';
-    // 两层描边（先宽后窄）再填充：轮廓更饱满，细笔画处也不易断裂
-    ctx.lineWidth = Math.max(3, Math.round(d.px / 5));
-    ctx.strokeText(d.text, x, d.y);
-    ctx.lineWidth = Math.max(1.5, Math.round(d.px / 9));
-    ctx.strokeText(d.text, x, d.y);
-    ctx.fillStyle = d.color;
-    ctx.fillText(d.text, x, d.y);
-  }
-
-  /** 弹幕字体：加粗 + 常见中文字体栈，保证清晰度（测量与绘制共用同一字体） */
-  function danmakuFont(px) {
-    return '700 ' + px + 'px "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif';
-  }
-
-  function spawnDanmaku(d, t, w, h) {
-    var px = d.size >= 36 ? 28 : d.size >= 25 ? 20 : 16;
-    var laneH = px + 6;
-    var color = '#' + ('000000' + d.color.toString(16)).slice(-6);
-    if (d.mode === 4 || d.mode === 5) {
-      // 顶部(5) / 底部(4)：分配从顶/底开始的轨道
-      var used = {};
-      for (var i = 0; i < state.active.length; i++) {
-        if (state.active[i].mode === d.mode) used[state.active[i].lane] = true;
-      }
-      var lane = 0;
-      while (used[lane]) lane++;
-      var y = d.mode === 5 ? 20 + lane * laneH : h - 20 - lane * laneH;
-      state.active.push({
-        mode: d.mode, text: d.text, color: color, px: px, start: t, lane: lane, y: y
-      });
-      return;
-    }
-    // 滚动弹幕：按轨道分配
-    var ctx = els.canvas.getContext('2d');
-    ctx.font = danmakuFont(px); // 与绘制用同一字体，保证测量宽度一致
-    var tw = ctx.measureText(d.text).width;
-    var speed = (w + tw) / 8;             // 约 8 秒穿过屏幕
-    var duration = (w + tw) / speed;
-    var lane = 0;
-    while (state.lanes[lane] && state.lanes[lane] > t + 0.05) lane++;
-    state.lanes[lane] = t + duration;
-    state.active.push({
-      mode: d.mode, text: d.text, color: color, px: px, start: t,
-      speed: speed, width: tw, y: 20 + lane * laneH
+  /** 把内部弹幕格式（B 站 mode/color 数字）转换为插件要求的格式：
+   *  { time, text, color: '#rrggbb', mode }
+   *  插件 mode 约定：0 滚动 / 1 底部 / 2 顶部
+   *  （B 站：1 滚动 / 4 底部 / 5 顶部）*/
+  function toPluginDanmaku(list) {
+    return (list || []).map(function (d) {
+      var mode = d.mode === 5 ? 2 : d.mode === 4 ? 1 : 0; // 顶(5)/底(4) → 插件 top(2)/bottom(1)
+      var color = '#' + ('000000' + (d.color >>> 0).toString(16)).slice(-6);
+      return { time: d.time, text: d.text, color: color, mode: mode };
     });
-  }
-
-  function sizeCanvas() {
-    var c = els.canvas;
-    if (!c) return;
-    var dpr = window.devicePixelRatio || 1;
-    var w = c.clientWidth, h = c.clientHeight;
-    if (!w || !h) return;
-    var bw = Math.round(w * dpr), bh = Math.round(h * dpr);
-    // 尺寸变化超过阈值才重建位图，避免全屏过渡期间每帧重建导致卡顿
-    if (Math.abs(c.width - bw) > dpr * 2 || Math.abs(c.height - bh) > dpr * 2) {
-      c.width = bw;
-      c.height = bh;
-    }
-    c.getContext('2d').setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
   /* ---------------- 字幕位置（滑块）/ 字号设置 ---------------- */
@@ -1283,8 +1153,6 @@ window.BiliNestPlayer = (function () {
 
   /* ---------------- 停止 ---------------- */
   function reset() {
-    cancelAnimationFrame(state.rafId);
-    state.rafId = 0;
     state.playing = false;
     clearPendingRetry();
     subtitleSeq++; // 使尚未完成的字幕请求失效，避免旧视频字幕覆盖新视频
@@ -1297,9 +1165,7 @@ window.BiliNestPlayer = (function () {
     state.urls = [];
     state.urlIdx = 0;
     state.danmaku = [];
-    state.danmakuIdx = 0;
-    state.active = [];
-    state.lanes = [];
+    state.pluginDanmaku = [];
     state.subtitleBody = [];
     state.subtitleOn = false;
     state.resumePoint = 0;
@@ -1315,12 +1181,9 @@ window.BiliNestPlayer = (function () {
     if (state.art) {
       try { state.art.pause(); } catch (e) { /* ignore */ }
       hideEndOverlay();
-      if (els.canvas) {
-        var ctx = els.canvas.getContext('2d');
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.clearRect(0, 0, els.canvas.width, els.canvas.height);
-        els.canvas.hidden = true;
-      }
+      // 清空弹幕（已改由插件渲染）：重置内部数组并通知插件重载空数据
+      var dp = danmakuPlugin();
+      if (dp) dp.load([]);
       if (els.sub) {
         els.sub.hidden = true;
         els.sub.textContent = '';
@@ -1345,6 +1208,8 @@ window.BiliNestPlayer = (function () {
       // 供应用层读取播放进度 / 时长；ArtPlayer 初始化前返回 null
       return state.art ? state.art.template.$video : null;
     },
+    /** 当前已加载弹幕条数（用于历史记录展示，对齐 DanmuTV 的 danmaku 字段） */
+    getDanmakuCount: function () { return state.danmaku ? state.danmaku.length : 0; },
     setResumePoint: function (seconds) {
       state.resumePoint = Number(seconds) || 0;
       state.resumeTarget = state.resumePoint;

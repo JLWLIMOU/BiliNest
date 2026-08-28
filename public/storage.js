@@ -26,7 +26,10 @@ window.BiliNestStore = (function () {
     subSettings: { pos: 100, size: 'md' }, // 字幕位置（滑块 0~100）/ 字号
     customVideos: [],         // 手动添加的 B 站视频 / 本地视频
     studyFolders: [],         // 学习收藏夹：{ id, title, cover, mediaCount, addedAt, stars }
-    watchHistory: [],         // 观看记录：{ key, kind, bvid, cid, page, title, cover, upper, progress, duration, watchedAt }
+    watchHistory: [],         // 观看记录（参考 DanmuTV 的播放记录 schema，向后兼容）：
+                               //   { key, kind, bvid, cid, page, title, cover, upper, seriesKey,
+                               //     seriesTitle, episodeLabel, episodeCount, danmaku,
+                               //     progress, duration, watchedAt, episodes?{key:{progress,...}} }
     hiddenHistoryKeys: [],    // 用户从“继续学习”栏手动隐藏的卡片（按合并键，历史数据保留）
     guideSeen: null           // 是否已看过首次启动引导（true = 不再显示）
   };
