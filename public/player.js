@@ -66,7 +66,11 @@ window.BiliNestPlayer = (function () {
     subtitleBody: [],
     subtitleOn: false,      // 字幕默认关闭，由用户手动开启
     subSettings: loadSubSettings(), // 字幕位置 / 字号（持久化到 localStorage）
-    resumePoint: 0,         // 续播点（秒），媒体就绪后自动跳转
+    resumePoint: 0,         // 续播点（秒），媒体就绪后自动跳转（一次性，保留兼容）
+    resumeTarget: 0,        // 期望续播点（秒），跨重试/恢复保持，直到真正到达才清零
+    recovering: false,      // 处于“加载失败 → 自动恢复”过程中（此时不要回写进度）
+    seekedResume: false,    // 本次加载是否已成功 seek 到续播点
+    playurlAt: 0,           // 上次成功获取播放地址的时间戳（用于判断签名是否过期）
     errorHandler: null,
     urlSwitching: false,    // 重试/切换中，避免 video:error 重复触发
     loadAttempts: 0,        // 当前播放地址的连续失败次数
@@ -298,22 +302,27 @@ window.BiliNestPlayer = (function () {
     });
     art.on('video:timeupdate', function () {
       updateSubtitle();
+      // 已真正到达续播点：停止续播逻辑，避免后续误判
+      if (state.resumeTarget > 0 && art.currentTime >= state.resumeTarget - 2) {
+        state.resumeTarget = 0;
+      }
       // 交给应用层做观看进度节流保存
       window.dispatchEvent(new CustomEvent('bilinest-timeupdate', {
         detail: { currentTime: art.currentTime, duration: art.duration }
       }));
     });
     art.on('video:canplay', function () {
-      // 加载成功：清零失败计数
+      // 加载成功：清零失败计数 + 退出恢复态
       state.loadAttempts = 0;
       state.freshTries = 0;
       state.qualityTries = 0;
+      state.recovering = false;
     });
     art.on('video:loadedmetadata', function () {
-      // 自动从上次观看进度续播
-      if (state.resumePoint > 10) {
-        var sec = state.resumePoint;
-        state.resumePoint = 0;
+      // 自动从上次观看进度续播（跨重试保持：只要尚未成功 seek，就重新跳转）
+      if (state.resumeTarget > 10 && !state.seekedResume) {
+        var sec = state.resumeTarget;
+        state.seekedResume = true;
         try { art.currentTime = sec; } catch (e) { /* 跳转失败忽略 */ }
         art.play().catch(function () { /* 自动播放可能被浏览器拦截 */ });
         window.dispatchEvent(new CustomEvent('bilinest-resumed', {
@@ -345,6 +354,55 @@ window.BiliNestPlayer = (function () {
     }
   }
 
+  /** 切到指定地址；期间屏蔽 video:error，避免切换过程被误判 */
+  function switchTo(url) {
+    if (!state.art) return;
+    var next = toProxiedUrl(url);
+    state.urlSwitching = true;
+    // 新地址与当前相同：switchQuality 会直接跳过，需强制重载
+    if (state.art.video.src === next) {
+      try { state.art.video.load(); } catch (e) { /* 忽略 */ }
+      state.urlSwitching = false;
+      return;
+    }
+    state.art.switchQuality(next).then(function () {
+      state.urlSwitching = false;
+    }).catch(function () {
+      state.urlSwitching = false;
+      handleLoadError();
+    });
+  }
+
+  /** B 站签名 URL 过期/坏镜像：重新请求播放地址并切换（受 MAX_FRESH_TRIES 限制） */
+  function reFetchPlayurl() {
+    if (state.freshTries >= MAX_FRESH_TRIES) return false;
+    state.freshTries++;
+    state.loadAttempts = 0;
+    state.urlSwitching = true;
+    if (state.art && state.art.notice) state.art.notice.show = '播放地址失效，正在重新获取…';
+    var wantQn = state.qn || 64;
+    api.playurl(state.bvid, state.cid, wantQn, creds())
+      .then(function (pl) {
+        if (!state.art) return;
+        if (!pl || !pl.durl || !pl.durl.length) {
+          state.urlSwitching = false;
+          handleLoadError();
+          return;
+        }
+        state.qn = pl.quality || wantQn;
+        state.qualities = buildQualities(pl);
+        state.urls = [pl.durl[0].url].concat(pl.durl[0].backup_url || []);
+        state.urlIdx = 0;
+        state.playurlAt = Date.now();
+        switchTo(state.urls[0]);
+      })
+      .catch(function () {
+        state.urlSwitching = false;
+        handleLoadError();
+      });
+    return true;
+  }
+
   /**
    * 视频加载失败处理：不再建议用户“切换画质”。
    * 策略（逐级自动恢复）：
@@ -360,6 +418,9 @@ window.BiliNestPlayer = (function () {
     var art = state.art;
     if (!art || state.urlSwitching) return;
     if (!state.urls.length) return; // 已停止/已兜底切换，忽略残留错误事件
+    // 进入恢复态：禁止应用层在此期间把进度回写成 0，并允许重新 seek 续播点
+    state.recovering = true;
+    state.seekedResume = false;
     var v = art.video;
     var code = (v && v.error && v.error.code) || 0;
     // 播放地址现在经本地代理转发，currentSrc 是 127.0.0.1；用真实 CDN 地址的域名做诊断
@@ -369,23 +430,10 @@ window.BiliNestPlayer = (function () {
       host = new URL(realUrl).hostname;
     } catch (e) { /* 忽略 */ }
 
-    /** 切到指定地址；期间屏蔽 video:error，避免切换过程被误判 */
-    function switchTo(url) {
-      if (!state.art) return;
-      var next = toProxiedUrl(url);
-      state.urlSwitching = true;
-      // 新地址与当前相同：switchQuality 会直接跳过，需强制重载
-      if (state.art.video.src === next) {
-        try { state.art.video.load(); } catch (e) { /* 忽略 */ }
-        state.urlSwitching = false;
-        return;
-      }
-      state.art.switchQuality(next).then(function () {
-        state.urlSwitching = false;
-      }).catch(function () {
-        state.urlSwitching = false;
-        handleLoadError();
-      });
+    // 地址已可能过期（长时间待机 / B 站签名时效）：直接重取，跳过同地址重试
+    if (state.kind === 'bili' && state.playurlAt &&
+        Date.now() - state.playurlAt > 4 * 60 * 1000) {
+      if (reFetchPlayurl()) return;
     }
 
     // 1) 同一地址重试
@@ -422,33 +470,8 @@ window.BiliNestPlayer = (function () {
     }
 
     // 3) 重新请求播放地址（B 站偶尔返回“坏镜像”，重取可能换到可用镜像）
-    if (state.freshTries < MAX_FRESH_TRIES) {
-      state.freshTries++;
-      clearPendingRetry();
-      state.urlSwitching = true;
-      if (art.notice) art.notice.show = '播放地址失效，正在重新获取…';
-      var wantQn = state.qn || 64;
-      api.playurl(state.bvid, state.cid, wantQn, creds())
-        .then(function (pl) {
-          if (!state.art) return;
-          if (!pl || !pl.durl || !pl.durl.length) {
-            state.urlSwitching = false;
-            handleLoadError();
-            return;
-          }
-          state.qn = pl.quality || wantQn;
-          state.qualities = buildQualities(pl);
-          state.urls = [pl.durl[0].url].concat(pl.durl[0].backup_url || []);
-          state.urlIdx = 0;
-          state.loadAttempts = 0;
-          switchTo(state.urls[0]);
-        })
-        .catch(function () {
-          state.urlSwitching = false;
-          handleLoadError();
-        });
-      return;
-    }
+    if (reFetchPlayurl()) return;
+
 
     // 4) 静默尝试其他清晰度的文件（文件路径不同，可能存在）
     if (state.qualityTries < MAX_QUALITY_TRIES) {
@@ -668,8 +691,11 @@ window.BiliNestPlayer = (function () {
     state.cid = cid;
     // 续播点必须在 reset() 之后设置（reset 会清零）
     state.resumePoint = Number(resumeSeconds) || 0;
+    state.resumeTarget = state.resumePoint;
+    state.seekedResume = false;
 
     var pl = await fetchPlayurl(bvid, cid);
+    state.playurlAt = Date.now();
 
     state.qn = pl.quality || 64;
     state.qualities = buildQualities(pl);
@@ -698,6 +724,8 @@ window.BiliNestPlayer = (function () {
     reset();
     state.kind = 'local';
     state.resumePoint = Number(resumeSeconds) || 0;
+    state.resumeTarget = state.resumePoint;
+    state.seekedResume = false;
     els.player.hidden = false;   // 先让容器可见，再创建播放器，避免隐藏状态下初始化
     ensureArt();
     state.art.poster = '';
@@ -1265,6 +1293,10 @@ window.BiliNestPlayer = (function () {
     state.subtitleBody = [];
     state.subtitleOn = false;
     state.resumePoint = 0;
+    state.resumeTarget = 0;
+    state.recovering = false;
+    state.seekedResume = false;
+    state.playurlAt = 0;
     state.urlSwitching = false;
     state.loadAttempts = 0;
     state.freshTries = 0;
@@ -1304,6 +1336,28 @@ window.BiliNestPlayer = (function () {
     },
     setResumePoint: function (seconds) {
       state.resumePoint = Number(seconds) || 0;
+      state.resumeTarget = state.resumePoint;
+      state.seekedResume = false;
+    },
+    /** 是否处于“加载失败 → 自动恢复”过程中（应用层据此跳过进度回写） */
+    isRecovering: function () { return !!state.recovering; },
+    /** 主动强制重新获取播放地址（如检测到待机恢复、签名可能过期时由应用层调用） */
+    refreshPlayurl: function () {
+      if (state.kind !== 'bili' || !state.art) return Promise.resolve(false);
+      state.playurlAt = 0; // 标记为“已过期”，下次出错会直接重取；这里立即重取
+      return api.playurl(state.bvid, state.cid, state.qn || 64, creds())
+        .then(function (pl) {
+          if (!state.art || !pl || !pl.durl || !pl.durl.length) return false;
+          state.qn = pl.quality || state.qn;
+          state.qualities = buildQualities(pl);
+          state.urls = [pl.durl[0].url].concat(pl.durl[0].backup_url || []);
+          state.urlIdx = 0;
+          state.seekedResume = false;
+          state.playurlAt = Date.now();
+          switchTo(state.urls[0]);
+          return true;
+        })
+        .catch(function () { return false; });
     },
     setEpisodeNavHandler: function (fn) { state.episodeNavHandler = fn; },
     /** 应用层根据选集列表更新上一集/下一集按钮：{ visible, prev, next } */

@@ -955,6 +955,13 @@
     var v = window.BiliNestPlayer ? BiliNestPlayer.getVideo() : null;
     if (!ctx || !v || !v.duration || isNaN(v.currentTime)) return;
     if (v.ended) return; // 已结束的由 markFinished 处理（写 progress 0），这里不覆盖
+    // 恢复态（加载失败自动重试中）：视频可能在 0 附近，回写会污染历史，跳过
+    if (window.BiliNestPlayer && typeof BiliNestPlayer.isRecovering === 'function' &&
+        BiliNestPlayer.isRecovering() && v.currentTime < 5) return;
+    // 回退保护：若已记录的真实进度较大，不要被“接近 0 的瞬时值”覆盖
+    var list = store.get('watchHistory') || [];
+    var idx = state.progressCtx ? historyIndexFor(list, state.progressCtx) : -1;
+    if (!force && idx >= 0 && list[idx].progress >= 10 && v.currentTime < 5) return;
     var now = Date.now();
     if (!force && now - progressLastSave < 5000) return;
     progressLastSave = now;
@@ -1727,7 +1734,8 @@
       var active = String(ep.cid) === String(currentCid) &&
         String(ep.page) === String(currentPage || 1);
       html +=
-        '<button type="button" class="episode-row' + (active ? ' active' : '') + '" data-ep="' + i + '">' +
+        '<button type="button" class="episode-row' + (active ? ' active' : '') + '" data-ep="' + i +
+        '" data-title="' + esc(ep.title) + '">' +
           '<span class="ep-index">' + (i + 1) + '</span>' +
           '<span class="ep-name">' + esc(ep.title) + '</span>' +
           '<span class="ep-dur">' + fmtDuration(ep.duration) + '</span>' +
@@ -3033,6 +3041,66 @@
     addLocalEntries(entries);
   }
 
+  /* ---------------- 选集悬浮完整名称提示 ---------------- */
+  // 选集列表里长标题会被省略号截断；悬浮时在旁边弹一个小标签显示完整集名。
+  // 标签挂在 document.body 上（portal 方式），避免被选集面板的 overflow 裁剪。
+  var epTooltipEl = null;
+
+  function getEpTooltip() {
+    if (!epTooltipEl) {
+      epTooltipEl = document.createElement('div');
+      epTooltipEl.className = 'bilinest-ep-tooltip';
+      epTooltipEl.hidden = true;
+      document.body.appendChild(epTooltipEl);
+    }
+    return epTooltipEl;
+  }
+
+  /** 在悬浮的选集行旁边显示完整集名（优先放右侧，不挡播放画面；放不下再放左侧） */
+  function showEpisodeTooltip(row) {
+    var title = String(row.getAttribute('data-title') || '').trim();
+    if (!title) return;
+    var tip = getEpTooltip();
+    tip.textContent = title;
+    tip.hidden = false;
+    // 先放到屏幕外量出实际宽高，再按空间计算最终位置
+    tip.style.left = '-9999px';
+    tip.style.top = '0';
+    var rect = row.getBoundingClientRect();
+    var tw = tip.offsetWidth;
+    var th = tip.offsetHeight;
+    var gap = 10;
+    var left = rect.right + gap; // 首选：行的右侧
+    if (left + tw > window.innerWidth - 8) left = rect.left - gap - tw; // 右侧放不下再放左侧
+    if (left < 8) left = 8; // 两侧都放不下时贴左边缘
+    var top = Math.min(
+      Math.max(8, rect.top + rect.height / 2 - th / 2),
+      window.innerHeight - th - 8
+    );
+    tip.style.left = Math.round(left) + 'px';
+    tip.style.top = Math.round(top) + 'px';
+  }
+
+  function hideEpisodeTooltip() {
+    if (epTooltipEl && !epTooltipEl.hidden) epTooltipEl.hidden = true;
+  }
+
+  /** 事件委托：悬浮选集行显示完整名称；滚动 / 缩放时收起 */
+  function bindEpisodeTooltip() {
+    var list = els.episodeList;
+    if (!list) return;
+    list.addEventListener('mouseover', function (e) {
+      var row = e.target && e.target.closest ? e.target.closest('.episode-row') : null;
+      if (row) showEpisodeTooltip(row);
+    });
+    list.addEventListener('mouseout', function (e) {
+      var row = e.target && e.target.closest ? e.target.closest('.episode-row') : null;
+      if (row) hideEpisodeTooltip();
+    });
+    if (els.episodePanel) els.episodePanel.addEventListener('scroll', hideEpisodeTooltip);
+    window.addEventListener('resize', hideEpisodeTooltip);
+  }
+
   /* ---------------- 启动 ---------------- */
   (async function init() {
     applyTheme();
@@ -3041,6 +3109,7 @@
     // 后台尝试为旧版“无系列信息”的单集记录补齐系列归属（限量、静默，不阻塞启动）
     backfillOrphanSeries().catch(function () { /* 静默 */ });
     bindEvents();
+    bindEpisodeTooltip();
     // 自研播放器错误提示接入应用的 toast
     if (window.BiliNestPlayer) {
       BiliNestPlayer.setErrorHandler(function (msg, type, duration) { toast(msg, type, duration); });

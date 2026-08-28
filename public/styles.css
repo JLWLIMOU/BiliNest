@@ -849,6 +849,23 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
 .episode-row .ep-dur { flex: none; color: var(--text-2); font-size: 12px; }
 .episode-section { font-size: 12px; color: var(--text-2); margin: 10px 0 4px; }
 
+/* 选集悬浮提示：显示完整集名（长标题被省略号截断时悬停查看） */
+.bilinest-ep-tooltip {
+  position: fixed;
+  z-index: 200;
+  max-width: min(340px, 60vw);
+  padding: 7px 11px;
+  border-radius: 8px;
+  background: rgba(16, 18, 24, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #f2f3f5;
+  font-size: 12.5px;
+  line-height: 1.5;
+  word-break: break-word;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
 /* ---------- 模态框 ---------- */
 .overlay {
   position: fixed;

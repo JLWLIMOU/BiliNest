@@ -7,6 +7,8 @@
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](#)
 [![Zero Deps](https://img.shields.io/badge/dependencies-zero-success)](#)
 
+> 📝 更新历史见 [CHANGELOG.md](./CHANGELOG.md)。
+
 > 只看你指定的收藏夹 / 手动添加的视频 / 本地文件，**没有推荐、首页、评论、点赞、动态**。画质切换、弹幕、字幕全部在页面内完成，永不跳转 B 站官网。
 
 ## 它解决什么痛点？
