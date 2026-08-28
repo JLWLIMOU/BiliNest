@@ -1,5 +1,5 @@
 /**
- * BiliPure 本地视频文件管理
+ * BiliNest 本地视频文件管理
  * ------------------------------------------------------------
  * 优先使用 File System Access API（showOpenFilePicker）：
  *   - 直接唤起系统资源管理器选择文件；
@@ -7,13 +7,61 @@
  * 在不支持该 API 的浏览器中回退到 <input type="file">，
  * 此时文件仅在当前会话内可播放。
  */
-window.BiliPureLocal = (function () {
+window.BiliNestLocal = (function () {
   'use strict';
 
-  var DB_NAME = 'bilipure-files';
+  var DB_NAME = 'bilinest-files';
+  // 旧版本（BiliPure）使用的数据库名：改名后首次打开自动迁移文件句柄
+  var LEGACY_DB_NAME = 'bilipure-files';
   var STORE_NAME = 'handles';
   var urlMap = new Map(); // entryId -> objectURL
   var dbPromise = null;
+  var legacyMigrated = false;
+
+  /** 把旧库（BiliPure）里的本地文件句柄一次性复制到新库，成功后删除旧库 */
+  function migrateLegacyDb(db) {
+    if (legacyMigrated) return Promise.resolve();
+    legacyMigrated = true;
+    return new Promise(function (resolve) {
+      try {
+        var openReq = indexedDB.open(LEGACY_DB_NAME, 1);
+        openReq.onsuccess = function () {
+          var legacy = openReq.result;
+          if (!legacy.objectStoreNames.contains(STORE_NAME)) {
+            legacy.close();
+            return resolve();
+          }
+          var allReq = legacy.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME).getAll();
+          var keysReq = legacy.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME).getAllKeys();
+          allReq.onsuccess = function () {
+            keysReq.onsuccess = function () {
+              var keys = keysReq.result || [];
+              var values = allReq.result || [];
+              if (!keys.length) {
+                legacy.close();
+                return resolve();
+              }
+              var t = db.transaction(STORE_NAME, 'readwrite');
+              for (var i = 0; i < keys.length; i++) {
+                t.objectStore(STORE_NAME).put(values[i], keys[i]);
+              }
+              t.oncomplete = function () {
+                legacy.close();
+                try { indexedDB.deleteDatabase(LEGACY_DB_NAME); } catch (e) { /* 忽略 */ }
+                resolve();
+              };
+              t.onerror = function () { legacy.close(); resolve(); };
+            };
+          };
+          allReq.onerror = function () { legacy.close(); resolve(); };
+          keysReq.onerror = function () { legacy.close(); resolve(); };
+        };
+        openReq.onerror = function () { resolve(); }; // 旧库不存在或打不开：跳过迁移
+      } catch (e) {
+        resolve();
+      }
+    });
+  }
 
   function openDb() {
     if (dbPromise) return dbPromise;
@@ -24,7 +72,12 @@ window.BiliPureLocal = (function () {
           req.result.createObjectStore(STORE_NAME);
         }
       };
-      req.onsuccess = function () { resolve(req.result); };
+      req.onsuccess = function () {
+        migrateLegacyDb(req.result).then(
+          function () { resolve(req.result); },
+          function () { resolve(req.result); }
+        );
+      };
       req.onerror = function () { reject(req.error); };
     });
     return dbPromise;
@@ -68,7 +121,7 @@ window.BiliPureLocal = (function () {
     if (!window.showOpenFilePicker) return null; // 回退到 input[type=file]
     var handles = await window.showOpenFilePicker({
       multiple: true,
-      id: 'bilipure-local',
+      id: 'bilinest-local',
       types: [
         {
           description: '视频文件',

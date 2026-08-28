@@ -1,5 +1,5 @@
 ﻿<#
-  BiliPure —— 生成应用图标 public/icon.ico
+  BiliNest —— 生成应用图标 public/icon.ico
   ------------------------------------------------------------
   生成标准双条目 ICO：
     - 32x32 无压缩 DIB（小图标 / 列表视图）
@@ -25,7 +25,7 @@ function New-RoundPath([float]$x, [float]$y, [float]$w, [float]$h, [float]$r) {
   return $p
 }
 
-function Draw-Bilipure([int]$size) {
+function Draw-Bilinest([int]$size) {
   $bmp = New-Object System.Drawing.Bitmap $size, $size
   $g = [System.Drawing.Graphics]::FromImage($bmp)
   $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
@@ -59,7 +59,7 @@ function Draw-Bilipure([int]$size) {
 }
 
 # ---------- 32x32 DIB 条目 ----------
-$small = Draw-Bilipure 32
+$small = Draw-Bilinest 32
 $rect = New-Object System.Drawing.Rectangle 0, 0, 32, 32
 $bmpData = $small.LockBits($rect, [System.Drawing.Imaging.ImageLockMode]::ReadOnly, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
 $stride = $bmpData.Stride
@@ -89,7 +89,7 @@ $smallBytes = $smallMs.ToArray()
 $small.Dispose()
 
 # ---------- 256x256 PNG 条目 ----------
-$large = Draw-Bilipure 256
+$large = Draw-Bilinest 256
 $enc = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq 'image/png' }
 $large.Save($outPng, $enc, $null)          # 预览图
 $pngMs = New-Object System.IO.MemoryStream

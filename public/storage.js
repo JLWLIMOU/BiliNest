@@ -1,16 +1,19 @@
 /**
- * BiliPure 本地状态管理
+ * BiliNest 本地状态管理
  * ------------------------------------------------------------
- * 持久化到 localStorage（键：bilipure.state.v1），结构见 DEFAULTS。
+ * 持久化到 localStorage（键：bilinest.state.v1），结构见 DEFAULTS。
  * 安全说明：
  *   - Cookie 仅在用户勾选“保存到本地”时才写入 localStorage；
  *   - 勾选“仅本次会话”时 Cookie 只保存在内存，刷新页面即失效；
  *   - 清除数据按钮会移除所有本地状态。
  */
-window.BiliPureStore = (function () {
+window.BiliNestStore = (function () {
   'use strict';
 
-  var STORAGE_KEY = 'bilipure.state.v1';
+  var STORAGE_KEY = 'bilinest.state.v1';
+  // 旧版本（BiliPure）使用的存储键：改名后首次打开自动迁移，
+  // 避免登录态 / 收藏夹 / 观看记录等本地数据丢失
+  var LEGACY_STORAGE_KEY = 'bilipure.state.v1';
 
   var DEFAULTS = {
     v: 1,
@@ -39,6 +42,17 @@ window.BiliPureStore = (function () {
       if (raw && raw.v === 1) return Object.assign({}, DEFAULTS, raw);
     } catch (e) {
       /* 数据损坏时回退默认值 */
+    }
+    // 兼容旧键：一次性迁移到新键并删除旧键
+    try {
+      var legacy = JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEY) || 'null');
+      if (legacy && legacy.v === 1) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(legacy));
+        localStorage.removeItem(LEGACY_STORAGE_KEY);
+        return Object.assign({}, DEFAULTS, legacy);
+      }
+    } catch (e) {
+      /* 旧数据损坏则忽略 */
     }
     return Object.assign({}, DEFAULTS);
   }
@@ -91,6 +105,7 @@ window.BiliPureStore = (function () {
       state = Object.assign({}, DEFAULTS);
       try {
         localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(LEGACY_STORAGE_KEY);
       } catch (e) {
         /* ignore */
       }

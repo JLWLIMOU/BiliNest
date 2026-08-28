@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# BiliPure 启动脚本（macOS / Linux）
+# BiliNest 启动脚本（macOS / Linux）
 # 启动本地代理（server.mjs），并在默认浏览器打开应用。
-# 若默认端口 4173 被占用，server.mjs 会自动顺延端口并写入 bilipure.port，
+# 若默认端口 4173 被占用，server.mjs 会自动顺延端口并写入 bilinest.port，
 # 本脚本读取实际端口后再打开浏览器。
 # 用法：  ./start.sh
 set -e
@@ -15,7 +15,7 @@ if ! command -v node >/dev/null 2>&1; then
 fi
 
 # 启动前清掉旧的端口文件，避免读到上一次运行残留
-PORT_FILE="bilipure.port"
+PORT_FILE="bilinest.port"
 DEF_PORT=4173
 URL=""
 rm -f "$PORT_FILE"
@@ -48,5 +48,5 @@ else
   echo "请手动在浏览器打开 $URL"
 fi
 
-echo "BiliPure 本地服务已启动（$URL，PID $SERVER_PID）。按 Ctrl+C 停止。"
+echo "BiliNest 本地服务已启动（$URL，PID $SERVER_PID）。按 Ctrl+C 停止。"
 wait "$SERVER_PID"

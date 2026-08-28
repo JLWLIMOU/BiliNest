@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>BiliPure · 登录完成</title>
+  <title>BiliNest · 登录完成</title>
   <style>
     body {
       font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
@@ -18,7 +18,7 @@
 </head>
 <body>
   <div class="box">
-    <h1>BiliPure</h1>
+    <h1>BiliNest</h1>
     <p id="msg">正在完成登录…</p>
   </div>
   <script>
@@ -33,9 +33,9 @@
             throw new Error((d && d.message) || '登录失败');
           }
           if (window.opener) {
-            window.opener.postMessage({ type: 'bilipure-oauth', sid: d.data.sid }, '*');
+            window.opener.postMessage({ type: 'bilinest-oauth', sid: d.data.sid }, '*');
           }
-          msg.textContent = '登录成功，请回到 BiliPure 窗口继续使用。';
+          msg.textContent = '登录成功，请回到 BiliNest 窗口继续使用。';
           setTimeout(function () { window.close(); }, 800);
         })
         .catch(function (e) {

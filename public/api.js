@@ -1,12 +1,12 @@
 /**
- * BiliPure API 客户端
+ * BiliNest API 客户端
  * ------------------------------------------------------------
  * 设计：
  *   - 优先通过本地代理（同源 /api/bili/* 或 http://127.0.0.1:4173）访问 B 站接口，
  *     彻底规避浏览器 CORS 限制，且凭据只发给本机服务，不发给任何第三方；
  *   - 未检测到代理时回退为直连 api.bilibili.com（通常会被 CORS 拦截，仅作兜底）。
  */
-window.BiliPureAPI = (function () {
+window.BiliNestAPI = (function () {
   'use strict';
 
   var DEFAULT_BACKEND = 'http://127.0.0.1:4173';
@@ -36,14 +36,14 @@ window.BiliPureAPI = (function () {
         var res = await fetch(base + '/api/health', { signal: ctrl.signal });
         clearTimeout(timer);
         if (res.ok) {
-          // 校验响应确实是 BiliPure（防止端口被其它程序占用时误连）
+          // 校验响应确实是 BiliNest（防止端口被其它程序占用时误连）
           var info = null;
           try {
             info = await res.json();
           } catch (e) {
             /* 非 JSON 视为不匹配 */
           }
-          if (!info || info.app !== 'bilipure') continue;
+          if (!info || info.app !== 'bilinest') continue;
           backendBase = base;
           backendInfo = info;
           return {
@@ -80,7 +80,7 @@ window.BiliPureAPI = (function () {
     var headers = {};
     var creds = opts.creds || {};
     if (creds.cookie) headers['X-Bili-Cookie'] = creds.cookie;
-    if (creds.sid) headers['X-Bilipure-Sid'] = creds.sid;
+    if (creds.sid) headers['X-Bilinest-Sid'] = creds.sid;
 
     var res;
     try {
@@ -215,7 +215,7 @@ window.BiliPureAPI = (function () {
     var headers = {};
     var c = creds || {};
     if (c.cookie) headers['X-Bili-Cookie'] = c.cookie;
-    if (c.sid) headers['X-Bilipure-Sid'] = c.sid;
+    if (c.sid) headers['X-Bilinest-Sid'] = c.sid;
     var res = await fetch(base + '/api/danmaku/segments?' + qs, { headers: headers });
     var json = null;
     try {
@@ -259,7 +259,7 @@ window.BiliPureAPI = (function () {
     var headers = {};
     var creds = opts.creds || {};
     if (creds.cookie) headers['X-Bili-Cookie'] = creds.cookie;
-    if (creds.sid) headers['X-Bilipure-Sid'] = creds.sid;
+    if (creds.sid) headers['X-Bilinest-Sid'] = creds.sid;
     var res = await fetch(url, { headers: headers });
     if (!res.ok) throw new Error('弹幕接口请求失败（HTTP ' + res.status + '）');
     return res.text();

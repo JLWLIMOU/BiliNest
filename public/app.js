@@ -1,5 +1,5 @@
 /**
- * BiliPure 主逻辑
+ * BiliNest 主逻辑
  * ------------------------------------------------------------
  * 职责：页面渲染、状态管理、收藏夹 / 自定义视频列表、
  *       官方嵌入播放器与本地视频播放、设置与登录、OAuth 回调。
@@ -12,9 +12,9 @@
 (function () {
   'use strict';
 
-  var store = window.BiliPureStore;
-  var api = window.BiliPureAPI;
-  var local = window.BiliPureLocal;
+  var store = window.BiliNestStore;
+  var api = window.BiliNestAPI;
+  var local = window.BiliNestLocal;
 
   /* ---------------- DOM ---------------- */
   var els = {
@@ -952,7 +952,7 @@
 
   function saveProgressNow(force) {
     var ctx = state.progressCtx;
-    var v = window.BiliPurePlayer ? BiliPurePlayer.getVideo() : null;
+    var v = window.BiliNestPlayer ? BiliNestPlayer.getVideo() : null;
     if (!ctx || !v || !v.duration || isNaN(v.currentTime)) return;
     if (v.ended) return; // 已结束的由 markFinished 处理（写 progress 0），这里不覆盖
     var now = Date.now();
@@ -979,7 +979,7 @@
 
   function markFinished() {
     var ctx = state.progressCtx;
-    var v = window.BiliPurePlayer ? BiliPurePlayer.getVideo() : null;
+    var v = window.BiliNestPlayer ? BiliNestPlayer.getVideo() : null;
     if (!ctx) return;
     progressLastSave = Date.now();
     var finishedAt = Date.now();
@@ -1435,7 +1435,7 @@
 
     if (v.kind === 'local') {
       // 本地视频：复用 ArtPlayer 内核（无弹幕/清晰度），支持自动续播
-      BiliPurePlayer.stop();
+      BiliNestPlayer.stop();
       els.biliFrame.hidden = true;
       var url = local.getUrl(v.id);
       if (!url) {
@@ -1453,7 +1453,7 @@
         rec && rec.progress >= 10 && (!rec.duration || rec.progress < rec.duration - 10)
           ? rec.progress
           : 0;
-      BiliPurePlayer.loadLocal(url, resumeSec);
+      BiliNestPlayer.loadLocal(url, resumeSec);
       return;
     }
 
@@ -1506,12 +1506,12 @@
         ? rec.progress
         : 0;
     try {
-      await BiliPurePlayer.load(bvid, cid, resumeSec, {
+      await BiliNestPlayer.load(bvid, cid, resumeSec, {
         poster: (av.cover || av.pic || '').replace(/^http:\/\//i, 'https://')
       });
     } catch (e) {
       // 降级：官方嵌入播放器
-      BiliPurePlayer.stop();
+      BiliNestPlayer.stop();
       els.biliFrame.hidden = false;
       els.biliFrame.src = buildPlayerUrl(bvid, cid, page);
       toast('播放地址服务暂不可用（' + e.message + '），已切换官方播放器', 'error');
@@ -1690,16 +1690,16 @@
 
   /** 根据选集列表更新播放器里的上一集 / 下一集按钮显隐 */
   function updateEpisodeNav() {
-    if (!window.BiliPurePlayer) return;
+    if (!window.BiliNestPlayer) return;
     var hasList = !!(state.episodes && state.episodes.length > 1);
     var idx = currentEpisodeIndex();
-    window.BiliPurePlayer.updateEpisodeNav({
+    window.BiliNestPlayer.updateEpisodeNav({
       visible: hasList && idx >= 0,
       prev: hasList && idx > 0,
       next: hasList && idx >= 0 && idx < state.episodes.length - 1
     });
     // 播放结束浮层：仅列表（多 P / 合集）视频显示；最后一集只显示“重温”
-    window.BiliPurePlayer.setEndNav({
+    window.BiliNestPlayer.setEndNav({
       show: hasList,
       next: hasList && idx >= 0 && idx < state.episodes.length - 1
     });
@@ -1772,7 +1772,7 @@
 
   function stopPlayer() {
     // 停止自研播放器
-    BiliPurePlayer.stop();
+    BiliNestPlayer.stop();
     // 重建 iframe 节点以彻底停止播放（避免 CSP 对 about:blank 的兼容问题）
     if (els.biliFrame && els.biliFrame.parentNode) {
       var fresh = makeBiliFrame();
@@ -2424,8 +2424,8 @@
           '<p class="muted small">清除本地数据不会影响 B 站账号；停止服务后，双击桌面快捷方式可重新启动。</p>' +
         '</section>' +
         '<section><h3>关于</h3>' +
-          '<p class="muted small">BiliPure 仅供个人学习使用。请遵守 B 站用户协议与 API 使用规范；本工具不会向任何第三方发送你的凭据。<br>播放器内核版本：' +
-            (window.BiliPurePlayer && window.BiliPurePlayer.VERSION ? 'v' + window.BiliPurePlayer.VERSION : '未知') +
+          '<p class="muted small">BiliNest 仅供个人学习使用。请遵守 B 站用户协议与 API 使用规范；本工具不会向任何第三方发送你的凭据。<br>播放器内核版本：' +
+            (window.BiliNestPlayer && window.BiliNestPlayer.VERSION ? 'v' + window.BiliNestPlayer.VERSION : '未知') +
             '（若低于 v3，请强制刷新页面 Ctrl+F5 后重试）</p>' +
           '<div class="row">' + guideBtn + '</div>' +
         '</section>' +
@@ -2455,7 +2455,7 @@
   /* ---------------- 首次启动 / 使用引导 ---------------- */
   function openQrLoginModal() {
     if (!state.backend || !state.backend.ok) {
-      toast('需要本地代理服务支持，请先通过桌面快捷方式启动 BiliPure', 'error');
+      toast('需要本地代理服务支持，请先通过桌面快捷方式启动 BiliNest', 'error');
       return;
     }
     openModal(
@@ -2663,7 +2663,7 @@
   }
 
   async function onShutdown() {
-    if (!window.confirm('确定停止本地 BiliPure 服务吗？停止后请双击桌面快捷方式重新启动。')) return;
+    if (!window.confirm('确定停止本地 BiliNest 服务吗？停止后请双击桌面快捷方式重新启动。')) return;
     var base = state.backend && state.backend.base ? state.backend.base : '';
     try {
       await fetch(base + '/api/shutdown');
@@ -2717,7 +2717,7 @@
 
   function onOAuth() {
     var base = state.backend ? state.backend.base : '';
-    window.open(base + '/api/oauth/login', 'bilipure-oauth', 'width=560,height=680,popup=yes');
+    window.open(base + '/api/oauth/login', 'bilinest-oauth', 'width=560,height=680,popup=yes');
   }
 
   async function onClearData() {
@@ -2866,12 +2866,12 @@
 
     // 观看进度记录（节流保存；暂停/结束/离开页面时立即保存）
     // 播放器内核（ArtPlayer）由 player.js 管理，进度事件通过自定义事件转发
-    window.addEventListener('bilipure-timeupdate', function () { saveProgressNow(false); });
-    window.addEventListener('bilipure-pause', function () { saveProgressNow(true); });
-    window.addEventListener('bilipure-ended', markFinished);
+    window.addEventListener('bilinest-timeupdate', function () { saveProgressNow(false); });
+    window.addEventListener('bilinest-pause', function () { saveProgressNow(true); });
+    window.addEventListener('bilinest-ended', markFinished);
     window.addEventListener('beforeunload', function () { saveProgressNow(true); });
     // B 站视频续播成功提示（由 player.js 触发）
-    window.addEventListener('bilipure-resumed', function (e) {
+    window.addEventListener('bilinest-resumed', function (e) {
       if (e.detail && e.detail.seconds) {
         toast('已从 ' + fmtDuration(e.detail.seconds) + ' 继续播放');
       }
@@ -2973,7 +2973,7 @@
 
   function onOAuthMessage(e) {
     var data = e.data;
-    if (!data || data.type !== 'bilipure-oauth' || !data.sid) return;
+    if (!data || data.type !== 'bilinest-oauth' || !data.sid) return;
     var expected = state.backend && state.backend.base ? state.backend.base : location.origin;
     if (expected && expected !== 'null' && e.origin !== expected) {
       toast('OAuth 回调来源异常，已忽略', 'error');
@@ -3042,10 +3042,10 @@
     backfillOrphanSeries().catch(function () { /* 静默 */ });
     bindEvents();
     // 自研播放器错误提示接入应用的 toast
-    if (window.BiliPurePlayer) {
-      BiliPurePlayer.setErrorHandler(function (msg, type, duration) { toast(msg, type, duration); });
+    if (window.BiliNestPlayer) {
+      BiliNestPlayer.setErrorHandler(function (msg, type, duration) { toast(msg, type, duration); });
       // 播放器控制条“上一集 / 下一集”按钮
-      BiliPurePlayer.setEpisodeNavHandler(function (dir) {
+      BiliNestPlayer.setEpisodeNavHandler(function (dir) {
         var idx = currentEpisodeIndex();
         if (idx < 0) return;
         var target = dir === 'prev' ? idx - 1 : idx + 1;
@@ -3053,8 +3053,8 @@
       });
       // 播放器穷尽重试/备用/换清晰度后仍失败（如该集文件在 CDN 缺失），
       // 自动切换到官方嵌入播放器兜底（官方走 DASH，通常可播）。
-      BiliPurePlayer.setFallbackHandler(function (bvid, cid) {
-        BiliPurePlayer.stop();
+      BiliNestPlayer.setFallbackHandler(function (bvid, cid) {
+        BiliNestPlayer.stop();
         var page = (state.activeEpisode && state.activeEpisode.page) || 1;
         els.biliFrame.hidden = false;
         els.biliFrame.src = buildPlayerUrl(bvid, cid, page);

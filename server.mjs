@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * BiliPure —— 本地代理服务器
+ * BiliNest —— 本地代理服务器
  * ------------------------------------------------------------------
  * 职责：
  *   1. 托管 public/ 目录下的前端静态页面（零第三方依赖，Node.js 18+ 即可运行）；
@@ -28,18 +28,18 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, 'public');
-const LOG_FILE = path.join(__dirname, 'bilipure.log');
-const PORT_FILE = path.join(__dirname, 'bilipure.port');
+const LOG_FILE = path.join(__dirname, 'bilinest.log');
+const PORT_FILE = path.join(__dirname, 'bilinest.port');
 
 // ---------- 基础配置（全部来自环境变量，不硬编码任何敏感信息） ----------
-const HOST = process.env.BILIPURE_HOST || '127.0.0.1';
-const PORT = Number(process.env.BILIPURE_PORT || 4173);
+const HOST = process.env.BILINEST_HOST || '127.0.0.1';
+const PORT = Number(process.env.BILINEST_PORT || 4173);
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 const BILI_REFERER = 'https://www.bilibili.com/';
 
 /* ------------------------------------------------------------------
- * 日志：同时输出到控制台与 bilipure.log（便于排查扫码登录等问题）
+ * 日志：同时输出到控制台与 bilinest.log（便于排查扫码登录等问题）
  * ------------------------------------------------------------------ */
 function log(...args) {
   const line = `[${new Date().toLocaleString('zh-CN', { hour12: false })}] ${args.join(' ')}`;
@@ -55,7 +55,7 @@ function log(...args) {
 }
 
 /* ------------------------------------------------------------------
- * 端口文件：把实际监听的端口写成纯数字文本（bilipure.port），
+ * 端口文件：把实际监听的端口写成纯数字文本（bilinest.port），
  * 供 launcher.vbs / start.sh 打开正确地址（默认端口被占用时会顺延）。
  * ------------------------------------------------------------------ */
 function writePortFile(port) {
@@ -710,11 +710,11 @@ async function wbiSignQuery(params) {
  *    access_token 通过 access_key 参数访问 B 站 APP 鉴权接口。
  * ------------------------------------------------------------------ */
 const oauth = {
-  clientId: process.env.BILIPURE_OAUTH_CLIENT_ID || '',
-  clientSecret: process.env.BILIPURE_OAUTH_CLIENT_SECRET || '',
+  clientId: process.env.BILINEST_OAUTH_CLIENT_ID || '',
+  clientSecret: process.env.BILINEST_OAUTH_CLIENT_SECRET || '',
   // 默认回调地址在端口确定后再填充（端口被占用顺延时必须跟着走），
-  // 也可用 BILIPURE_OAUTH_REDIRECT_URI 显式覆盖。
-  redirectUri: process.env.BILIPURE_OAUTH_REDIRECT_URI || '',
+  // 也可用 BILINEST_OAUTH_REDIRECT_URI 显式覆盖。
+  redirectUri: process.env.BILINEST_OAUTH_REDIRECT_URI || '',
 };
 oauth.enabled = Boolean(oauth.clientId && oauth.clientSecret);
 
@@ -766,7 +766,7 @@ function corsHeaders() {
   return {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, OPTIONS',
-    'Access-Control-Allow-Headers': 'X-Bili-Cookie, X-Bili-Access-Key, X-Bilipure-Sid, Content-Type',
+    'Access-Control-Allow-Headers': 'X-Bili-Cookie, X-Bili-Access-Key, X-Bilinest-Sid, Content-Type',
     'Access-Control-Max-Age': '86400',
   };
 }
@@ -797,9 +797,9 @@ function escHtml(s) {
 }
 
 function sendHtml(res, status, message) {
-  const html = `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>BiliPure</title>
+  const html = `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>BiliNest</title>
 <body style="font-family:system-ui,sans-serif;max-width:520px;margin:80px auto;line-height:1.7">
-<h2>BiliPure</h2><p>${escHtml(message)}</p>
+<h2>BiliNest</h2><p>${escHtml(message)}</p>
 <p><a href="/">返回应用</a></p></body></html>`;
   res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
   res.end(html);
@@ -857,7 +857,7 @@ async function proxyBiliApi(req, res, url) {
   // 凭据来源：请求头（浏览器端 localStorage 中的 Cookie）或 OAuth 会话
   const cookie = String(req.headers['x-bili-cookie'] || '');
   let accessKey = String(req.headers['x-bili-access-key'] || '');
-  const sid = String(req.headers['x-bilipure-sid'] || '');
+  const sid = String(req.headers['x-bilinest-sid'] || '');
   if (sid) {
     const token = await resolveOauthToken(sid);
     if (token) {
@@ -941,7 +941,7 @@ function handleOAuthLogin(res) {
   if (!oauth.enabled) {
     return sendJson(res, 503, {
       code: -503,
-      message: '未配置 OAuth 应用凭证（BILIPURE_OAUTH_CLIENT_ID / BILIPURE_OAUTH_CLIENT_SECRET）',
+      message: '未配置 OAuth 应用凭证（BILINEST_OAUTH_CLIENT_ID / BILINEST_OAUTH_CLIENT_SECRET）',
     });
   }
   const state = crypto.randomBytes(16).toString('hex');
@@ -1065,7 +1065,7 @@ const server = http.createServer((req, res) => {
         return sendJson(res, 405, { code: -405, message: '仅支持 GET 请求' });
       }
       if (url.pathname === '/api/health') {
-        return sendJson(res, 200, { ok: true, app: 'bilipure', oauthEnabled: oauth.enabled, version: 1 });
+        return sendJson(res, 200, { ok: true, app: 'bilinest', oauthEnabled: oauth.enabled, version: 1 });
       }
       // 扫码登录：生成二维码 / 轮询扫码状态
       if (url.pathname === '/api/qr/generate') return await handleQrGenerate(res);
@@ -1082,7 +1082,7 @@ const server = http.createServer((req, res) => {
         if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host)) {
           return sendJson(res, 403, { code: -403, message: '仅允许本机调用' });
         }
-        sendJson(res, 200, { ok: true, message: 'BiliPure 服务已停止' });
+        sendJson(res, 200, { ok: true, message: 'BiliNest 服务已停止' });
         log('[server] shutdown requested, exiting…');
         setTimeout(() => {
           server.close();
@@ -1112,7 +1112,7 @@ const server = http.createServer((req, res) => {
  * 9.1 端口兜底启动
  *     默认监听 4173；若该端口已被其它进程（另一个 Node、Vite 预览、
  *     代理软件等）占用，自动顺延尝试 4174、4175 …（最多 50 个）。
- *     最终端口写入 bilipure.port，供启动脚本打开正确地址。
+ *     最终端口写入 bilinest.port，供启动脚本打开正确地址。
  * ------------------------------------------------------------------ */
 const PORT_TRIES = 50;
 

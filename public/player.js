@@ -1,5 +1,5 @@
 /**
- * BiliPure 播放器（ArtPlayer 内核）
+ * BiliNest 播放器（ArtPlayer 内核）
  * ------------------------------------------------------------
  * 之前直接使用浏览器原生 <video controls>，存在两个无法绕开的问题：
  *   1. 原生全屏只全屏 video 元素，弹幕画布、字幕层、音量提示等自定义浮层
@@ -13,11 +13,11 @@
  *   - 双击全屏、单击播放/暂停由 ArtPlayer 内置行为接管。
  * 官方嵌入播放器 iframe 仍保留，仅作为播放地址获取失败时的降级方案。
  */
-window.BiliPurePlayer = (function () {
+window.BiliNestPlayer = (function () {
   'use strict';
 
-  var store = window.BiliPureStore;
-  var api = window.BiliPureAPI;
+  var store = window.BiliNestStore;
+  var api = window.BiliNestAPI;
 
   var els = {
     player: document.getElementById('customPlayer'),
@@ -114,7 +114,7 @@ window.BiliPurePlayer = (function () {
     }
 
     var art = new window.Artplayer({
-      id: 'bilipure',
+      id: 'bilinest',
       container: els.player,
       url: '',
       type: 'mp4',
@@ -177,7 +177,7 @@ window.BiliPurePlayer = (function () {
           name: 'prev',
           position: 'right',
           index: 3,
-          html: '<span class="bilipure-ctl nav">‹</span>',
+          html: '<span class="bilinest-ctl nav">‹</span>',
           tooltip: '上一集',
           click: function () { if (state.episodeNavHandler) state.episodeNavHandler('prev'); }
         },
@@ -185,7 +185,7 @@ window.BiliPurePlayer = (function () {
           name: 'next',
           position: 'right',
           index: 4,
-          html: '<span class="bilipure-ctl nav">›</span>',
+          html: '<span class="bilinest-ctl nav">›</span>',
           tooltip: '下一集',
           click: function () { if (state.episodeNavHandler) state.episodeNavHandler('next'); }
         },
@@ -193,7 +193,7 @@ window.BiliPurePlayer = (function () {
           name: 'danmaku',
           position: 'right',
           index: 5,
-          html: '<span class="bilipure-ctl">弹幕</span>',
+          html: '<span class="bilinest-ctl">弹幕</span>',
           tooltip: '弹幕开关',
           click: function () { toggleDanmaku(); }
         },
@@ -201,7 +201,7 @@ window.BiliPurePlayer = (function () {
           name: 'subtitle',
           position: 'right',
           index: 12,
-          html: '<span class="bilipure-ctl">字幕</span>',
+          html: '<span class="bilinest-ctl">字幕</span>',
           tooltip: '字幕开关',
           click: function () { toggleSubtitle(); }
         },
@@ -210,7 +210,7 @@ window.BiliPurePlayer = (function () {
           position: 'right',
           index: 13,
           html:
-            '<span class="bilipure-ctl subpos-wrap">' +
+            '<span class="bilinest-ctl subpos-wrap">' +
               '位置<input type="range" class="subpos-slider" min="0" max="100" step="1" value="' +
               Math.round(state.subSettings.pos) + '" aria-label="字幕位置微调">' +
             '</span>',
@@ -220,7 +220,7 @@ window.BiliPurePlayer = (function () {
           name: 'subsize',
           position: 'right',
           index: 14,
-          html: '<span class="bilipure-ctl">字号</span>',
+          html: '<span class="bilinest-ctl">字号</span>',
           selector: [],
           onSelect: function (item) { return selectSubSize(item); }
         },
@@ -228,7 +228,7 @@ window.BiliPurePlayer = (function () {
           name: 'quality',
           position: 'right',
           index: 10,
-          html: '<span class="bilipure-ctl">清晰度</span>',
+          html: '<span class="bilinest-ctl">清晰度</span>',
           selector: [],
           onSelect: function (item) { return selectQuality(item); }
         }
@@ -273,7 +273,7 @@ window.BiliPurePlayer = (function () {
       // 暂停时冻结弹幕：保留画布最后一帧，方便阅读（播放时继续滚动）
       freezeRender();
       updateSubtitle(); // 暂停时也按当前时间刷新字幕，避免停留在上一句的空白间隙
-      window.dispatchEvent(new CustomEvent('bilipure-pause'));
+      window.dispatchEvent(new CustomEvent('bilinest-pause'));
     });
     art.on('video:seeked', function () {
       updateSubtitle(); // 拖动进度后立即刷新字幕
@@ -283,7 +283,7 @@ window.BiliPurePlayer = (function () {
     art.on('video:ended', function () {
       state.playing = false;
       stopRender();
-      window.dispatchEvent(new CustomEvent('bilipure-ended'));
+      window.dispatchEvent(new CustomEvent('bilinest-ended'));
       showEndOverlay();
     });
     art.on('video:seeking', function () {
@@ -299,7 +299,7 @@ window.BiliPurePlayer = (function () {
     art.on('video:timeupdate', function () {
       updateSubtitle();
       // 交给应用层做观看进度节流保存
-      window.dispatchEvent(new CustomEvent('bilipure-timeupdate', {
+      window.dispatchEvent(new CustomEvent('bilinest-timeupdate', {
         detail: { currentTime: art.currentTime, duration: art.duration }
       }));
     });
@@ -316,7 +316,7 @@ window.BiliPurePlayer = (function () {
         state.resumePoint = 0;
         try { art.currentTime = sec; } catch (e) { /* 跳转失败忽略 */ }
         art.play().catch(function () { /* 自动播放可能被浏览器拦截 */ });
-        window.dispatchEvent(new CustomEvent('bilipure-resumed', {
+        window.dispatchEvent(new CustomEvent('bilinest-resumed', {
           detail: { seconds: sec }
         }));
       } else {
@@ -489,7 +489,7 @@ window.BiliPurePlayer = (function () {
       return;
     }
 
-    console.warn('[BiliPure] 视频加载失败', {
+    console.warn('[BiliNest] 视频加载失败', {
       code: code,
       host: host,
       urlIdx: state.urlIdx,
@@ -764,7 +764,7 @@ window.BiliPurePlayer = (function () {
       name: 'quality',
       position: 'right',
       index: 10,
-      html: '<span class="bilipure-ctl">' + esc(currentQualityLabel()) + '</span>',
+      html: '<span class="bilinest-ctl">' + esc(currentQualityLabel()) + '</span>',
       selector: items,
       onSelect: function (item) { return selectQuality(item); }
     });
@@ -809,7 +809,7 @@ window.BiliPurePlayer = (function () {
     if (!art) return;
     var el = art.controls.danmaku;
     if (!el) return;
-    var span = el.querySelector('.bilipure-ctl');
+    var span = el.querySelector('.bilinest-ctl');
     if (span) span.classList.toggle('off', !state.danmakuOn);
   }
 
@@ -1137,7 +1137,7 @@ window.BiliPurePlayer = (function () {
       name: 'subsize',
       position: 'right',
       index: 14,
-      html: '<span class="bilipure-ctl">字号·' + esc(subSizeLabel(state.subSettings.size)) + '</span>',
+      html: '<span class="bilinest-ctl">字号·' + esc(subSizeLabel(state.subSettings.size)) + '</span>',
       selector: sizeItems,
       onSelect: function (item) { return selectSubSize(item); }
     });
@@ -1170,7 +1170,7 @@ window.BiliPurePlayer = (function () {
     if (!art) return;
     var el = art.controls.subtitle;
     if (!el) return;
-    var span = el.querySelector('.bilipure-ctl');
+    var span = el.querySelector('.bilinest-ctl');
     if (!span) return;
     if (!state.subtitleBody.length) {
       state.subtitleOn = false;
@@ -1187,7 +1187,7 @@ window.BiliPurePlayer = (function () {
     ['subpos', 'subsize'].forEach(function (name) {
       var ctl = art.controls[name];
       if (!ctl) return;
-      var cSpan = ctl.querySelector('.bilipure-ctl');
+      var cSpan = ctl.querySelector('.bilinest-ctl');
       if (!cSpan) return;
       cSpan.classList.toggle('disabled', !state.subtitleBody.length);
       var slider = ctl.querySelector('.subpos-slider');

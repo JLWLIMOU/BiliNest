@@ -1,4 +1,6 @@
-# BiliPure · 无干扰 B 站学习播放器
+# BiliNest · 无干扰 B 站学习播放器
+
+> B 站小窝：窝在里面安安静静看课，外面的推荐、广告、争吵都跟你无关。
 
 [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](https://nodejs.org)
 [![License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
@@ -17,21 +19,21 @@
 - **进度总丢**：多 P / 合集看到哪集、哪一分，下次打开全忘了，从头再来。
 - **第三方工具不放心**：要么要把 Cookie 交给别人，要么只是换皮播放器——画质一高就跳回官网。
 
-BiliPure 的思路很简单：**只把你指定的内容留下来，其它的全删掉**。没有推荐、没有评论、没有动态；登录态只存在你自己的浏览器里，播放地址走本机代理获取，画质切换在页面内完成，永不跳官网。
+BiliNest 的思路很简单：**只把你指定的内容留下来，其它的全删掉**。没有推荐、没有评论、没有动态；登录态只存在你自己的浏览器里，播放地址走本机代理获取，画质切换在页面内完成，永不跳官网。
 
 ---
 
 ## English
 
-**BiliPure** is a minimal, distraction-free Bilibili study player. It shows only the content you choose — a specific favorite folder, manually added videos, or local files — with **no home feed, no recommendations, no comments, no like/coin/favorite buttons, no notifications**. Playback, danmaku and CC subtitles all happen inside the page; quality switching never leaves the app.
+**BiliNest** is a minimal, distraction-free Bilibili study player. It shows only the content you choose — a specific favorite folder, manually added videos, or local files — with **no home feed, no recommendations, no comments, no like/coin/favorite buttons, no notifications**. Playback, danmaku and CC subtitles all happen inside the page; quality switching never leaves the app.
 
 - **Local-first & private**: a tiny zero-dependency Node proxy on `127.0.0.1` forwards only whitelisted read-only Bilibili APIs. Your credentials stay in your own browser; requests never touch any third party.
 - **Zero install of dependencies**: pure Node 18+ built-ins + static frontend, no `npm install` needed.
 - **Cross-platform**: works on Windows, macOS and Linux.
 
-### Why BiliPure?
+### Why BiliNest?
 
-Bilibili is great for studying, but its home feed, comments and recommendations are engineered to keep you scrolling. BiliPure strips all of that away: you pick exactly what to watch (a folder, a few videos, or local files), and the app remembers your progress across multi-part series — so you actually finish what you start.
+Bilibili is great for studying, but its home feed, comments and recommendations are engineered to keep you scrolling. BiliNest strips all of that away: you pick exactly what to watch (a folder, a few videos, or local files), and the app remembers your progress across multi-part series — so you actually finish what you start.
 
 ### Quick start
 
@@ -78,7 +80,7 @@ See the Chinese section below for login methods, usage and the full feature list
 
 ### 第二步：获取本程序
 - 方式 A（推荐）：到本仓库右侧 **Releases** 页面，下载 `Source code (zip)` 并解压；
-- 方式 B：已装 git 则执行 `git clone https://github.com/JLWLIMOU/bilipure.git`。
+- 方式 B：已装 git 则执行 `git clone https://github.com/JLWLIMOU/BiliNest.git`。
 
 ### 第三步：启动
 - **Windows**：进入文件夹，**双击 `launcher.vbs`**（自动起服务并打开浏览器，无黑窗口）；
@@ -88,7 +90,7 @@ See the Chinese section below for login methods, usage and the full feature list
 启动后浏览器会自动打开 **http://127.0.0.1:4173**；若没自动打开，手动访问该地址即可。
 
 > **端口占用自动顺延**：若 4173 已被其它程序（另一个 Node 进程、Vite 预览、代理软件等）占用，
-> 服务不会启动失败，而是自动顺延到 4174、4175 …（最多 50 个）并写入 `bilipure.port`；
+> 服务不会启动失败，而是自动顺延到 4174、4175 …（最多 50 个）并写入 `bilinest.port`；
 > `launcher.vbs` / `start.sh` 会读取该文件自动打开**实际端口**。
 > 用 `npm start` 手动启动时，日志会打印实际地址，例如
 > `server started at http://127.0.0.1:4174（4173 被占用，已自动顺延）`。
@@ -104,7 +106,7 @@ See the Chinese section below for login methods, usage and the full feature list
 powershell -ExecutionPolicy Bypass -File create-shortcut.ps1
 ```
 
-会在桌面生成 **BiliPure.lnk**，双击即可一键启动。停止服务：应用内「设置 → 停止本地服务」，或结束 `node` 进程。
+会在桌面生成 **BiliNest.lnk**，双击即可一键启动。停止服务：应用内「设置 → 停止本地服务」，或结束 `node` 进程。
 
 ### 直接用 `index.html` 打开（不推荐）
 
@@ -126,7 +128,7 @@ powershell -ExecutionPolicy Bypass -File create-shortcut.ps1
 
 1. 在浏览器登录 [bilibili.com](https://www.bilibili.com)；
 2. 按 `F12` → `Application` → `Cookies` → `https://www.bilibili.com`，复制 `SESSDATA`（或整段 Cookie）；
-3. 回到 BiliPure，「设置」→ 粘贴 →「保存并验证」。
+3. 回到 BiliNest，「设置」→ 粘贴 →「保存并验证」。
 
 > Cookie 等同于账号凭证，**不要发给任何人**；建议仅个人设备勾选“保存到本地”。
 
@@ -139,7 +141,7 @@ powershell -ExecutionPolicy Bypass -File create-shortcut.ps1
 node --env-file=.env server.mjs
 ```
 
-需要配置 `BILIPURE_OAUTH_CLIENT_ID`、`BILIPURE_OAUTH_CLIENT_SECRET`、`BILIPURE_OAUTH_REDIRECT_URI=http://127.0.0.1:4173/api/oauth/callback`。重启后「设置」中出现「使用 B 站 OAuth 登录」。
+需要配置 `BILINEST_OAUTH_CLIENT_ID`、`BILINEST_OAUTH_CLIENT_SECRET`、`BILINEST_OAUTH_REDIRECT_URI=http://127.0.0.1:4173/api/oauth/callback`。重启后「设置」中出现「使用 B 站 OAuth 登录」。
 注意：若 4173 被占用而端口顺延，**未显式配置**回调地址时会自动跟随实际端口；若显式配置了固定回调地址，则需与顺延后的端口保持一致，否则 OAuth 回调会失败。
 
 ---
@@ -147,7 +149,7 @@ node --env-file=.env server.mjs
 ## 使用说明
 
 0. **首次启动引导**：第一次打开自动弹出「使用引导」（含 SESSDATA 获取步骤、内容源选择、常见问题）；之后可在「设置 → 查看使用引导」再看。
-1. **主页**：默认进入仪表盘，从上到下为「继续学习 / 添加的视频 / 学习收藏夹」；点品牌名（BiliPure）返回主页。
+1. **主页**：默认进入仪表盘，从上到下为「继续学习 / 添加的视频 / 学习收藏夹」；点品牌名（BiliNest）返回主页。
 2. **添加学习内容**：点右上角「内容源」→ 收藏夹列表点「加入学习」（可打星）；收藏夹内某视频点封面右上角「+」加入学习列表；也可粘贴单个视频链接或选择本地视频。
 3. **观看**：点击视频卡片播放；多 P / 合集右侧有选集；进度自动记录，下次续播。
 4. **排序**：「添加的视频」与收藏夹列表支持按「添加时间 / 发布时间 / 星级 / 播放量」排序。
@@ -157,7 +159,7 @@ node --env-file=.env server.mjs
 ## 技术架构
 
 ```
-bilipure/
+bilinest/
 ├── package.json          # 零依赖，Node 18+
 ├── server.mjs            # 本地代理 + 静态托管 + 可选 OAuth
 ├── .env.example          # 环境变量模板（含敏感项，勿提交真实值）

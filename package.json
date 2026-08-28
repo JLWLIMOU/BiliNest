@@ -1,7 +1,7 @@
 {
-  "name": "bilipure",
+  "name": "bilinest",
   "version": "1.0.0",
-  "description": "BiliPure —— 无干扰 B 站学习播放器（零依赖本地代理 + 纯前端）",
+  "description": "BiliNest —— 无干扰 B 站学习播放器（零依赖本地代理 + 纯前端）",
   "private": true,
   "type": "module",
   "scripts": {

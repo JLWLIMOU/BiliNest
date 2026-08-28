@@ -1,16 +1,16 @@
 ' ============================================================
-' BiliPure Launcher
+' BiliNest Launcher
 ' ------------------------------------------------------------
 ' 1. Check whether the local proxy is already running;
 ' 2. If not, start "node server.mjs" in a hidden window;
 ' 3. Wait until the service is ready, then open the browser.
 ' 若默认端口 4173 被其它程序占用，server.mjs 会自动顺延到下一个
-' 空闲端口，并把最终端口写入 bilipure.port，本脚本据此打开正确地址。
+' 空闲端口，并把最终端口写入 bilinest.port，本脚本据此打开正确地址。
 ' ============================================================
 Option Explicit
 
 Const DEF_PORT = 4173
-Const PORT_FILE = "bilipure.port"
+Const PORT_FILE = "bilinest.port"
 Const MAX_WAIT = 40   ' 40 x 500ms = 最多等待 20 秒
 
 Dim fso, scriptDir, shell
@@ -25,7 +25,7 @@ If HealthOk(DEF_PORT) Then
   WScript.Quit
 End If
 
-' 2) 上次运行顺延过端口？若该端口上确实是 BiliPure，直接打开
+' 2) 上次运行顺延过端口？若该端口上确实是 BiliNest，直接打开
 Dim lastPort
 lastPort = ReadPortFile()
 If lastPort > 0 And lastPort <> DEF_PORT Then
@@ -69,7 +69,7 @@ End If
 WScript.Quit
 
 ' ------------------------------------------------------------
-' 读取 bilipure.port（纯数字文本），失败返回 0
+' 读取 bilinest.port（纯数字文本），失败返回 0
 ' ------------------------------------------------------------
 Function ReadPortFile()
   On Error Resume Next
@@ -86,7 +86,7 @@ Function ReadPortFile()
 End Function
 
 ' ------------------------------------------------------------
-' 健康检查：确认 /api/health 返回且响应里确实有 "bilipure"
+' 健康检查：确认 /api/health 返回且响应里确实有 "bilinest"
 ' （防止 4173 被别的程序占用时，误打开别人的页面）
 ' ------------------------------------------------------------
 Function HealthOk(port)
@@ -97,7 +97,7 @@ Function HealthOk(port)
     xml.Open "GET", "http://127.0.0.1:" & port & "/api/health", False
     xml.setTimeouts 800, 800, 800, 2000
     xml.Send
-    HealthOk = (xml.Status = 200) And (InStr(xml.responseText, "bilipure") > 0)
+    HealthOk = (xml.Status = 200) And (InStr(xml.responseText, "bilinest") > 0)
     Set xml = Nothing
   Else
     HealthOk = False
@@ -106,7 +106,7 @@ Function HealthOk(port)
 End Function
 
 ' ------------------------------------------------------------
-' 打开 BiliPure
+' 打开 BiliNest
 ' ------------------------------------------------------------
 Sub OpenBrowser(port)
   Dim s

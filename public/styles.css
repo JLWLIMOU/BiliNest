@@ -1,5 +1,5 @@
 /* ==================================================================
-   BiliPure 样式 —— 极简、干净，类似 Notion / Apple 风格
+   BiliNest 样式 —— 极简、干净，类似 Notion / Apple 风格
    结构：设计令牌 -> 基础元素 -> 顶栏 -> 卡片网格 -> 播放页 -> 弹窗
    ================================================================== */
 
@@ -659,7 +659,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
 .subtitle-box.sub-size-xl { font-size: clamp(22px, 3.4vw, 38px); }
 
 /* 控制条内的字幕位置滑块（底部区域微调） */
-.bilipure-ctl.subpos-wrap {
+.bilinest-ctl.subpos-wrap {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -675,7 +675,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
 .subpos-slider:disabled { cursor: default; }
 
 /* ArtPlayer 控制条内的自定义文本控件（弹幕 / 字幕 / 清晰度） */
-.bilipure-ctl {
+.bilinest-ctl {
   display: inline-block;
   padding: 4px 9px;
   border-radius: 6px;
@@ -688,14 +688,14 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
   cursor: pointer;
   transition: background 0.15s ease, opacity 0.15s ease;
 }
-.bilipure-ctl:hover { background: rgba(255, 255, 255, 0.12); }
-.bilipure-ctl.off { opacity: 0.45; }
-.bilipure-ctl.disabled {
+.bilinest-ctl:hover { background: rgba(255, 255, 255, 0.12); }
+.bilinest-ctl.off { opacity: 0.45; }
+.bilinest-ctl.disabled {
   opacity: 0.3;
   cursor: default;
   pointer-events: none;
 }
-.bilipure-ctl.nav {
+.bilinest-ctl.nav {
   font-size: 17px;
   font-weight: 700;
   line-height: 1;
