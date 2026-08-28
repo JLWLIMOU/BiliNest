@@ -70,6 +70,7 @@ window.BiliNestPlayer = (function () {
     resumeTarget: 0,        // 期望续播点（秒），跨重试/恢复保持，直到真正到达才清零
     recovering: false,      // 处于“加载失败 → 自动恢复”过程中（此时不要回写进度）
     seekedResume: false,    // 本次加载是否已成功 seek 到续播点
+    reseekTries: 0,         // 续播 seek 已尝试次数（防止深 seek 失败导致重试死循环）
     playurlAt: 0,           // 上次成功获取播放地址的时间戳（用于判断签名是否过期）
     errorHandler: null,
     urlSwitching: false,    // 重试/切换中，避免 video:error 重复触发
@@ -321,6 +322,13 @@ window.BiliNestPlayer = (function () {
     art.on('video:loadedmetadata', function () {
       // 自动从上次观看进度续播（跨重试保持：只要尚未成功 seek，就重新跳转）
       if (state.resumeTarget > 10 && !state.seekedResume) {
+        if (state.reseekTries >= 5) {
+          // 续播多次失败，放弃续播、从开头播放，避免“重载→seek→再报错”死循环
+          state.resumeTarget = 0;
+          art.play().catch(function () { /* 自动播放可能被浏览器拦截 */ });
+          return;
+        }
+        state.reseekTries++;
         var sec = state.resumeTarget;
         state.seekedResume = true;
         try { art.currentTime = sec; } catch (e) { /* 跳转失败忽略 */ }
@@ -436,8 +444,8 @@ window.BiliNestPlayer = (function () {
       if (reFetchPlayurl()) return;
     }
 
-    // 1) 同一地址重试
-    if (state.loadAttempts < MAX_URL_ATTEMPTS) {
+    // 1) 同一地址仅重试 1 次（代理侧已做上游重试，过多同址重试只会拖慢恢复）
+    if (state.loadAttempts < 1) {
       state.loadAttempts++;
       state.urlSwitching = true;
       if (art.notice) art.notice.show = '视频加载失败，正在自动重试…';
@@ -693,6 +701,7 @@ window.BiliNestPlayer = (function () {
     state.resumePoint = Number(resumeSeconds) || 0;
     state.resumeTarget = state.resumePoint;
     state.seekedResume = false;
+    state.reseekTries = 0;
 
     var pl = await fetchPlayurl(bvid, cid);
     state.playurlAt = Date.now();
@@ -726,6 +735,7 @@ window.BiliNestPlayer = (function () {
     state.resumePoint = Number(resumeSeconds) || 0;
     state.resumeTarget = state.resumePoint;
     state.seekedResume = false;
+    state.reseekTries = 0;
     els.player.hidden = false;   // 先让容器可见，再创建播放器，避免隐藏状态下初始化
     ensureArt();
     state.art.poster = '';
@@ -1296,6 +1306,7 @@ window.BiliNestPlayer = (function () {
     state.resumeTarget = 0;
     state.recovering = false;
     state.seekedResume = false;
+    state.reseekTries = 0;
     state.playurlAt = 0;
     state.urlSwitching = false;
     state.loadAttempts = 0;

@@ -168,15 +168,48 @@ async function handleVideoProxy(req, res, url) {
   const headers = { 'User-Agent': UA, Referer: BILI_REFERER };
   if (req.headers.range) headers.Range = String(req.headers.range);
 
-  const controller = new AbortController();
+  // 上游（B 站 CDN）偶发 5xx/429/网络抖动：代理内部重试几次再决定是否报错，
+  // 这样绝大多数瞬时失败会被吸收，浏览器看到的是一条连续成功的流，不会触发播放器反复重试。
+  // 仅 5xx / 429 可重试；4xx（含 403 防盗链）重试无意义。
+  const MAX_TRIES = 3;
+  let upstream = null;
+  let lastErr = null;
+  let controller = null;
   // 浏览器断开（暂停 / 跳转 / 切换地址）时取消上游请求，避免连接泄漏
-  req.on('close', () => controller.abort());
+  req.on('close', () => { if (controller) controller.abort(); });
+  for (let attempt = 0; attempt < MAX_TRIES; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 300 * attempt));
+    controller = new AbortController();
+    try {
+      const resp = await fetch(target, {
+        headers,
+        redirect: 'follow',
+        signal: controller.signal,
+      });
+      if (resp.status >= 500 || resp.status === 429) {
+        lastErr = new Error('upstream ' + resp.status);
+        try { await resp.arrayBuffer(); } catch (e) { /* 忽略 */ }
+        continue;
+      }
+      upstream = resp;
+      break;
+    } catch (e) {
+      lastErr = e;
+      continue; // 网络错误重试
+    }
+  }
+
+  if (!upstream) {
+    log(`[video-proxy] error: ${lastErr && lastErr.message}`);
+    if (!res.headersSent) {
+      sendJson(res, 502, { code: -502, message: '视频代理请求失败：' + (lastErr && lastErr.message) });
+    } else {
+      res.end();
+    }
+    return;
+  }
+
   try {
-    const upstream = await fetch(target, {
-      headers,
-      redirect: 'follow',
-      signal: controller.signal,
-    });
     const respHeaders = {
       'Cache-Control': 'no-store',
       'Accept-Ranges': upstream.headers.get('accept-ranges') || 'bytes',
@@ -196,7 +229,7 @@ async function handleVideoProxy(req, res, url) {
       );
     }
 
-    // 上游 4xx/5xx：读一小段响应体记录下来，便于判断是 CDN 404 还是防盗链 403
+    // 上游 4xx：读一小段响应体记录下来，便于判断是 CDN 404 还是防盗链 403
     if (upstream.status >= 400) {
       let errBody = '';
       try {
@@ -234,11 +267,12 @@ async function handleVideoProxy(req, res, url) {
     }
     res.end();
   } catch (e) {
-    log(`[video-proxy] error: ${e.message}`);
+    // 传输中途客户端断开（signal 被 abort）等：优雅结束即可
+    log(`[video-proxy] stream error: ${e.message}`);
     if (!res.headersSent) {
-      sendJson(res, 502, { code: -502, message: '视频代理请求失败：' + e.message });
+      sendJson(res, 502, { code: -502, message: '视频流传输失败：' + e.message });
     } else {
-      res.end();
+      try { res.end(); } catch (_) { /* 已结束 */ }
     }
   }
 }
