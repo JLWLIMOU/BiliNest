@@ -18,6 +18,7 @@
     frame-src https://player.bilibili.com https://passport.bilibili.com;
     media-src 'self' blob: https://*.bilivideo.com http://*.bilivideo.com;
     connect-src 'self' http://127.0.0.1:* https://api.bilibili.com https://app.bilibili.com;
+    worker-src 'self' blob:;
     base-uri 'none';
     form-action 'none';
   ">
@@ -191,6 +192,9 @@
   <!-- 本地化的 MIT 协议播放器内核（ArtPlayer v5.4.0，许可证见 vendor/ARTPLAYER_LICENSE） -->
   <script src="vendor/artplayer.min.js"></script>
   <script src="vendor/artplayer-plugin-danmuku.min.js"></script>
+  <!-- DASH 解码引擎（dash.js, BSD）与官方清晰度控制插件（artplayer-plugin-dash-control, MIT） -->
+  <script src="vendor/dash.all.min.js"></script>
+  <script src="vendor/artplayer-plugin-dash-control.min.js"></script>
   <script src="storage.js"></script>
   <script src="api.js"></script>
   <script src="localfiles.js"></script>

@@ -22,19 +22,12 @@ window.BiliNestPlayer = (function () {
   var els = {
     player: document.getElementById('customPlayer'),
     canvas: null,   // ArtPlayer 初始化后指向弹幕画布
-    sub: null,      // ArtPlayer 初始化后指向字幕层
     endOverlay: null // ArtPlayer 初始化后指向播放结束浮层
   };
 
   // 视频画面区域的单击 / 双击判定（见 bindClick）
   var clickTimer = null;
   var lastVideoClick = 0;
-  // 同一播放地址的连续失败次数上限（超过后转备用地址）
-  var MAX_URL_ATTEMPTS = 3;
-  // 地址失效（如 CDN 镜像 404）时，重新请求播放地址的次数上限
-  var MAX_FRESH_TRIES = 2;
-  // 当前清晰度文件在 CDN 缺失时，自动尝试其他清晰度的次数上限
-  var MAX_QUALITY_TRIES = 2;
   // 弹幕分段：官方网页端每 6 分钟一包、每包最多 6000 条。
   // 上限 250 包 ≈ 25 小时视频，防止异常视频无限拉取。
   var MAX_DANMAKU_SEGMENTS = 250;
@@ -60,11 +53,10 @@ window.BiliNestPlayer = (function () {
     danmakuIdx: 0,
     active: [],             // 正在显示的弹幕
     lanes: [],              // 弹幕轨道占用
-    danmakuOn: true,        // 弹幕默认开启
     pluginDanmaku: [],      // 适配 artplayer-plugin-danmuku 的弹幕数组
     playing: false,         // 播放状态（由 video:play/pause 事件维护）
     rafId: 0,
-    subtitleBody: [],
+    subtitleVttUrl: null,   // 当前字幕的 Blob URL（切集时 revoke）
     subtitleOn: false,      // 字幕默认关闭，由用户手动开启
     subSettings: loadSubSettings(), // 字幕位置 / 字号（持久化到 localStorage）
     resumePoint: 0,         // 续播点（秒），媒体就绪后自动跳转（一次性，保留兼容）
@@ -82,7 +74,8 @@ window.BiliNestPlayer = (function () {
     fallbackHandler: null,  // 全部方案失败后的兜底（切官方播放器）
     episodeNavHandler: null, // 上一集 / 下一集点击回调（由应用层提供）
     endNav: { show: false, next: false }, // 播放结束浮层状态（应用层设置）
-    endTimer: null           // 播放结束自动连播倒计时
+    endTimer: null,           // 播放结束自动连播倒计时
+    lastDanmakuWidth: 0       // 弹幕容器宽度（用于全屏 resize 时修正速度）
   };
 
   /* ---------------- 工具 ---------------- */
@@ -98,20 +91,6 @@ window.BiliNestPlayer = (function () {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
     });
-  }
-
-  /**
-   * B 站 CDN 防盗链：视频地址的 Referer 必须是 bilibili.com，
-   * 浏览器直连（Referer 为 127.0.0.1）会被 403 → 播放器报“地址不支持”。
-   * 因此统一改为请求本地代理 /api/video，由服务器带正确 Referer 转发。
-   */
-  function toProxiedUrl(url, alts) {
-    var u = '/api/video?url=' + encodeURIComponent(url);
-    // 把备用 CDN 地址一并交给代理：主节点抖动时由服务器“CDN 优选”兜底
-    if (alts && alts.length) {
-      u += '&alt=' + encodeURIComponent(alts.join('|'));
-    }
-    return u;
   }
 
   /* ---------------- ArtPlayer 初始化 ---------------- */
@@ -160,8 +139,6 @@ window.BiliNestPlayer = (function () {
       // 避免某些 fMP4 流在 metadata 预取阶段解析失败导致误报加载错误
       moreVideoAttr: { controls: false, preload: 'auto' },
       layers: [
-        // CC 字幕层：全屏时同样保持可见
-        { name: 'subtitle', html: '<div id="subtitleBox" class="subtitle-box" hidden></div>' },
         // 播放结束浮层：下一集（含倒计时自动连播）/ 重温一遍
         {
           name: 'end',
@@ -199,50 +176,16 @@ window.BiliNestPlayer = (function () {
           click: function () { if (state.episodeNavHandler) state.episodeNavHandler('next'); }
         },
         {
-          name: 'bdmaku',
-          position: 'right',
-          index: 5,
-          html: '<span class="bilinest-ctl">弹幕</span>',
-          tooltip: '弹幕开关',
-          click: function () { toggleDanmaku(); }
-        },
-        {
           name: 'subtitle',
           position: 'right',
           index: 12,
           html: '<span class="bilinest-ctl">字幕</span>',
           tooltip: '字幕开关',
           click: function () { toggleSubtitle(); }
-        },
-        {
-          name: 'subpos',
-          position: 'right',
-          index: 13,
-          html:
-            '<span class="bilinest-ctl subpos-wrap">' +
-              '位置<input type="range" class="subpos-slider" min="0" max="100" step="1" value="' +
-              Math.round(state.subSettings.pos) + '" aria-label="字幕位置微调">' +
-            '</span>',
-          tooltip: '字幕位置（底部微调）'
-        },
-        {
-          name: 'subsize',
-          position: 'right',
-          index: 14,
-          html: '<span class="bilinest-ctl">字号</span>',
-          selector: [],
-          onSelect: function (item) { return selectSubSize(item); }
-        },
-        {
-          name: 'quality',
-          position: 'right',
-          index: 10,
-          html: '<span class="bilinest-ctl">清晰度</span>',
-          selector: [],
-          onSelect: function (item) { return selectQuality(item); }
         }
       ],
       plugins: [
+        window.artplayerPluginDashControl ? window.artplayerPluginDashControl() : null,
         artplayerPluginDanmuku({
           // 弹幕数据由 loadDanmaku 经 danmakuPlugin().load() 动态注入；
           // 这里给一个兜底函数，插件初始化时读取一次
@@ -254,20 +197,67 @@ window.BiliNestPlayer = (function () {
           fontSize: 25,
           color: '#FFFFFF',
           antiOverlap: true,
-          display: state.danmakuOn,   // 初始可见性跟随“弹幕开关”
+          display: true,
           theme: 'dark',
           heatmap: false,
-          beforeEmit: function () { return false; }, // 只读，禁止发送弹幕
+          emitter: false,             // 不显示“发弹幕”输入框（只读观看，避免遮挡控件）
+          beforeEmit: function () { return false; }, // 禁止发送弹幕
           filter: function () { return true; }
         })
-      ]
+      ],
+      // DASH 流：用 dash.js 初始化，并把实例挂到 art.dash，
+      // 供 artplayer-plugin-dash-control 读取码率列表生成清晰度下拉。
+      // 注意：ArtPlayer v5 以 fn(videoEl, url, art) 形式调用，this === art。
+      customType: {
+        dash: function (videoEl, url) {
+          var art = this;
+          if (!window.dashjs || !url) {
+            console.error('[bilinest][dash] dash.js 未加载或 url 为空，放弃 DASH 播放');
+            return;
+          }
+          // 切换视频时，先释放上一次 dash.js 实例（ArtPlayer 不会自动清理）
+          if (art.dash && art.dash.reset) {
+            try { art.dash.reset(); } catch (e) { /* ignore */ }
+          }
+          // 直接用相对路径（同源），避免任何绝对 URL/跨域/Headers 问题
+          var player = window.dashjs.MediaPlayer().create();
+          try {
+            var ck = (typeof store !== 'undefined' && store.getCookie && store.getCookie()) || '';
+            if (ck) {
+              player.updateSettings({ streaming: { httpHeaders: { Cookie: ck } } });
+            }
+            player.initialize(art.video, url, false);
+            art.dash = player;
+            var ev = (window.dashjs.MediaPlayer.events && window.dashjs.MediaPlayer.events.STREAM_INITIALIZED) || 'streamInitialized';
+            var errEv = (window.dashjs.MediaPlayer.events && window.dashjs.MediaPlayer.events.ERROR) || 'error';
+            var mpdEv = (window.dashjs.MediaPlayer.events && window.dashjs.MediaPlayer.events.MANIFEST_LOADED) || 'manifestLoaded';
+            player.on(mpdEv, function () {
+              console.log('[bilinest][dash] MANIFEST_LOADED');
+            });
+            player.on(ev, function () {
+              console.log('[bilinest][dash] STREAM_INITIALIZED');
+              var p = art.plugins && art.plugins.artplayerPluginDashControl;
+              if (p && p.update) p.update();
+              if (art.loading && art.loading.hide) art.loading.hide();
+            });
+            player.on(errEv, function (e) {
+              var info = e && e.error ? (e.error.code + ':' + (e.error.message || '')) : (e && e.message) || 'unknown';
+              console.error('[bilinest][dash] dash.js 错误：', info, e);
+            });
+          } catch (e) {
+            console.error('[bilinest][dash] 初始化异常：', e && e.message, e);
+          }
+          return function () {
+            try { if (player) player.reset(); } catch (e) { /* ignore */ }
+            art.dash = null;
+          };
+        }
+      }
     });
 
     state.art = art;
-    els.sub = els.player.querySelector('#subtitleBox');
     els.endOverlay = els.player.querySelector('#endOverlay');
     applySubSettings(); // 字幕位置 / 字号（可能已持久化，先恢复再显示）
-    bindSubPosSlider();
     bindEndOverlay();
     // ArtPlayer 模板里自带一个空 <track>（src=""），我们不用它的字幕模块，
     // 移除它可避免浏览器对空 track 发起无意义的请求
@@ -281,11 +271,6 @@ window.BiliNestPlayer = (function () {
   function bindArtEvents() {
     var art = state.art;
 
-    // 播放器尺寸变化（窗口缩放 / 全屏切换）时，字幕字号按宽度等比更新
-    art.on('resize', function () { resizeSubtitleFont(); });
-    window.addEventListener('resize', function () {
-      if (state.art) resizeSubtitleFont();
-    });
     art.on('video:play', function () {
       // 注意：不要用 art.playing 判断“是否在播放”来启动弹幕循环——
       // ArtPlayer 的 playing 依赖 currentTime>0 且 readyState>2，
@@ -296,11 +281,9 @@ window.BiliNestPlayer = (function () {
     });
     art.on('video:pause', function () {
       state.playing = false;
-      updateSubtitle(); // 暂停时也按当前时间刷新字幕，避免停留在上一句的空白间隙
       window.dispatchEvent(new CustomEvent('bilinest-pause'));
     });
     art.on('video:seeked', function () {
-      updateSubtitle(); // 拖动进度后立即刷新字幕
     });
     art.on('video:ended', function () {
       state.playing = false;
@@ -308,7 +291,6 @@ window.BiliNestPlayer = (function () {
       showEndOverlay();
     });
     art.on('video:timeupdate', function () {
-      updateSubtitle();
       // 已真正到达续播点：停止续播逻辑，避免后续误判
       if (state.resumeTarget > 0 && art.currentTime >= state.resumeTarget - 2) {
         state.resumeTarget = 0;
@@ -347,15 +329,33 @@ window.BiliNestPlayer = (function () {
       }
     });
     art.on('video:error', function () { handleLoadError(); });
+
+    // 修复全屏弹幕加速：覆盖插件 resize，在其重置 transition 之前修正 $restTime
+    var dp = danmakuPlugin();
+    if (dp && typeof dp.resize === 'function') {
+      var _origResize = dp.resize.bind(dp);
+      dp.resize = function () {
+        var newW = art.player && art.player.clientWidth ? art.player.clientWidth : 0;
+        if (newW > 0 && dp.queue) {
+          var queue = dp.queue;
+          for (var i = 0; i < queue.length; i++) {
+            var d = queue[i];
+            if (d.$state !== 'emit' || d.mode !== 0 || !d.$ref) continue;
+            var tw = d.$ref.clientWidth || 0;
+            var oldW = state.lastDanmakuWidth || newW;
+            if (oldW > 0 && oldW !== newW && d.$restTime > 0) {
+              var oldDist = oldW + tw;
+              var newDist = newW + tw;
+              if (oldDist > 0) d.$restTime = d.$restTime * newDist / oldDist;
+            }
+          }
+        }
+        state.lastDanmakuWidth = newW;
+        _origResize();
+      };
+    }
   }
 
-  /**
-   * 视频加载失败处理：不再建议用户“切换画质”。
-   * 策略：
-   *   1. 同一地址自动重试几次（间隔 0.8s，瞬时网络抖动通常能自愈）；
-   *   2. 仍失败则静默尝试备用地址（同清晰度，仅换 CDN）；
-   *   3. 全部失败才提示，并附带错误码与域名便于排查。
-   */
   /** 清理挂起的“重试同地址”定时器：换地址/切换前必须清理，否则旧定时器会打断新加载 */
   function clearPendingRetry() {
     if (state.retryTimer) {
@@ -364,174 +364,29 @@ window.BiliNestPlayer = (function () {
     }
   }
 
-  /** 切到指定地址；期间屏蔽 video:error，避免切换过程被误判 */
-  function switchTo(url) {
-    if (!state.art) return;
-    var next = toProxiedUrl(url, state.urls);
-    state.urlSwitching = true;
-    // 新地址与当前相同：switchQuality 会直接跳过，需强制重载
-    if (state.art.video.src === next) {
-      try { state.art.video.load(); } catch (e) { /* 忽略 */ }
-      state.urlSwitching = false;
-      return;
-    }
-    state.art.switchQuality(next).then(function () {
-      state.urlSwitching = false;
-    }).catch(function () {
-      state.urlSwitching = false;
-      handleLoadError();
-    });
-  }
-
-  /** B 站签名 URL 过期/坏镜像：重新请求播放地址并切换（受 MAX_FRESH_TRIES 限制） */
-  function reFetchPlayurl() {
-    if (state.freshTries >= MAX_FRESH_TRIES) return false;
-    state.freshTries++;
-    state.loadAttempts = 0;
-    state.urlSwitching = true;
-    if (state.art && state.art.notice) state.art.notice.show = '播放地址失效，正在重新获取…';
-    var wantQn = state.qn || 64;
-    api.playurl(state.bvid, state.cid, wantQn, creds())
-      .then(function (pl) {
-        if (!state.art) return;
-        if (!pl || !pl.durl || !pl.durl.length) {
-          state.urlSwitching = false;
-          handleLoadError();
-          return;
-        }
-        state.qn = pl.quality || wantQn;
-        state.qualities = buildQualities(pl);
-        state.urls = [pl.durl[0].url].concat(pl.durl[0].backup_url || []);
-        state.urlIdx = 0;
-        state.playurlAt = Date.now();
-        switchTo(state.urls[0]);
-      })
-      .catch(function () {
-        state.urlSwitching = false;
-        handleLoadError();
-      });
-    return true;
-  }
-
   /**
-   * 视频加载失败处理：不再建议用户“切换画质”。
-   * 策略（逐级自动恢复）：
-   *   1. 同一地址自动重试几次（间隔 0.8s，瞬时网络抖动通常能自愈）；
-   *   2. 静默尝试备用地址（同清晰度，仅换 CDN）；
-   *   3. 重新请求播放地址（B 站偶尔返回坏镜像，重取可能换到可用镜像）；
-   *   4. 静默尝试其他清晰度的文件（文件路径不同，可能存在）；
-   *   5. 全部失败交给应用层兜底（切官方播放器，官方走 DASH 通常可播）。
-   * 注意：所有切换动作开始前必须 clearPendingRetry()，否则旧的重试定时器
-   * 会在新地址加载时触发 video.load()，把正常的加载打断（曾导致 206 流被中止）。
+   * 视频加载失败处理（DASH 流）。
+   * 清晰度切换 / 分段重试由 artplayer-plugin-dash-control + dash.js 内部完成，
+   * 这里只做兜底：本地视频给简短提示；B 站视频转交应用层降级到官方播放器。
    */
   function handleLoadError() {
     var art = state.art;
-    if (!art || state.urlSwitching) return;
-    if (!state.urls.length) return; // 已停止/已兜底切换，忽略残留错误事件
-    // 进入恢复态：禁止应用层在此期间把进度回写成 0，并允许重新 seek 续播点
-    state.recovering = true;
-    state.seekedResume = false;
     var v = art.video;
     var code = (v && v.error && v.error.code) || 0;
-    // 播放地址现在经本地代理转发，currentSrc 是 127.0.0.1；用真实 CDN 地址的域名做诊断
-    var realUrl = state.urls[state.urlIdx] || '';
-    var host = '';
-    try {
-      host = new URL(realUrl).hostname;
-    } catch (e) { /* 忽略 */ }
-
-    // 地址已可能过期（长时间待机 / B 站签名时效）：直接重取，跳过同地址重试
-    if (state.kind === 'bili' && state.playurlAt &&
-        Date.now() - state.playurlAt > 4 * 60 * 1000) {
-      if (reFetchPlayurl()) return;
-    }
-
-    // 1) 同一地址仅重试 1 次（代理侧已做上游重试，过多同址重试只会拖慢恢复）
-    if (state.loadAttempts < 1) {
-      state.loadAttempts++;
-      state.urlSwitching = true;
-      if (art.notice) art.notice.show = '视频加载失败，正在自动重试…';
-      var failedUrl = state.urls[state.urlIdx];
-      clearPendingRetry();
-      state.retryTimer = setTimeout(function () {
-        state.retryTimer = null;
-        state.urlSwitching = false;
-        // 仅当仍是同一个失败地址时重载，避免用户已切换视频时误重载新视频
-        if (state.art && state.urls[state.urlIdx] === failedUrl) {
-          try { state.art.video.load(); } catch (e) { /* 忽略 */ }
-        }
-      }, 800);
-      return;
-    }
-
-    // 2) 备用地址（同清晰度，仅换 CDN）
-    if (state.urls[state.urlIdx + 1]) {
-      state.loadAttempts = 0;
-      state.urlIdx++;
-      clearPendingRetry();
-      switchTo(state.urls[state.urlIdx]);
-      return;
-    }
-
-    // 本地文件不走 B 站地址重取 / 换清晰度 / 官方兜底
+    // 诊断：把原生 media error 打到控制台，便于定位“CDN 缺失”类降级的根因
+    console.error('[bilinest][load-error] kind=' + state.kind + ' video.error.code=' + code,
+      v && v.error ? { message: v.error.message, code: v.error.code } : null,
+      'src=' + (v && v.currentSrc));
     if (state.kind !== 'bili') {
-      toast('视频加载失败，请检查本地文件是否仍可用', 'error', 8000);
+      var codeText = code === 1 ? '请求中止' : code === 2 ? '网络异常' : code === 3 ? '解码失败' : code === 4 ? '地址不支持' : '未知错误';
+      toast('视频加载失败（' + codeText + '），请检查本地文件是否仍可用', 'error', 8000);
       return;
     }
-
-    // 3) 重新请求播放地址（B 站偶尔返回“坏镜像”，重取可能换到可用镜像）
-    if (reFetchPlayurl()) return;
-
-
-    // 4) 静默尝试其他清晰度的文件（文件路径不同，可能存在）
-    if (state.qualityTries < MAX_QUALITY_TRIES) {
-      var candidates = state.qualities.filter(function (q) { return q.qn !== state.qn; });
-      var target = candidates[state.qualityTries];
-      if (target) {
-        state.qualityTries++;
-        clearPendingRetry();
-        state.urlSwitching = true;
-        if (art.notice) art.notice.show = '当前清晰度文件缺失，正在尝试其他清晰度…';
-        api.playurl(state.bvid, state.cid, target.qn, creds())
-          .then(function (pl) {
-            if (!state.art) return;
-            if (!pl || !pl.durl || !pl.durl.length) {
-              state.urlSwitching = false;
-              handleLoadError();
-              return;
-            }
-            state.qn = pl.quality || target.qn;
-            state.qualities = buildQualities(pl);
-            state.urls = [pl.durl[0].url].concat(pl.durl[0].backup_url || []);
-            state.urlIdx = 0;
-            state.loadAttempts = 0;
-            state.freshTries = 0;
-            switchTo(state.urls[0]);
-          })
-          .catch(function () {
-            state.urlSwitching = false;
-            handleLoadError();
-          });
-        return;
-      }
-    }
-
-    // 5) 全部方案失败：交给应用层兜底（切官方播放器，官方走 DASH 通常可播）
     if (state.fallbackHandler) {
       state.fallbackHandler(state.bvid, state.cid);
       return;
     }
-
-    console.warn('[BiliNest] 视频加载失败', {
-      code: code,
-      host: host,
-      urlIdx: state.urlIdx,
-      freshTries: state.freshTries,
-      qualityTries: state.qualityTries,
-      currentSrc: v ? v.currentSrc : ''
-    });
-    var codeText = code === 1 ? '请求中止' : code === 2 ? '网络异常' : code === 3 ? '解码失败' : code === 4 ? '地址不支持' : '未知错误';
-    toast('视频加载失败（' + codeText + (host ? ' · ' + host : '') + '），请检查网络后重试', 'error', 8000);
+    toast('视频加载失败，请检查网络后重试', 'error', 8000);
   }
 
   /* 鼠标位于视频窗口时滚轮调节音量；提示使用 ArtPlayer 内置 notice（全屏可见） */
@@ -693,6 +548,13 @@ window.BiliNestPlayer = (function () {
    * 加载一个 B 站视频（单 P）。
    * @returns {Promise<boolean>} 成功返回 true；失败抛出异常由调用方降级。
    */
+  /** 构造 DASH MPD 地址：清晰度由 artplayer-plugin-dash-control 依据 MPD 码率列表自动提供 */
+  function dashMpdUrl(bvid, cid, qn) {
+    // 不再把 Cookie 塞进 URL（太长会被拦截），改由 dash.js 的 httpRequestHeaders 透传 Header
+    return '/api/dash.mpd?bvid=' + encodeURIComponent(bvid) +
+           '&cid=' + encodeURIComponent(cid) + '&qn=' + (qn || 80);
+  }
+
   async function load(bvid, cid, resumeSeconds, opts) {
     opts = opts || {};
     reset();
@@ -705,24 +567,16 @@ window.BiliNestPlayer = (function () {
     state.seekedResume = false;
     state.reseekTries = 0;
 
-    var pl = await fetchPlayurl(bvid, cid);
-    state.playurlAt = Date.now();
-
-    state.qn = pl.quality || 64;
-    state.qualities = buildQualities(pl);
-    state.urls = [pl.durl[0].url].concat(pl.durl[0].backup_url || []);
-    state.urlIdx = 0;
-
     els.player.hidden = false;   // 先让容器可见，再创建播放器，避免隐藏状态下初始化
     ensureArt();
     state.art.poster = opts.poster || '';
     showBiliControls(true);
-    renderQualityControl();
-    updateDanmakuControl();
     updateSubtitleControl();
-    renderSubSettingsControls();
 
-    state.art.url = toProxiedUrl(state.urls[0], state.urls);
+    // DASH：清晰度由 artplayer-plugin-dash-control 自动生成下拉
+    state.mpdUrl = dashMpdUrl(bvid, cid, 80);
+    state.art.type = 'dash';
+    state.art.url = state.mpdUrl;
 
     // 弹幕与字幕异步加载，失败不阻塞播放
     loadDanmaku(cid);
@@ -742,117 +596,9 @@ window.BiliNestPlayer = (function () {
     ensureArt();
     state.art.poster = '';
     showBiliControls(false);
+    state.art.type = 'auto';
     state.art.url = url;
     return true;
-  }
-
-  /**
-   * 获取播放地址：默认请求最高画质；若接口自动降级，
-   * 再按返回的可选画质列表请求最高档（默认取最高）。
-   */
-  async function fetchPlayurl(bvid, cid) {
-    var pl = null;
-    var tryQns = [120, 116, 80, 64];
-    for (var i = 0; i < tryQns.length; i++) {
-      try {
-        var r = await api.playurl(bvid, cid, tryQns[i], creds());
-        if (r && r.durl && r.durl.length) {
-          pl = r;
-          break;
-        }
-      } catch (e) {
-        pl = null;
-      }
-    }
-    if (!pl || !pl.durl || !pl.durl.length) throw new Error('未获取到播放地址');
-
-    var maxQn = 0;
-    (pl.accept_quality || []).forEach(function (q) { if (q > maxQn) maxQn = q; });
-    if (maxQn > (pl.quality || 0)) {
-      try {
-        var r2 = await api.playurl(bvid, cid, maxQn, creds());
-        if (r2 && r2.durl && r2.durl.length) pl = r2;
-      } catch (e) {
-        /* 保持当前画质 */
-      }
-    }
-    return pl;
-  }
-
-  function buildQualities(pl) {
-    var q = pl.accept_quality || [pl.quality];
-    var d = pl.accept_description || [];
-    return q.map(function (qn, i) {
-      return { qn: qn, label: d[i] || ('画质 ' + qn) };
-    });
-  }
-
-  /* ---------------- 画质切换 ---------------- */
-  function currentQualityLabel() {
-    var cur = state.qualities.find(function (q) { return q.qn === state.qn; });
-    return cur ? cur.label : ('画质 ' + state.qn);
-  }
-
-  /** 把当前可选画质写入 ArtPlayer 的“清晰度”下拉控件 */
-  function renderQualityControl() {
-    var art = state.art;
-    if (!art || state.kind !== 'bili') return;
-    var items = state.qualities.map(function (q) {
-      return { html: esc(q.label), qn: q.qn, default: q.qn === state.qn, url: '' };
-    });
-    art.controls.update({
-      name: 'quality',
-      position: 'right',
-      index: 10,
-      html: '<span class="bilinest-ctl">' + esc(currentQualityLabel()) + '</span>',
-      selector: items,
-      onSelect: function (item) { return selectQuality(item); }
-    });
-  }
-
-  /** 选中画质：按需请求该画质地址，再交给 ArtPlayer 无缝切换（保留进度） */
-  async function selectQuality(item) {
-    var art = state.art;
-    var qn = Number(item.qn);
-    if (!art || !qn || qn === state.qn) return item.html;
-    var label = item.html || ('画质 ' + qn);
-    try {
-      clearPendingRetry();
-      var pl = await api.playurl(state.bvid, state.cid, qn, creds());
-      if (!pl || !pl.durl || !pl.durl.length) throw new Error('该画质暂不可用');
-      state.qn = pl.quality || qn;
-      state.urls = [pl.durl[0].url].concat(pl.durl[0].backup_url || []);
-      state.urlIdx = 0;
-      state.urlSwitching = true;
-      try {
-        await art.switchQuality(toProxiedUrl(state.urls[0], state.urls));
-        return label;
-      } finally {
-        state.urlSwitching = false;
-      }
-    } catch (e) {
-      toast('画质切换失败：' + e.message, 'error');
-      return currentQualityLabel();
-    }
-  }
-
-  /* ---------------- 弹幕开关 ---------------- */
-  function toggleDanmaku() {
-    state.danmakuOn = !state.danmakuOn;
-    updateDanmakuControl();
-    var p = danmakuPlugin();
-    if (p) {
-      if (state.danmakuOn) p.show(); else p.hide();
-    }
-  }
-
-  function updateDanmakuControl() {
-    var art = state.art;
-    if (!art) return;
-    var el = art.controls.bdmaku;
-    if (!el) return;
-    var span = el.querySelector('.bilinest-ctl');
-    if (span) span.classList.toggle('off', !state.danmakuOn);
   }
 
   /* ---------------- 弹幕 ---------------- */
@@ -884,10 +630,11 @@ window.BiliNestPlayer = (function () {
     if (!list) list = [];
     list.sort(function (a, b) { return a.time - b.time; });
     state.danmaku = list;
+    state.lastDanmakuWidth = (els.player && els.player.clientWidth) || 0;
     var arr = toPluginDanmaku(list);
     state.pluginDanmaku = arr;
     var p = danmakuPlugin();
-    if (p) p.load(arr);
+    if (p) p.load();  // 无参=重置队列后从 danmuku 函数重新加载
   }
 
   /**
@@ -928,7 +675,7 @@ window.BiliNestPlayer = (function () {
       if (elems.length < 6000) break;
       if (i < MAX_DANMAKU_SEGMENTS) await sleep(DANMAKU_SEGMENT_DELAY_MS);
     }
-    return firstOk ? list : null; // 第一段就失败 → 让调用方回退 XML
+    return firstOk && list.length > 0 ? list : null; // protobuf 返回空 → 让调用方回退 XML
   }
 
   /** 旧 XML 弹幕（仅实时弹幕池，不完整），作为分段接口失败时的兜底 */
@@ -969,7 +716,7 @@ window.BiliNestPlayer = (function () {
     });
   }
 
-  /* ---------------- 字幕位置（滑块）/ 字号设置 ---------------- */
+  /* ---------------- 字幕（改用 ArtPlayer 原生组件）设置 ---------------- */
   function loadSubSettings() {
     var s = (store && store.get && store.get('subSettings')) || null;
     var pos = s && s.pos;
@@ -985,92 +732,86 @@ window.BiliNestPlayer = (function () {
     if (store && store.set) store.set({ subSettings: state.subSettings });
   }
 
-  function subSizeLabel(v) { return { sm: '小', md: '中', lg: '大', xl: '特大' }[v] || '中'; }
-
-  /** 字幕位置映射：滑块 0~100 → bottom 2%~16%，始终位于底部区域做微调 */
+  /** 字幕位置映射：滑块 0~100 → 距底部 2%~16%，始终位于底部区域做微调 */
   function subPosToBottom(v) {
     var x = Math.min(100, Math.max(0, Number(v) || 0));
     return 2 + (x / 100) * 14;
   }
 
-  /** 把位置 / 字号设置应用到字幕层 */
+  /** 取 ArtPlayer 原生字幕 DOM 节点（加载后才有）；初始化阶段 art.player 可能尚未就绪，需容错 */
+  function nativeSubtitleEl() {
+    try {
+      if (!state.art || !state.art.player) return null;
+      return state.art.player.querySelector('.art-subtitle');
+    } catch (e) { return null; }
+  }
+
+  /** 显示 / 隐藏原生字幕：优先用官方 API，失败则直控元素兜底 */
+  function setNativeSubtitleVisible(on) {
+    var sub = state.art && state.art.subtitle;
+    try {
+      if (sub) { if (on) { if (sub.show) sub.show(); } else { if (sub.hide) sub.hide(); } }
+    } catch (e) { /* ignore */ }
+    var el = nativeSubtitleEl();
+    if (el) {
+      el.style.visibility = on ? '' : 'hidden';
+    }
+    if (on) setTimeout(applySubSettings, 30); // 显示时（元素已就绪）确保应用位置 / 字号
+  }
+
+  /** 把位置 / 字号设置应用到原生字幕层 */
   function applySubSettings() {
-    if (!els.sub) return;
-    // 底部偏移存成 CSS 变量，CSS 里再叠加控制条高度（暂停/悬停时自动抬升）
-    els.sub.style.bottom = '';
-    els.sub.style.setProperty('--sub-bottom', subPosToBottom(state.subSettings.pos).toFixed(2) + '%');
-    var z = state.subSettings.size || 'md';
-    els.sub.classList.remove('sub-size-sm', 'sub-size-md', 'sub-size-lg', 'sub-size-xl');
-    els.sub.classList.add('sub-size-' + z);
+    var el = nativeSubtitleEl();
+    if (!el) return;
+    // 底部偏移（CSS 百分比），与原生默认叠加
+    el.style.bottom = subPosToBottom(state.subSettings.pos).toFixed(2) + '%';
     resizeSubtitleFont();
   }
 
-  /** 字幕字号按播放器实际宽度等比缩放（全屏时容器变大，字号同步变大，不再封顶） */
+  /** 字幕字号按播放器实际宽度等比缩放（全屏时容器变大，字号同步变大） */
   function resizeSubtitleFont() {
-    if (!els.sub || !els.player) return;
+    var el = nativeSubtitleEl();
+    if (!el || !els.player) return;
     var w = els.player.clientWidth || els.player.offsetWidth || 0;
     if (!w) return;
     var z = state.subSettings.size || 'md';
     var factor = SUB_SIZE_FACTORS[z] || SUB_SIZE_FACTORS.md;
-    // 极小窗口保底 12px；上限随宽度比例走
-    els.sub.style.fontSize = Math.max(12, Math.round(w * factor)) + 'px';
+    el.style.fontSize = Math.max(12, Math.round(w * factor)) + 'px';
   }
 
-  /** 绑定控制条里的字幕位置滑块（ArtPlayer 只渲染一次，事件只需绑定一次） */
-  function bindSubPosSlider() {
-    var art = state.art;
-    if (!art) return;
-    var ctl = art.controls.subpos;
-    if (!ctl) return;
-    var slider = ctl.querySelector('.subpos-slider');
-    if (!slider) return;
-    slider.addEventListener('input', function () {
-      state.subSettings.pos = Number(slider.value) || 0;
-      saveSubSettings();
-      applySubSettings();
-    });
-  }
-
-  /** 把字号写入 ArtPlayer 下拉控件（位置已改为滑块，不再需要下拉） */
-  function renderSubSettingsControls() {
-    var art = state.art;
-    if (!art) return;
-    var sizeItems = [
-      { html: '小', value: 'sm', default: state.subSettings.size === 'sm' },
-      { html: '中', value: 'md', default: state.subSettings.size === 'md' },
-      { html: '大', value: 'lg', default: state.subSettings.size === 'lg' },
-      { html: '特大', value: 'xl', default: state.subSettings.size === 'xl' }
-    ];
-    art.controls.update({
-      name: 'subsize',
-      position: 'right',
-      index: 14,
-      html: '<span class="bilinest-ctl">字号·' + esc(subSizeLabel(state.subSettings.size)) + '</span>',
-      selector: sizeItems,
-      onSelect: function (item) { return selectSubSize(item); }
-    });
-  }
-
-  function selectSubSize(item) {
-    state.subSettings.size = item.value;
-    saveSubSettings();
-    applySubSettings();
-    renderSubSettingsControls();
-    return item.html;
+  /** 把 B 站 CC 字幕（{from,to,content}[]）转换为 WebVTT 文本 */
+  function subtitleBodyToVtt(body) {
+    function p2(n) { return (n < 10 ? '0' : '') + n; }
+    function p3(n) { return (n < 100 ? '0' : '') + (n < 10 ? '0' : '') + n; }
+    function fmt(sec) {
+      sec = Math.max(0, sec);
+      var h = Math.floor(sec / 3600);
+      var m = Math.floor((sec % 3600) / 60);
+      var s = Math.floor(sec % 60);
+      var ms = Math.round((sec - Math.floor(sec)) * 1000);
+      return p2(h) + ':' + p2(m) + ':' + p2(s) + '.' + p3(ms);
+    }
+    var lines = ['WEBVTT', ''];
+    for (var i = 0; i < body.length; i++) {
+      var it = body[i];
+      var from = Number(it.from) || 0;
+      var to = Number(it.to) || 0;
+      if (to <= from) to = from + 0.001;
+      var content = String(it.content == null ? '' : it.content).replace(/-->/g, '—>');
+      lines.push(String(i + 1));
+      lines.push(fmt(from) + ' --> ' + fmt(to));
+      lines.push(content);
+      lines.push('');
+    }
+    return lines.join('\n');
   }
 
   /* ---------------- 字幕开关 ---------------- */
   function toggleSubtitle() {
-    if (!state.subtitleBody.length) return;
+    if (!state.subtitleVttUrl) return;
     state.subtitleOn = !state.subtitleOn;
+    setNativeSubtitleVisible(state.subtitleOn);
     updateSubtitleControl();
-    if (state.subtitleOn) {
-      els.sub.hidden = false;
-      updateSubtitle();
-    } else {
-      els.sub.hidden = true;
-      els.sub.textContent = '';
-    }
   }
 
   function updateSubtitleControl() {
@@ -1080,27 +821,10 @@ window.BiliNestPlayer = (function () {
     if (!el) return;
     var span = el.querySelector('.bilinest-ctl');
     if (!span) return;
-    if (!state.subtitleBody.length) {
-      state.subtitleOn = false;
-      if (els.sub) {
-        els.sub.hidden = true;
-        els.sub.textContent = '';
-      }
-      span.classList.add('disabled');
-    } else {
-      span.classList.remove('disabled');
-    }
+    var has = !!state.subtitleVttUrl;
+    if (!has) state.subtitleOn = false;
+    span.classList.toggle('disabled', !has);
     span.classList.toggle('off', !state.subtitleOn);
-    // 没有字幕时，位置滑块 / 字号下拉一并置灰
-    ['subpos', 'subsize'].forEach(function (name) {
-      var ctl = art.controls[name];
-      if (!ctl) return;
-      var cSpan = ctl.querySelector('.bilinest-ctl');
-      if (!cSpan) return;
-      cSpan.classList.toggle('disabled', !state.subtitleBody.length);
-      var slider = ctl.querySelector('.subpos-slider');
-      if (slider) slider.disabled = !state.subtitleBody.length;
-    });
   }
 
   async function loadSubtitles(bvid, cid) {
@@ -1124,28 +848,27 @@ window.BiliNestPlayer = (function () {
       body = []; // 失败视为无字幕
     }
     if (mySeq !== subtitleSeq) return;
-    state.subtitleBody = body;
-    updateSubtitleControl();
-    renderSubSettingsControls();
-    applySubSettings();
-  }
-
-  function updateSubtitle() {
-    if (!state.subtitleBody.length || !state.subtitleOn || !els.sub) return;
-    var t = state.art ? state.art.currentTime : 0;
-    var cur = null;
-    for (var i = 0; i < state.subtitleBody.length; i++) {
-      var it = state.subtitleBody[i];
-      if (t >= it.from && t <= it.to) { cur = it.content; break; }
+    if (state.subtitleVttUrl) { try { URL.revokeObjectURL(state.subtitleVttUrl); } catch (e) {} }
+    state.subtitleVttUrl = null;
+    state.subtitleOn = false;
+    if (body.length) {
+      var vtt = subtitleBodyToVtt(body);
+      state.subtitleVttUrl = URL.createObjectURL(new Blob([vtt], { type: 'text/vtt' }));
+      var sub = state.art && state.art.subtitle;
+      try {
+        if (sub) { if (sub.switch) sub.switch(state.subtitleVttUrl, 'vtt'); else if (sub.load) sub.load(state.subtitleVttUrl, 'vtt'); }
+      } catch (e) { /* ignore */ }
+      applySubSettings();             // 应用字号 / 位置样式
+      setNativeSubtitleVisible(false); // 默认关，由用户手动开
     }
-    els.sub.textContent = cur || '';
+    updateSubtitleControl();
   }
 
   /* ---------------- 控件显隐 ---------------- */
   /** 本地视频没有弹幕/字幕/画质，隐藏对应控件 */
   function showBiliControls(show) {
     if (!state.art) return;
-    ['danmaku', 'subtitle', 'subpos', 'subsize', 'quality'].forEach(function (name) {
+    ['danmaku', 'subtitle'].forEach(function (name) {
       var el = state.art.controls[name];
       if (el) el.style.display = show ? '' : 'none';
     });
@@ -1160,13 +883,15 @@ window.BiliNestPlayer = (function () {
     state.kind = '';
     state.bvid = '';
     state.cid = '';
+    state.mpdUrl = null;
     state.qn = 0;
     state.qualities = [];
     state.urls = [];
     state.urlIdx = 0;
     state.danmaku = [];
     state.pluginDanmaku = [];
-    state.subtitleBody = [];
+    if (state.subtitleVttUrl) { try { URL.revokeObjectURL(state.subtitleVttUrl); } catch (e) {} }
+    state.subtitleVttUrl = null;
     state.subtitleOn = false;
     state.resumePoint = 0;
     state.resumeTarget = 0;
@@ -1180,14 +905,17 @@ window.BiliNestPlayer = (function () {
     state.qualityTries = 0;
     if (state.art) {
       try { state.art.pause(); } catch (e) { /* ignore */ }
-      hideEndOverlay();
-      // 清空弹幕（已改由插件渲染）：重置内部数组并通知插件重载空数据
-      var dp = danmakuPlugin();
-      if (dp) dp.load([]);
-      if (els.sub) {
-        els.sub.hidden = true;
-        els.sub.textContent = '';
+      // 切换视频前释放 dash.js 实例（ArtPlayer 不会自动清理自定义源）
+      if (state.art.dash) {
+        try { state.art.dash.reset(); } catch (e) { /* ignore */ }
+        state.art.dash = null;
       }
+      hideEndOverlay();
+      // 清空弹幕（已改由插件渲染）：先清数据源，再调 load()（无参=重置队列）
+      state.pluginDanmaku = [];
+      var dp = danmakuPlugin();
+      if (dp) dp.load();
+      setNativeSubtitleVisible(false);
       els.player.hidden = true;
     }
   }
@@ -1220,20 +948,9 @@ window.BiliNestPlayer = (function () {
     /** 主动强制重新获取播放地址（如检测到待机恢复、签名可能过期时由应用层调用） */
     refreshPlayurl: function () {
       if (state.kind !== 'bili' || !state.art) return Promise.resolve(false);
-      state.playurlAt = 0; // 标记为“已过期”，下次出错会直接重取；这里立即重取
-      return api.playurl(state.bvid, state.cid, state.qn || 64, creds())
-        .then(function (pl) {
-          if (!state.art || !pl || !pl.durl || !pl.durl.length) return false;
-          state.qn = pl.quality || state.qn;
-          state.qualities = buildQualities(pl);
-          state.urls = [pl.durl[0].url].concat(pl.durl[0].backup_url || []);
-          state.urlIdx = 0;
-          state.seekedResume = false;
-          state.playurlAt = Date.now();
-          switchTo(state.urls[0]);
-          return true;
-        })
-        .catch(function () { return false; });
+      // DASH：清晰度与重试由 dash.js 内部完成；刷新即重新拉取 MPD（cookie/签名可能已变化）
+      state.art.url = dashMpdUrl(state.bvid, state.cid, 80);
+      return Promise.resolve(true);
     },
     setEpisodeNavHandler: function (fn) { state.episodeNavHandler = fn; },
     /** 应用层根据选集列表更新上一集/下一集按钮：{ visible, prev, next } */

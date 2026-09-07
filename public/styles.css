@@ -799,6 +799,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
   padding: 14px;
   box-shadow: var(--shadow-sm);
   overflow-y: auto;
+  max-height: calc(100vh - var(--topbar-h) - 40px);
 }
 .episode-title { margin: 0 0 12px; font-size: 15px; font-weight: 650; }
 .episode-list {

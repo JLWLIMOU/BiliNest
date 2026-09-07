@@ -4,14 +4,15 @@
 ' 1. Check whether the local proxy is already running;
 ' 2. If not, start "node server.mjs" in a hidden window;
 ' 3. Wait until the service is ready, then open the browser.
-' 若默认端口 4173 被其它程序占用，server.mjs 会自动顺延到下一个
-' 空闲端口，并把最终端口写入 bilinest.port，本脚本据此打开正确地址。
+' If the default port 4173 is occupied, server.mjs auto-advances
+' to the next free port and writes it to bilinest.port; this
+' script opens the correct address based on that file.
 ' ============================================================
 Option Explicit
 
 Const DEF_PORT = 4173
 Const PORT_FILE = "bilinest.port"
-Const MAX_WAIT = 40   ' 40 x 500ms = 最多等待 20 秒
+Const MAX_WAIT = 40   ' 40 x 500ms = wait up to 20 seconds
 
 Dim fso, scriptDir, shell
 Set fso = CreateObject("Scripting.FileSystemObject")
@@ -19,13 +20,13 @@ scriptDir = fso.GetParentFolderName(WScript.ScriptFullName)
 Set shell = CreateObject("WScript.Shell")
 shell.CurrentDirectory = scriptDir
 
-' 1) 默认端口上已在运行？直接打开
+' 1) Already running on default port? Open it directly.
 If HealthOk(DEF_PORT) Then
   OpenBrowser DEF_PORT
   WScript.Quit
 End If
 
-' 2) 上次运行顺延过端口？若该端口上确实是 BiliNest，直接打开
+' 2) Did we advance ports last run? If that port is really BiliNest, open it.
 Dim lastPort
 lastPort = ReadPortFile()
 If lastPort > 0 And lastPort <> DEF_PORT Then
@@ -35,15 +36,15 @@ If lastPort > 0 And lastPort <> DEF_PORT Then
   End If
 End If
 
-' 3) 启动前清掉旧的端口文件，避免读到上一次的残留
+' 3) Clear stale port file before starting, to avoid reading old value.
 Dim portFilePath
 portFilePath = fso.BuildPath(scriptDir, PORT_FILE)
 If fso.FileExists(portFilePath) Then fso.DeleteFile portFilePath
 
-' 4) 启动本地代理（窗口样式 0 = 隐藏，不等待）
+' 4) Start the local server (window style 0 = hidden, do not wait).
 shell.Run "node server.mjs", 0, False
 
-' 5) 轮询等待服务就绪：优先读端口文件，兜底检查默认端口
+' 5) Poll until ready: prefer the port file, fall back to default port.
 Dim i, p
 For i = 1 To MAX_WAIT
   WScript.Sleep 500
@@ -59,7 +60,7 @@ For i = 1 To MAX_WAIT
   End If
 Next
 
-' 6) 超时兜底：按端口文件或默认端口最后再试一次
+' 6) Timeout fallback: try the port file or default port one last time.
 p = ReadPortFile()
 If p > 0 And HealthOk(p) Then
   OpenBrowser p
@@ -69,7 +70,7 @@ End If
 WScript.Quit
 
 ' ------------------------------------------------------------
-' 读取 bilinest.port（纯数字文本），失败返回 0
+' Read bilinest.port (plain numeric text); return 0 on failure.
 ' ------------------------------------------------------------
 Function ReadPortFile()
   On Error Resume Next
@@ -86,8 +87,9 @@ Function ReadPortFile()
 End Function
 
 ' ------------------------------------------------------------
-' 健康检查：确认 /api/health 返回且响应里确实有 "bilinest"
-' （防止 4173 被别的程序占用时，误打开别人的页面）
+' Health check: confirm /api/health returns and the response
+' actually contains "bilinest" (so we don't open a stranger's
+' page if 4173 is taken by something else).
 ' ------------------------------------------------------------
 Function HealthOk(port)
   On Error Resume Next
@@ -106,7 +108,7 @@ Function HealthOk(port)
 End Function
 
 ' ------------------------------------------------------------
-' 打开 BiliNest
+' Open BiliNest in the default browser.
 ' ------------------------------------------------------------
 Sub OpenBrowser(port)
   Dim s

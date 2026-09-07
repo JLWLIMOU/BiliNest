@@ -1670,11 +1670,11 @@
     // 旧版“每集一条”记录归并为整季一条（保留各集独立进度）
     normalizeHistory();
     state.episodes = episodes;
-    renderEpisodeList(cid, page);
-    updateEpisodeNav();
     els.episodePanel.hidden = false;
     els.playerLayout.classList.add('has-episodes');
     sizeEpisodePanel();
+    renderEpisodeList(cid, page, true);
+    updateEpisodeNav();
   }
 
   /** 播放指定索引的剧集（上一集 / 下一集 / 点击选集共用） */
@@ -1727,7 +1727,7 @@
     if (h > 0) els.episodePanel.style.maxHeight = h + 'px';
   }
 
-  function renderEpisodeList(currentCid, currentPage) {
+  function renderEpisodeList(currentCid, currentPage, scrollToActive) {
     var html = '';
     var lastSection = null;
     state.episodes.forEach(function (ep, i) {
@@ -1746,17 +1746,19 @@
         '</button>';
     });
     els.episodeList.innerHTML = html;
-    // 播放时自动把当前集滚到可见位置，并尽量保留其前两集作为视觉上下文
-    requestAnimationFrame(scrollEpisodeToActive);
+    if (scrollToActive) requestAnimationFrame(scrollEpisodeToActive);
   }
 
-  /** 选集面板自动滚动：让正在播放的剧集可见，且尽量露出其前两集 */
   function scrollEpisodeToActive() {
     var panel = els.episodePanel;
-    var active = els.episodeList.querySelector('.episode-row.active');
-    if (!panel || panel.hidden || !active) return;
+    if (!panel || panel.hidden) return;
+    var active = panel.querySelector('.episode-row.active');
+    if (!active) return;
     var rowH = active.offsetHeight || 40;
-    panel.scrollTop = Math.max(0, active.offsetTop - rowH * 2);
+    var target = Math.max(0, active.offsetTop - rowH * 2);
+    if (Math.abs(panel.scrollTop - target) > rowH) {
+      panel.scrollTop = target;
+    }
   }
 
   async function getVideoInfoCached(bvid) {

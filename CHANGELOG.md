@@ -14,7 +14,7 @@
 
 ---
 
-## [Unreleased]（v1.0.1 之后的更新，待发布）
+## [1.0.2] - 2026-09-07
 
 ### Added（新增）
 
@@ -26,6 +26,72 @@
     - 提示标签是挂在 `document.body` 的独立元素（portal 方式），避免被选集面板 `overflow-y: auto` 裁剪；
     - 定位逻辑 `showEpisodeTooltip()`：优先行右侧（`rect.right + 10`），放不下再放左侧，垂直居中并钳制在视口内；
     - 样式 `.bilinest-ep-tooltip`：深色圆角气泡、`pointer-events: none`、`max-width: min(340px, 60vw)`。
+
+- **DASH 自适应码率播放**：B站视频从 durl（单一 mp4 地址）切换为 DASH 协议，dash.js 根据网络带宽自动切换码率。
+  - 涉及文件：`server.mjs`、`public/player.js`、`public/index.html`、`public/vendor/dash.all.min.js`、`public/vendor/artplayer-plugin-dash-control.min.js`
+  - 技术细节：
+    - 服务端新增 `/api/dash.mpd`：用 WBI 签名请求 `/x/player/wbi/playurl`（fnval=4048），将 B 站非标准 DASH JSON 转换为标准 MPD；
+    - MPD 仅保留 H.264（avc1）+ AAC（mp4a）编码，过滤 HEVC/AV1 避免 Chrome 硬解失败；
+    - 视频/音频流通过 `/api/video` 本地代理转发（带正确 Referer），MPD BaseURL 为相对路径；
+    - dash.js 通过 `httpHeaders` 透传用户 Cookie，确保高清晰度不被风控拦截；
+    - 前端 `customType.dash`：ArtPlayer v5 以 `fn(videoEl, url, art)` 形式调用，切集时先 `art.dash.reset()` 释放旧实例。
+
+- **清晰度下拉选择**：新增 `artplayer-plugin-dash-control` 插件，由 dash.js 码率列表自动生成清晰度下拉菜单。
+  - 涉及文件：`public/player.js`、`public/vendor/artplayer-plugin-dash-control.min.js`
+
+- **字幕改用 ArtPlayer 原生 VTT 组件**：移除自绘字幕层，B站 CC 字幕转为 WebVTT 格式（Blob URL），通过 `art.subtitle.switch()` 加载。
+  - 涉及文件：`public/player.js`
+  - 技术细节：
+    - 新增 `subtitleBodyToVtt()` 将 `{from,to,content}[]` 转为 WebVTT 文本；
+    - 用 `URL.createObjectURL` 生成 Blob URL，切集/重置时自动 `revokeObjectURL` 防止内存泄漏；
+    - 字幕位置/字号设置仍可通过控制条微调，持久化到 localStorage。
+
+### Fixed（修复）
+
+- **CSP `worker-src` 缺失**：添加 `worker-src 'self' blob:`，解决 dash.js WebWorker 加载被 Content Security Policy 拦截。
+  - 涉及文件：`public/index.html`
+
+- **全屏弹幕加速**：全屏切换时弹幕速度异常变快。
+  - 涉及文件：`public/player.js`
+  - 技术细节：覆盖 `dp.resize`，在插件重置 transition 前按宽度比例修正 `$restTime`；新增 `lastDanmakuWidth` 状态追踪容器宽度。
+
+- **弹幕重复/残留**：切集后弹幕堆积不消失。
+  - 涉及文件：`public/player.js`
+  - 技术细节：`p.load()` 改为无参调用（重置队列后重新加载），避免追加模式导致弹幕堆积。
+
+- **选集面板执行顺序**：进入播放页时当前集未自动滚动到可见位置。
+  - 涉及文件：`public/app.js`
+  - 技术细节：面板先显示 → `sizeEpisodePanel()` → 再渲染列表 → 最后滚动到当前集，修复 `offsetTop` 为 0 的布局问题；`scrollEpisodeToActive` 增加 `Math.abs` 阈值判断（差值超过一行才滚动），避免切集时无意义跳转。
+
+- **弹幕 protobuf 解码崩溃**：异常弹幕包导致整包解析失败。
+  - 涉及文件：`server.mjs`
+  - 技术细节：`decodeDmSeg` 增加单条 try/catch + wireType 校验，`vInt`/`vStr` 按 wireType 取值，异常包跳过不拖垮整包。
+
+- **选集面板溢出**：剧集数较多时选集面板撑满屏幕。
+  - 涉及文件：`public/styles.css`
+  - 技术细节：`.episode-panel` 添加 `max-height: calc(100vh - var(--topbar-h) - 40px)`。
+
+- **dash.js 实例泄漏**：切换视频时旧 dash.js 实例未释放。
+  - 涉及文件：`public/player.js`
+  - 技术细节：`reset()` / `loadBili()` 中先 `art.dash.reset()` 释放旧实例，再创建新实例。
+
+- **视频加载错误诊断不足**：本地文件播放失败时提示信息过于笼统。
+  - 涉及文件：`public/player.js`
+  - 技术细节：`handleLoadError` 新增 `console.error` 输出 error.code + currentSrc；本地文件失败提示包含具体错误码文本（请求中止/网络异常/解码失败/地址不支持）。
+
+### Changed（变更）
+
+- **移除旧版 durl 播放重试/换源逻辑**：清晰度切换与重试由 dash.js 内部完成。
+  - 涉及文件：`public/player.js`
+  - 技术细节：移除 `MAX_URL_ATTEMPTS`、`MAX_FRESH_TRIES`、`MAX_QUALITY_TRIES`、`switchTo`、`reFetchPlayurl`、`fetchPlayurl`、`buildQualities`、`selectQuality`、`toProxiedUrl`。
+
+- **移除自绘控件**：弹幕开关、字幕位置滑块、字号下拉改由插件/原生 API 处理。
+  - 涉及文件：`public/player.js`
+  - 技术细节：移除自绘弹幕开关控件（保留插件内置 `display` 控制）、自绘字幕位置滑块/字号下拉（改用原生 subtitle API）；`showBiliControls` 控件列表精简为 `['danmaku', 'subtitle']`。
+
+- `launcher.vbs` 注释翻译为英文。
+
+- 弹幕插件配置新增 `emitter: false`，隐藏"发弹幕"输入框（只读观看模式）。
 
 ---
 

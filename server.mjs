@@ -352,6 +352,105 @@ async function fetchDanmakuUpstream(fullUrl, headers) {
 }
 
 /* ------------------------------------------------------------------
+ * 弹幕 protobuf 解码：B 站 dm/web/seg.so 返回 protobuf 二进制，
+ * 这里用手写的极简 protobuf 解码器解析为前端需要的 {elems:[...]} 结构，
+ * 不依赖任何第三方库（protobuf wire 格式本身很简单）。
+ * 字段对照（bilibili.community.service.dm.v1.DanmakuElem）：
+ *   id(1) progress(3,ms) mode(4) fontsize(5) color(6,uint32 RGB)
+ *   midHash(7) content(8) pool(12) idStr(13)
+ * 前端 fetchDanmakuSegments 已按 content/mode/progress/fontsize/color 读取。
+ * ------------------------------------------------------------------ */
+function readVarint(buf, pos) {
+  let result = 0n;
+  let shift = 0n;
+  let byte;
+  do {
+    byte = buf[pos++];
+    result |= BigInt(byte & 0x7f) << shift;
+    shift += 7n;
+  } while (byte & 0x80);
+  return { value: result, pos };
+}
+
+/** 解析一个 protobuf 消息，返回 { fieldNumber: [{ wireType, value }] }（varint→BigInt，长度型→Uint8Array） */
+function parseProtobufFields(buf) {
+  const fields = {};
+  let pos = 0;
+  const n = buf.length;
+  while (pos < n) {
+    const tag = readVarint(buf, pos);
+    pos = tag.pos;
+    const field = Number(tag.value >> 3n);
+    const wireType = Number(tag.value & 7n);
+    let value;
+    if (wireType === 0) {
+      const v = readVarint(buf, pos);
+      pos = v.pos;
+      value = v.value;
+    } else if (wireType === 2) {
+      const len = readVarint(buf, pos);
+      pos = len.pos;
+      const l = Number(len.value);
+      value = buf.subarray(pos, pos + l);
+      pos += l;
+    } else if (wireType === 1) {
+      value = buf.subarray(pos, pos + 8);
+      pos += 8;
+    } else if (wireType === 5) {
+      value = buf.subarray(pos, pos + 4);
+      pos += 4;
+    } else {
+      break; // 不支持的 wire type，停止解析避免死循环
+    }
+    (fields[field] || (fields[field] = [])).push({ wireType, value });
+  }
+  return fields;
+}
+
+function decodeDmSeg(buf) {
+  let top;
+  try {
+    top = parseProtobufFields(Buffer.from(buf));
+  } catch (e) {
+    log('[dm-seg] 解析失败：' + e.message);
+    return [];
+  }
+  const elems = top[1] || []; // 字段 1：repeated DanmakuElem（长度型）
+  const out = [];
+  for (let i = 0; i < elems.length; i++) {
+    try {
+      const raw = elems[i].value;
+      const f = parseProtobufFields(raw);
+      // 按 wire type 取值，避免异常包把 varint 当字符串解析导致崩溃
+      const vInt = (fn) => {
+        const it = f[fn] && f[fn][0];
+        return it && it.wireType === 0 ? Number(it.value) : null;
+      };
+      const vStr = (fn) => {
+        const it = f[fn] && f[fn][0];
+        return it && it.wireType === 2 ? Buffer.from(it.value).toString('utf8') : '';
+      };
+      const id = vInt(1);
+      const idStr = vStr(13);
+      out.push({
+        id: idStr || (id != null ? String(id) : ''),
+        progress: vInt(3) != null ? vInt(3) : 0,
+        mode: vInt(4) != null ? vInt(4) : 1,
+        fontsize: vInt(5) != null ? vInt(5) : 25,
+        color: vInt(6) != null ? vInt(6) : 16777215,
+        midHash: vStr(7),
+        content: vStr(8),
+        pool: vInt(12) != null ? vInt(12) : 0,
+        idStr: idStr,
+      });
+    } catch (e) {
+      /* 单条弹幕解析失败则跳过，避免整包失败 */
+    }
+  }
+  return out;
+}
+
+/* ------------------------------------------------------------------
  * 弹幕分段接口（protobuf → JSON）：见原 1.5 节说明
  * ------------------------------------------------------------------ */
 async function handleDanmakuSegments(req, res, url) {
@@ -416,6 +515,146 @@ async function handleDanmakuSegments(req, res, url) {
   }
   log(`[dm-seg] cid=${cid} seg=${idx} failed: ${lastErr}`);
   return sendJson(res, 502, { code: -502, message: '弹幕分段获取失败：' + lastErr });
+}
+
+/* ------------------------------------------------------------------
+ * DASH MPD 生成：B 站 playurl(fnval=4048) 返回非标准 DASH JSON，
+ * 这里用 WBI 签名请求并转换为标准 MPD，交由 dash.js 播放。
+ * 视频/音频分段经 /api/video 本地代理（带正确 Referer）转发。
+ * ------------------------------------------------------------------ */
+function escXml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;',
+  })[c]);
+}
+
+async function fetchBiliDash(bvid, cid, qn, cookie) {
+  const params = new URLSearchParams({
+    bvid,
+    cid,
+    qn: String(qn || 80),
+    fnval: '4048',
+    fnver: '0',
+    fourk: '1',
+  });
+  const signed = await wbiSignQuery(params);
+  const qs = signed || params.toString();
+  const headers = { 'User-Agent': UA, Referer: BILI_REFERER, Accept: 'application/json, text/plain, */*' };
+  if (cookie) {
+    headers.Cookie = cookie;
+    if (!cookie.includes('buvid3=')) {
+      const finger = await getFingerprintCookies();
+      if (finger) headers.Cookie = cookie + '; ' + finger;
+    }
+  } else {
+    const finger = await getFingerprintCookies();
+    if (finger) headers.Cookie = finger;
+  }
+  const r = await fetchUpstream('https://api.bilibili.com', '/x/player/wbi/playurl', qs, headers);
+  if (r.status !== 200) throw new Error('playurl http=' + r.status);
+  const json = safeParse(r.body);
+  if (!json || json.code !== 0 || !json.data || !json.data.dash) {
+    throw new Error('playurl code=' + (json && json.code) + ' ' + (json && json.message));
+  }
+  return json.data.dash;
+}
+
+function segBaseXml(seg) {
+  if (!seg) return '';
+  const init = seg.initialization || seg.Initialization;
+  const idx = seg.indexRange || seg.IndexRange;
+  if (!init || !idx) return '';
+  return `<SegmentBase indexRange="${escXml(idx)}"><Initialization range="${escXml(init)}"/></SegmentBase>`;
+}
+
+function isPlayableCodec(codecs) {
+  const c = String(codecs || '').toLowerCase();
+  // 只保留兼容性最好的编码：H.264 视频 + AAC 音频。
+  // 浏览器（尤其 Windows 上的 Chrome）普遍不支持 HEVC(hev1/hvc1) 与 AV1(av01) 硬解，
+  // dash.js 按带宽选流时容易选中它们导致解码失败 → 原生 video:error → 播放器降级。
+  return c.startsWith('avc1') || c.startsWith('mp4a');
+}
+
+function buildMpd(dash) {
+  const duration = Number(dash.duration) || 0;
+  const mediaPresentationDuration = duration > 0 ? ` mediaPresentationDuration="PT${duration}S"` : '';
+  let videoReps = (dash.video || []).filter((v) => isPlayableCodec(v.codecs));
+  // 兜底：万一接口未返回 H.264 流（极少见），保留全部以免无可用清晰度
+  if (!videoReps.length) videoReps = dash.video || [];
+  videoReps = videoReps.map((v) => {
+    const alts = [v.baseUrl].concat(v.backup_url || []).filter(Boolean);
+    const base = '/api/video?url=' + encodeURIComponent(alts[0]) +
+      (alts.length > 1 ? '&alt=' + encodeURIComponent(alts.slice(1).join('|')) : '');
+    const sb = segBaseXml(v.SegmentBase || v.segmentBase);
+    return (
+      `<Representation id="${escXml(v.id)}" bandwidth="${Number(v.bandwidth) || 0}" codecs="${escXml(v.codecs || '')}" ` +
+      `mimeType="video/mp4" width="${Number(v.width) || 0}" height="${Number(v.height) || 0}" ` +
+      `frameRate="${Number(v.frameRate) || 30}">` +
+      `<BaseURL>${escXml(base)}</BaseURL>` +
+      sb +
+      `</Representation>`
+    );
+  }).join('');
+
+  let audioReps = (dash.audio || []).filter((a) => isPlayableCodec(a.codecs));
+  if (!audioReps.length) audioReps = dash.audio || [];
+  audioReps = audioReps.map((a) => {
+    const alts = [a.baseUrl].concat(a.backup_url || []).filter(Boolean);
+    const base = '/api/video?url=' + encodeURIComponent(alts[0]) +
+      (alts.length > 1 ? '&alt=' + encodeURIComponent(alts.slice(1).join('|')) : '');
+    const sb = segBaseXml(a.SegmentBase || a.segmentBase);
+    return (
+      `<Representation id="${escXml(a.id)}" bandwidth="${Number(a.bandwidth) || 0}" codecs="${escXml(a.codecs || '')}" ` +
+      `mimeType="audio/mp4" audioSamplingRate="${Number(a.audioSamplingRate) || 0}">` +
+      `<BaseURL>${escXml(base)}</BaseURL>` +
+      sb +
+      `</Representation>`
+    );
+  }).join('');
+
+  return `<?xml version="1.0" encoding="UTF-8"?>\n` +
+    `<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" profiles="urn:mpeg:dash:profile:isoff-on-demand:2011" ` +
+    `type="static" minBufferTime="PT4S"${mediaPresentationDuration}>\n` +
+    `<Period start="PT0S" id="0">\n` +
+    `<AdaptationSet id="0" contentType="video" segmentAlignment="true" par="16:9">\n` +
+    videoReps + `\n` +
+    `</AdaptationSet>\n` +
+    `<AdaptationSet id="1" contentType="audio" segmentAlignment="true">\n` +
+    audioReps + `\n` +
+    `</AdaptationSet>\n` +
+    `</Period>\n</MPD>`;
+}
+
+async function handleDashMpd(req, res, url) {
+  const bvid = String(url.searchParams.get('bvid') || '').trim();
+  const cid = String(url.searchParams.get('cid') || '').trim();
+  const qn = parseInt(url.searchParams.get('qn') || '80', 10);
+  const cookie = String(req.headers['x-bili-cookie'] || url.searchParams.get('ck') || '');
+  if (!/^BV[0-9A-Za-z]+$/.test(bvid) || !/^\d+$/.test(cid)) {
+    return sendJson(res, 400, { code: -400, message: '参数错误：需要合法的 bvid 与 cid' });
+  }
+  if (!rateLimitOk(req.socket.remoteAddress || 'local')) {
+    return sendJson(res, 429, { code: -429, message: '请求过于频繁，请稍后再试' });
+  }
+  try {
+    const dash = await fetchBiliDash(bvid, cid, qn, cookie);
+    if (!dash || !dash.video || !dash.video.length) {
+      return sendJson(res, 502, { code: -502, message: '未获取到 DASH 流' });
+    }
+    const mpd = buildMpd(dash);
+    const vKeep = (dash.video || []).filter((v) => isPlayableCodec(v.codecs)).length || (dash.video || []).length;
+    const aKeep = (dash.audio || []).filter((a) => isPlayableCodec(a.codecs)).length || (dash.audio || []).length;
+    log(`[dash.mpd] bvid=${bvid} cid=${cid} video=${vKeep}/${dash.video.length} audio=${aKeep}/${(dash.audio || []).length}`);
+    res.writeHead(200, {
+      'Content-Type': 'application/dash+xml; charset=utf-8',
+      'Cache-Control': 'no-store',
+      ...corsHeaders(),
+    });
+    return res.end(mpd);
+  } catch (e) {
+    log(`[dash.mpd] error: ${e.message}`);
+    return sendJson(res, 502, { code: -502, message: 'DASH 生成失败：' + e.message });
+  }
 }
 
 /* ------------------------------------------------------------------
@@ -1046,6 +1285,8 @@ const server = http.createServer((req, res) => {
       if (url.pathname === '/api/subtitle') return await handleSubtitleProxy(res, url);
       // 弹幕分段（protobuf 解码为 JSON，见 1.5 节）
       if (url.pathname === '/api/danmaku/segments') return await handleDanmakuSegments(req, res, url);
+      // DASH MPD（B 站 playurl → 标准 MPD，供 dash.js 播放）
+      if (url.pathname === '/api/dash.mpd') return await handleDashMpd(req, res, url);
       // 视频流代理（B 站 CDN 防盗链：浏览器直连会被 403，见 handleVideoProxy）
       if (url.pathname === '/api/video') return await handleVideoProxy(req, res, url);
       // 本机“停止服务”入口：只允许来自 127.0.0.1 / localhost 的请求
