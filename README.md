@@ -1,4 +1,4 @@
-# BiliNest · 无干扰 B 站学习播放器
+﻿# BiliNest · 无干扰 B 站学习播放器
 
 > B 站小窝：窝在里面安安静静看课，外面的推荐、广告、争吵都跟你无关。
 
@@ -61,7 +61,7 @@ See the Chinese section below for login methods, usage and the full feature list
 - **视频列表**：封面、标题、UP 主、时长；支持按“添加时间 / 发布时间”排序；分页加载。
 - **搜索**：首页搜索框实时筛选「添加的视频」；内容源弹窗可同时搜索收藏夹与「我的视频」；收藏夹视图内可搜索当前收藏夹的视频。
 - **栏位与二级页**：首页各栏位（继续学习 / 添加的视频 / 学习收藏夹）默认只显示前几个，超出后点「展开全部」进入二级浏览页，支持翻页、排序与搜索（不再横向滚动）。
-- **纯净播放**：应用内置自研播放器——用应用内的登录态获取 B 站 MP4 直链，**画质切换完全在页面内完成，永不跳转 B 站官网**；弹幕显示（**无弹幕输入框，不能发送弹幕**）、CC 字幕、播放/暂停/进度/音量/全屏均支持。播放地址服务暂不可用时自动降级为官方嵌入播放器。
+- **纯净播放**：应用内置自研播放器——用应用内的登录态获取 B 站 DASH 自适应码率流，**画质切换由 dash.js 自动完成，永不跳转 B 站官网**；弹幕显示（**无弹幕输入框，不能发送弹幕**）、CC 字幕、播放/暂停/进度/音量/全屏均支持。播放地址服务暂不可用时自动降级为官方嵌入播放器。
 - **选集**：支持多 P 视频与 UP 主合集（视频系列）的选集切换。
 - **单个视频**：粘贴视频链接 / BV 号 / av 号即可添加。
 - **本地视频**：通过系统文件选择器添加本地视频文件（Chromium 内核浏览器可跨会话保留文件权限，其余浏览器本次会话可播放）。
@@ -113,6 +113,35 @@ powershell -ExecutionPolicy Bypass -File create-shortcut.ps1
 ### 直接用 `index.html` 打开（不推荐）
 
 也可直接双击 `public/index.html` 预览界面。此时界面能展示，但收藏夹 / B 站接口会被浏览器跨域策略拦截；请按上面步骤启动本地代理后使用。
+
+---
+
+## 更新方法
+
+> **重要：你的个人数据（登录态、收藏夹、观看记录、星级）全部保存在浏览器中（localStorage / IndexedDB），不在项目文件夹内。更新代码文件不会丢失这些数据——但请按下面的方式操作，不要直接删除整个文件夹再重新下载。**
+
+### 方式一：Git 拉取（推荐）
+
+```bash
+cd bilinest
+git pull origin main
+```
+
+重启服务即可（双击 `launcher.vbs` / `./start.sh` / `npm start`）。无需 `npm install`，所有依赖已 vendor 化。
+
+### 方式二：下载 Release ZIP
+
+1. 到 [Releases](https://github.com/JLWLIMOU/BiliNest/releases) 下载最新 `Source code (zip)`；
+2. **不要删除旧文件夹**，将 ZIP 解压到一个临时目录；
+3. 把解压出来的文件**覆盖复制**到旧项目文件夹（替换同名文件，保留你自己的 `.env` 等个人配置）；
+4. 重启服务。
+
+### 注意事项
+
+- **不要整个文件夹删除后重新下载**：虽然用户数据在浏览器中不会丢，但你可能自定义过 `.env`（OAuth 配置）等文件，删除就没了。
+- **`.env` 不会被覆盖**：该文件在 `.gitignore` 中，不会被 git pull 或 ZIP 解压影响。
+- **`bilinest.port` 是临时文件**：记录当前实际端口号，重启后会自动更新，无需关心。
+- **桌面快捷方式不受影响**：更新后无需重新创建。
 
 ---
 
@@ -173,10 +202,10 @@ bilinest/
 │   ├── storage.js        # localStorage 状态管理
 │   ├── api.js            # B 站 API 客户端（代理优先）
 │   ├── localfiles.js     # 本地视频：File System Access API + IndexedDB
-│   ├── player.js         # 自研播放器：MP4 直链 + 画质菜单 + 弹幕 + CC 字幕
+│   ├── player.js         # 自研播放器：DASH + dash.js + 弹幕 + CC 字幕
 │   ├── app.js            # 主逻辑：渲染、播放、设置、OAuth 回调
 │   ├── oauth_done.html   # OAuth 完成页
-│   └── vendor/           # ArtPlayer v5（MIT）、qrcode.js（MIT）
+│   └── vendor/           # ArtPlayer v5（MIT）、dash.js（BSD）、dash-control（MIT）、qrcode.js（MIT）
 └── README.md
 ```
 
@@ -199,9 +228,9 @@ bilinest/
 | `x/web-interface/view` | 视频详情（分 P / 合集） |
 | `x/web-interface/nav` | WBI 密钥来源（仅服务器内部） |
 
-### 播放器说明（ArtPlayer 内核）
+### 播放器说明（ArtPlayer + dash.js）
 
-自研播放器通过本地代理请求官方 `x/player/wbi/playurl` 接口（带应用内登录态），拿到 progressive MP4 直链交给 **ArtPlayer v5**（MIT）播放：画质菜单来自 `accept_quality`，切换仅重新请求地址、不离开页面；弹幕用官方网页端的分段 protobuf 接口 `x/v2/dm/wbi/web/seg.so`（每 6 分钟一包、每包最多 6000 条，完整度远高于旧 XML 的“实时弹幕池”），本地服务解码为 JSON 后交给 Canvas 渲染（只显示、不能发送），接口失败时自动回退旧 `x/v1/dm/list.so`；CC 字幕用 `x/player/v2`；播放地址失败自动降级官方嵌入播放器。B 站 CDN 防盗链由 `/api/video` 代理统一带正确 Referer 转发。
+自研播放器通过本地代理请求官方 `x/player/wbi/playurl` 接口（带应用内登录态），获取 **DASH 自适应码率流**（fnval=4048）交给 **dash.js** 播放：dash.js 根据网络带宽自动切换码率，**ArtPlayer**（MIT）负责 UI 控件与弹幕渲染；清晰度菜单由 `artplayer-plugin-dash-control` 插件从 MPD 码率列表自动生成，切换仅重新加载 MPD、不离开页面；弹幕用官方网页端的分段 protobuf 接口 `x/v2/dm/wbi/web/seg.so`（每 6 分钟一包、每包最多 6000 条，完整度远高于旧 XML 的“实时弹幕池”），本地服务解码为 JSON 后交给 Canvas 渲染（只显示、不能发送），接口失败时自动回退旧 `x/v1/dm/list.so`；CC 字幕转为 WebVTT 格式通过 ArtPlayer 原生字幕模块加载；播放地址失败自动降级官方嵌入播放器。B 站 CDN 防盗链由 `/api/video` 代理统一带正确 Referer 转发。
 
 ---
 
@@ -246,6 +275,8 @@ npx electron .
 | 组件 | 版本 | 作者 | 许可证 | 用途 |
 | --- | --- | --- | --- | --- |
 | [ArtPlayer](https://github.com/zhw2590582/ArtPlayer) | v5.4.0 | Harvey Zhao | MIT（见 `vendor/ARTPLAYER_LICENSE`） | 页内视频播放器内核 |
+| [dash.js](https://github.com/Dash-Industry-Forum/dash.js) | v4.5.2 | Dash Industry Forum | BSD（见 `vendor/dash.all.min.js` 文件头） | DASH 自适应码率流播放引擎 |
+| [artplayer-plugin-dash-control](https://github.com/CGeLon-iwgh/artplayer-plugin-dash-control) | — | CGeLon | MIT | ArtPlayer 清晰度下拉控件（配合 dash.js） |
 | [qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator) | — | Kazuhiko Arase | MIT（见 `public/vendor/qrcode.js` 文件头） | 登录二维码渲染 |
 
 本项目本身以 MIT 许可证发布（见仓库根目录 `LICENSE`）。
