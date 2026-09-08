@@ -27,7 +27,13 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PUBLIC_DIR = path.join(__dirname, 'public');
+// pkg 打包时 public/ 嵌在虚拟快照根目录下（与 bundle 同级的 public/），
+// 需用 process.pkg.entrypoint 推算快照根目录；node 直接运行时沿用 __dirname。
+const SNAPSHOT_ROOT = (() => {
+  try { return process.pkg ? path.resolve(path.dirname(process.pkg.entrypoint), '..') : null; }
+  catch { return null; }
+})();
+const PUBLIC_DIR = path.join(SNAPSHOT_ROOT || __dirname, 'public');
 const LOG_FILE = path.join(__dirname, 'bilinest.log');
 const PORT_FILE = path.join(__dirname, 'bilinest.port');
 
