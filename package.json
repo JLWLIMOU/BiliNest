@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "dev": "node server.mjs"
+    "dev": "node server.mjs",
+    "build:exe": "pkg . -t node22-win-x64 --output bilinest.exe"
   },
   "engines": {
     "node": ">=18"
@@ -17,5 +18,8 @@
     "极简",
     "播放器"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "pkg": {
+    "assets": ["public/**/*"]
+  }
 }

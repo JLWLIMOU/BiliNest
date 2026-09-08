@@ -2,9 +2,10 @@
 ' BiliNest Launcher
 ' ------------------------------------------------------------
 ' 1. Check whether the local proxy is already running;
-' 2. If not, start "node server.mjs" in a hidden window;
+' 2. If not, start "bilinest.exe" (if available) or "node server.mjs"
+'    in a hidden window;
 ' 3. Wait until the service is ready, then open the browser.
-' If the default port 4173 is occupied, server.mjs auto-advances
+' If the default port 4173 is occupied, the server auto-advances
 ' to the next free port and writes it to bilinest.port; this
 ' script opens the correct address based on that file.
 ' ============================================================
@@ -19,6 +20,15 @@ Set fso = CreateObject("Scripting.FileSystemObject")
 scriptDir = fso.GetParentFolderName(WScript.ScriptFullName)
 Set shell = CreateObject("WScript.Shell")
 shell.CurrentDirectory = scriptDir
+
+' Determine the server executable: bilinest.exe (packaged) takes priority,
+' fall back to node server.mjs (for development / if exe not present).
+Dim serverCmd
+If fso.FileExists(fso.BuildPath(scriptDir, "bilinest.exe")) Then
+  serverCmd = "bilinest.exe"
+Else
+  serverCmd = "node server.mjs"
+End If
 
 ' 1) Already running on default port? Open it directly.
 If HealthOk(DEF_PORT) Then
@@ -42,7 +52,7 @@ portFilePath = fso.BuildPath(scriptDir, PORT_FILE)
 If fso.FileExists(portFilePath) Then fso.DeleteFile portFilePath
 
 ' 4) Start the local server (window style 0 = hidden, do not wait).
-shell.Run "node server.mjs", 0, False
+shell.Run serverCmd, 0, False
 
 ' 5) Poll until ready: prefer the port file, fall back to default port.
 Dim i, p
