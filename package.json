@@ -8,7 +8,7 @@
   "scripts": {
     "start": "node server.mjs",
     "dev": "node server.mjs",
-    "build:exe": "esbuild server.mjs --bundle --platform=node --format=cjs --outfile=dist/bundled.cjs && node -e \"const f='dist/bundled.cjs';let c=require('fs').readFileSync(f,'utf8');c=c.replace(/var import_meta = \\{\\};\\s*\\nvar __dirname = import_node_path\\.default\\.dirname\\(\\(0, import_node_url\\.fileURLToPath\\)\\(import_meta\\.url\\)\\);/,'var __dirname = import_node_path.default.dirname(process.execPath);');require('fs').writeFileSync(f,c,'utf8')\" && pkg dist/bundled.cjs -t node22-win-x64 --output dist/bilinest.exe --config package.json"
+    "build:exe": "esbuild server.mjs --bundle --platform=node --format=cjs --outfile=dist/bundled.cjs && node -e \"const f='dist/bundled.cjs';let c=require('fs').readFileSync(f,'utf8');c=c.replace(/var import_meta = \\{\\};\\s*\\nvar __dirname = import_node_path\\.default\\.dirname\\(\\(0, import_node_url\\.fileURLToPath\\)\\(import_meta\\.url\\)\\);/,'var __dirname = import_node_path.default.dirname(process.execPath);');require('fs').writeFileSync(f,c,'utf8')\" && pkg dist/bundled.cjs -t node22-win-x64 --output dist/BiliNest.exe --config package.json && node patch-subsystem.mjs dist/BiliNest.exe"
   },
   "engines": {
     "node": ">=18"
