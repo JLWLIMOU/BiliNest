@@ -185,7 +185,9 @@ window.BiliNestPlayer = (function () {
         }
       ],
       plugins: [
-        window.artplayerPluginDashControl ? window.artplayerPluginDashControl() : null,
+        window.artplayerPluginDashControl ? window.artplayerPluginDashControl({
+          quality: { control: true, title: '画质' }
+        }) : null,
         artplayerPluginDanmuku({
           // 弹幕数据由 loadDanmaku 经 danmakuPlugin().load() 动态注入；
           // 这里给一个兜底函数，插件初始化时读取一次
