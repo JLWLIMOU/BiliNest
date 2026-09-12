@@ -14,6 +14,27 @@
 
 ---
 
+## [Unreleased]
+
+### Added（新增）
+
+- **移除学习 UP主**：学习 UP主 卡片右侧新增「✕」按钮，点击后弹出确认框，确认即从列表中移除。
+  - 涉及文件：`public/app.js`
+  - 技术细节：复用 `confirmAction()`（与「移除学习收藏夹」一致）；卡片渲染新增 `data-up-remove`，`onDashboardClick` 中在卡片跳转之前处理并 `stopPropagation`，避免误触发跳转 B站主页。
+
+- **空状态补充「添加 UP主」入口**：仪表盘没有任何内容时（包括移除最后一个 UP主 之后），空状态在「打开内容源」旁新增「添加 UP主」按钮，避免进入再也加不了 UP主 的死角。
+  - 涉及文件：`public/app.js`
+
+### Fixed（修复）
+
+- **主页标签页选中状态刷新后丢失**：`state.activeDashTab` 从未从 localStorage 恢复，「记住上次选中的标签」实际不生效（刷新后总是回到「继续学习」）。
+  - 涉及文件：`public/app.js`
+  - 技术细节：`init()` 中在 `loadDashboard()` 之前补 `state.activeDashTab = store.get('activeDashTab') || 'continue'`。
+
+- **学习 UP主 卡片排版错误（竖排）**：卡片标记同时带有通用 `.card` 类，其 `flex-direction: column` 覆盖了 `.up-card` 的横排意图，导致头像居中在上、文字堆叠在下。
+  - 涉及文件：`public/styles.css`
+  - 技术细节：`.up-card` 显式补 `flex-direction: row`。
+
 ## [1.1.0] - 2026-09-12
 
 ### Added（新增）

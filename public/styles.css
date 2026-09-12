@@ -1238,6 +1238,7 @@ details.help .steps { margin-top: 4px; }
 
 .up-card {
   display: flex;
+  flex-direction: row;
   align-items: center;
   gap: 14px;
   background: var(--surface);

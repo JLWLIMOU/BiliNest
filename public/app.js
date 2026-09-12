@@ -225,7 +225,10 @@
         '<div class="empty" style="padding:90px 20px">' +
           '<p class="empty-title">还没有学习内容</p>' +
           '<p>点击右上角「内容源」：把收藏夹添加为学习收藏夹、粘贴单个视频链接，或选择本地视频。</p>' +
-          '<button type="button" id="btnEmptyAction" class="btn primary">打开内容源</button>' +
+          '<div class="row">' +
+            '<button type="button" id="btnEmptyAction" class="btn primary">打开内容源</button>' +
+            '<button type="button" id="btnEmptyAddUp" class="btn ghost">添加 UP主</button>' +
+          '</div>' +
         '</div>';
       return;
     }
@@ -2982,6 +2985,12 @@
       else removeCustomVideo(rmBtn.dataset.cardRemove);
       return;
     }
+    var upRm = e.target.closest('[data-up-remove]');
+    if (upRm) {
+      e.stopPropagation();
+      removeStudyUp(upRm.dataset.upRemove);
+      return;
+    }
     var more = e.target.closest('[data-browse]');
     if (more) {
       openBrowse(more.dataset.browse);
@@ -2990,6 +2999,11 @@
     var action = e.target.closest('#btnEmptyAction');
     if (action) {
       openSourceModal();
+      return;
+    }
+    var emptyAddUp = e.target.closest('#btnEmptyAddUp');
+    if (emptyAddUp) {
+      openAddUpModal();
       return;
     }
     // 星级
@@ -3203,6 +3217,7 @@
             starControl(up.mid, up.stars, 'studyUp') +
           '</div>' +
         '</div>' +
+        '<button type="button" class="card-remove" data-up-remove="' + esc(String(up.mid)) + '" title="移除 UP主" aria-label="移除">✕</button>' +
       '</div>'
     );
   }
@@ -3269,6 +3284,19 @@
     }
   }
 
+  /** 从“学习 UP主”移除（确认后） */
+  function removeStudyUp(mid) {
+    var ups = store.get('studyUps') || [];
+    var u = ups.find(function (s) { return String(s.mid) === String(mid); });
+    var name = (u && u.name) || '该 UP主';
+    confirmAction('确定从学习 UP主中移除「' + esc(name) + '」？', function () {
+      var next = ups.filter(function (s) { return String(s.mid) !== String(mid); });
+      store.set({ studyUps: next });
+      toast('已移除 ' + name, 'success');
+      if (state.currentView === 'dashboard') renderDashboard();
+    });
+  }
+
   /* ---------------- 启动 ---------------- */
   (async function init() {
     applyTheme();
@@ -3302,6 +3330,8 @@
     if (!state.backend.ok) {
       els.backendBanner.hidden = false;
     }
+    // 恢复上次选中的主页标签（非法/缺失时回落到「继续学习」）
+    state.activeDashTab = store.get('activeDashTab') || 'continue';
     await checkLogin();
     await loadDashboard();
     // 首次启动展示登录与设置引导
