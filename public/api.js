@@ -49,7 +49,8 @@ window.BiliNestAPI = (function () {
           return {
             ok: true,
             base: base,
-            oauthEnabled: !!(backendInfo && backendInfo.oauthEnabled)
+            oauthEnabled: !!(backendInfo && backendInfo.oauthEnabled),
+            appVersion: (backendInfo && backendInfo.appVersion) || ''
           };
         }
       } catch (e) {
@@ -57,7 +58,7 @@ window.BiliNestAPI = (function () {
       }
     }
     backendBase = null;
-    return { ok: false, base: null, oauthEnabled: false };
+    return { ok: false, base: null, oauthEnabled: false, appVersion: '' };
   }
 
   /**

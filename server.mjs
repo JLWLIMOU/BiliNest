@@ -48,6 +48,16 @@ const DATA_DIR = process.env.BILINEST_DATA_DIR
 const STATE_BACKUP_FILE = path.join(DATA_DIR, 'state-backup.json');
 const STATE_BACKUP_LIMIT = 8 * 1024 * 1024;   // 8MB，够装很长的观看记录
 
+// 应用版本：从 package.json 读，避免版本号两处手写。
+// /api/health 会带上它，设置 →「关于」据此显示，发布时也能一眼核对。
+const APP_VERSION = (() => {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8')).version || '';
+  } catch {
+    return '';
+  }
+})();
+
 /** 读取请求体（限长，避免被塞大文件） */
 function readJsonBody(req, limit = 4096) {
   return new Promise((resolve) => {
@@ -1336,7 +1346,7 @@ const server = http.createServer((req, res) => {
         return sendJson(res, 405, { code: -405, message: '仅支持 GET 请求' });
       }
       if (url.pathname === '/api/health') {
-        return sendJson(res, 200, { ok: true, app: 'bilinest', oauthEnabled: oauth.enabled, version: 1 });
+        return sendJson(res, 200, { ok: true, app: 'bilinest', oauthEnabled: oauth.enabled, version: 1, appVersion: APP_VERSION });
       }
       // 客户端状态备份（仅供换环境时无感迁移）：仅同源可读写
       if (url.pathname === '/api/state/backup') {

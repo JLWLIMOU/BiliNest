@@ -2770,7 +2770,9 @@
         '</section>' +
         '<section class="settings-panel' + (tab === 'about' ? ' active' : '') + '" data-settings-panel="about">' +
           '<h3>关于</h3>' +
-          '<p class="muted small">BiliNest 仅供个人学习使用。请遵守 B 站用户协议与 API 使用规范；本工具不会向任何第三方发送你的凭据。<br>播放器内核版本：' +
+          '<p class="muted small">BiliNest ' +
+            (state.backend && state.backend.appVersion ? 'v' + state.backend.appVersion : '（版本未知：本地服务未连接，或仍在跑旧版）') +
+            ' · 仅供个人学习使用。请遵守 B 站用户协议与 API 使用规范；本工具不会向任何第三方发送你的凭据。<br>播放器内核版本：' +
             (window.BiliNestPlayer && window.BiliNestPlayer.VERSION ? 'v' + window.BiliNestPlayer.VERSION : '未知') +
             '（若低于 v3，请强制刷新页面 Ctrl+F5 后重试）</p>' +
           '<div class="row">' + guideBtn + '</div>' +
