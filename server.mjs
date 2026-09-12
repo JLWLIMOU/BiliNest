@@ -91,6 +91,9 @@ const API_ROUTES = new Map([
   ['/x/player/wbi/v2', 'https://api.bilibili.com'],              // 字幕/弹幕配置（WBI 签名版，官方现用）
   ['/x/v1/dm/list.so', 'https://api.bilibili.com'],              // 弹幕 XML（自研播放器）
   ['/x/v2/account/myinfo', 'https://app.bilibili.com'],          // 当前账号信息（Cookie 或 access_key）
+
+  // --- UP主 功能 ---
+  ['/x/web-interface/card', 'https://api.bilibili.com'],             // UP主卡片信息
 ]);
 
 // 这些接口在被风控拦截（412）时，会尝试用 WBI 签名重试一次

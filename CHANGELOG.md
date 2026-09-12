@@ -14,6 +14,35 @@
 
 ---
 
+## [1.1.0] - 2026-09-12
+
+### Added（新增）
+
+- **学习 UP主书签**：主页新增「学习 UP主」栏，输入 UID 添加 UP主 卡片（头像/名称/简介/粉丝数/星级评分），点击卡片跳转 B站个人主页。
+  - 涉及文件：`server.mjs`、`public/storage.js`、`public/api.js`、`public/app.js`、`public/styles.css`
+  - 技术细节：
+    - 新增 `/x/web-interface/card` 代理路由获取 UP主 信息；
+    - `studyUps` 存储于 localStorage，结构 `{ mid, name, face, sign, fans, videos, level, addedAt, stars }`；
+    - 卡片点击 `window.open('https://space.bilibili.com/{mid}', '_blank')`；
+    - 补充 `fmtCount`、`fixAvatar` 工具函数。
+
+- **主页标签页**：主页从纵向堆叠改为标签页切换模式（继续学习 / 添加的视频 / 学习收藏夹 / 学习 UP主），每次只显示一个栏位，标签状态持久化。
+  - 涉及文件：`public/app.js`、`public/styles.css`、`public/storage.js`
+  - 技术细节：
+    - `renderDashboard()` 重写为标签栏 + 内容区两层结构；
+    - `state.activeDashTab` 持久化到 localStorage，记住上次选中的标签；
+    - 每个标签独占整个主页空间，默认显示更多卡片（继续学习 12 / 添加的视频 20 / 收藏夹 12 / UP主 12）；
+    - 搜索框仅在「添加的视频」标签下显示。
+
+### Changed（变更）
+
+- **UP主 功能确定只做最小版本，完整规划作废**：本版本对 UP主 只做「本地书签」——输入 UID 添加、卡片展示头像/名称/简介/粉丝数/星级、点击卡片跳转 B站个人主页。原规划中的「搜索 UP主」「已关注列表」「站内 UP主 主页（投稿 / 合集 / 列表）」因功能过于复杂，已主动放弃，对应规划文档 `docs/feature-add-up.md` 一并删除。
+  - 涉及文件：`docs/feature-add-up.md`（删除）、`CHANGELOG.md`
+  - 技术细节：
+    - 不新增以下代理路由：`/x/web-interface/wbi/search/type`、`/x/relation/followings`、`/x/space/upstat`、`/x/space/wbi/arc/search`、`/x/space/navnum`、`/x/polymer/web-space/seasons_series_list`、`/x/polymer/web-space/seasons_archives_list`、`/x/series/archives`；
+    - 不新增以下前端 API 与视图：`searchUser` / `myFollowing` / `userUpstat` / `userVideos` / `spaceNavnum` / `seasonsSeriesList` / `seasonArchives` / `seriesArchives`、`upSpaceView`；
+    - 实际只保留 `/x/web-interface/card`（`api.userCard`）一个新增接口。
+
 ## [1.0.2] - 2026-09-07
 
 ### Added（新增）

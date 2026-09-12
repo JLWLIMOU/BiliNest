@@ -295,6 +295,17 @@ window.BiliNestAPI = (function () {
     return null;
   }
 
+  // ---- UP主 功能 ----
+
+  /** UP主卡片信息（无需 WBI，含粉丝数/视频数） */
+  async function userCard(mid, opts) {
+    opts = opts || {};
+    return request('/x/web-interface/card', {
+      params: { mid: mid, photo: 1 },
+      creds: opts.creds
+    });
+  }
+
   return {
     init: init,
     request: request,
@@ -309,6 +320,7 @@ window.BiliNestAPI = (function () {
     danmakuSegments: danmakuSegments,
     playerV2: playerV2,
     subtitleJson: subtitleJson,
-    parseVideoRef: parseVideoRef
+    parseVideoRef: parseVideoRef,
+    userCard: userCard
   };
 })();

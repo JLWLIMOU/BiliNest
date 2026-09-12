@@ -377,8 +377,33 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
 
 .load-more { text-align: center; margin-top: 28px; }
 
-/* ---------- 主页（仪表盘）分栏 ---------- */
-.dashboard { display: flex; flex-direction: column; gap: 34px; }
+/* ---------- 主页（仪表盘） ---------- */
+.dashboard { display: flex; flex-direction: column; gap: 0; }
+
+/* 标签页 */
+.dash-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 24px;
+}
+.dash-tab {
+  padding: 12px 24px;
+  cursor: pointer;
+  font-weight: 500;
+  font-size: 15px;
+  color: var(--muted);
+  border: none;
+  background: none;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+.dash-tab:hover { color: var(--text); }
+.dash-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
 
 .dash-section { display: flex; flex-direction: column; gap: 14px; }
 
@@ -1202,6 +1227,85 @@ details.help .steps { margin-top: 4px; }
   border: 2px solid var(--bg);
 }
 ::-webkit-scrollbar-track { background: transparent; }
+
+/* ---------- UP主 功能 ---------- */
+
+.up-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px;
+}
+
+.up-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 14px;
+  position: relative;
+  cursor: pointer;
+  text-decoration: none;
+  color: inherit;
+}
+.up-card:hover { border-color: var(--accent); }
+.up-card.up-add-card { cursor: pointer; }
+
+.up-avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: var(--bg);
+}
+.up-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.up-avatar-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--border-strong);
+  cursor: pointer;
+}
+.up-add-icon {
+  font-size: 24px;
+  color: var(--border-strong);
+  line-height: 1;
+}
+.up-card.up-add-card:hover .up-avatar-add { border-color: var(--accent); }
+.up-card.up-add-card:hover .up-add-icon { color: var(--accent); }
+
+.up-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.up-name {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.up-sign {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.up-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
 
 /* ---------- 响应式 ---------- */
 @media (max-width: 720px) {

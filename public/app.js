@@ -101,6 +101,19 @@
     });
   }
 
+  function fmtCount(n) {
+    n = parseInt(n, 10) || 0;
+    if (n >= 10000) return (n / 10000).toFixed(1).replace(/\.0$/, '') + '万';
+    return String(n);
+  }
+
+  /** 统一头像 URL：// → https:，http:// → https: */
+  function fixAvatar(url) {
+    if (!url) return '';
+    if (url.indexOf('//') === 0) return 'https:' + url;
+    return url.replace(/^http:\/\//i, 'https://');
+  }
+
   function fmtDuration(sec) {
     sec = Math.max(0, Math.round(Number(sec) || 0));
     var h = Math.floor(sec / 3600);
@@ -194,33 +207,56 @@
   }
 
   function renderDashboard() {
-    var html = '';
-    // 首页搜索框：搜索已添加的视频
-    html +=
-      '<div class="dash-search-wrap">' +
-        '<input id="dashSearch" class="search-input" type="search" placeholder="搜索已添加的视频…" autocomplete="off" value="' + esc(state.dashQuery) + '">' +
-      '</div>';
-    html += '<div id="dashContinue">' + renderContinueSection() + '</div>';
-    html += '<div id="dashAdded">' + renderAddedVideosSection() + '</div>';
-    html += '<div id="dashFolders">' + renderStudyFoldersSection() + '</div>';
+    var tab = state.activeDashTab || 'continue';
+    var tabs = [
+      { key: 'continue', label: '继续学习' },
+      { key: 'added', label: '添加的视频' },
+      { key: 'folders', label: '学习收藏夹' },
+      { key: 'ups', label: '学习 UP主' }
+    ];
 
     var hasAny =
       (store.get('watchHistory') || []).length ||
       (store.get('customVideos') || []).length ||
-      (store.get('studyFolders') || []).length;
+      (store.get('studyFolders') || []).length ||
+      (store.get('studyUps') || []).length;
     if (!hasAny) {
-      html =
-        '<div class="empty" style="grid-column:1/-1;padding:90px 20px">' +
+      els.dashboard.innerHTML =
+        '<div class="empty" style="padding:90px 20px">' +
           '<p class="empty-title">还没有学习内容</p>' +
           '<p>点击右上角「内容源」：把收藏夹添加为学习收藏夹、粘贴单个视频链接，或选择本地视频。</p>' +
           '<button type="button" id="btnEmptyAction" class="btn primary">打开内容源</button>' +
         '</div>';
+      return;
     }
-    els.dashboard.innerHTML = html;
-    // 封面加载失败时隐藏图片，避免破图
+
+    // 标签栏
+    var tabsHtml = '<div class="dash-tabs">';
+    for (var i = 0; i < tabs.length; i++) {
+      var t = tabs[i];
+      tabsHtml += '<button type="button" class="dash-tab' + (tab === t.key ? ' active' : '') + '" data-dash-tab="' + t.key + '">' + t.label + '</button>';
+    }
+    tabsHtml += '</div>';
+
+    // 搜索框（仅「添加的视频」标签显示）
+    var searchHtml = tab === 'added'
+      ? '<div class="dash-search-wrap"><input id="dashSearch" class="search-input" type="search" placeholder="搜索已添加的视频…" autocomplete="off" value="' + esc(state.dashQuery) + '"></div>'
+      : '';
+
+    // 当前标签内容
+    var contentHtml = '<div id="dashContent">';
+    if (tab === 'continue') contentHtml += renderContinueSection();
+    else if (tab === 'added') contentHtml += renderAddedVideosSection();
+    else if (tab === 'folders') contentHtml += renderStudyFoldersSection();
+    else if (tab === 'ups') contentHtml += renderStudyUpsSection();
+    contentHtml += '</div>';
+
+    els.dashboard.innerHTML = tabsHtml + searchHtml + contentHtml;
+
+    // 封面加载失败时隐藏图片
     var imgs = els.dashboard.querySelectorAll('img');
-    for (var i = 0; i < imgs.length; i++) {
-      imgs[i].addEventListener('error', function () {
+    for (var j = 0; j < imgs.length; j++) {
+      imgs[j].addEventListener('error', function () {
         this.style.display = 'none';
       });
     }
@@ -230,7 +266,7 @@
   function renderContinueSection() {
     var list = mergedHistoryList();
     if (!list.length) return '';
-    var LIMIT = 6;
+    var LIMIT = 12;
     var visible = list.slice(0, LIMIT);
     return (
       '<section class="dash-section">' +
@@ -381,7 +417,7 @@
         return '<option value="' + o[0] + '"' + ((store.get('sort') || 'add') === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
       })
       .join('');
-    var LIMIT = 8;
+    var LIMIT = 20;
     var visible = items.slice(0, LIMIT);
     var body;
     if (!items.length) {
@@ -415,7 +451,7 @@
         '<div class="empty-inline">尚未添加<b>学习收藏夹</b> —— 在「内容源」的收藏夹列表中点击「加入学习」即可显示在这里。<br>' +
         '也可以先在「内容源」里直接观看某个收藏夹的视频。</div>';
     } else {
-      var LIMIT = 8;
+      var LIMIT = 12;
       var visible = folders.slice(0, LIMIT);
       body =
         '<div class="grid folder-grid">' + visible.map(folderCard).join('') + '</div>' +
@@ -729,6 +765,12 @@
       if (!f) return;
       f.stars = val;
       store.set({ studyFolders: folders });
+    } else if (scope === 'studyUp') {
+      var ups = store.get('studyUps') || [];
+      var u = ups.find(function (x) { return String(x.mid) === String(key); });
+      if (!u) return;
+      u.stars = val;
+      store.set({ studyUps: ups });
     } else {
       return;
     }
@@ -2829,7 +2871,7 @@
     els.dashboard.addEventListener('input', function (e) {
       if (e.target && e.target.id === 'dashSearch') {
         state.dashQuery = e.target.value;
-        var wrap = els.dashboard.querySelector('#dashAdded');
+        var wrap = els.dashboard.querySelector('#dashContent');
         if (wrap) wrap.innerHTML = renderAddedVideosSection();
       }
     });
@@ -2918,6 +2960,14 @@
 
   /** 主页（仪表盘）点击委托 */
   function onDashboardClick(e) {
+    // 标签页切换
+    var tabBtn = e.target.closest('[data-dash-tab]');
+    if (tabBtn) {
+      state.activeDashTab = tabBtn.dataset.dashTab;
+      store.set({ activeDashTab: state.activeDashTab });
+      renderDashboard();
+      return;
+    }
     var histRm = e.target.closest('[data-history-remove]');
     if (histRm) {
       e.stopPropagation();
@@ -2949,6 +2999,12 @@
       setStars(wrap.dataset.scope, wrap.dataset.key, parseInt(star.dataset.val, 10));
       return;
     }
+    // UP主 卡片 → 跳转 B站主页
+    var upCard = e.target.closest('.up-card[data-up-mid]');
+    if (upCard && !upCard.classList.contains('up-add-card')) {
+      window.open('https://space.bilibili.com/' + encodeURIComponent(upCard.dataset.upMid), '_blank');
+      return;
+    }
     // 继续学习
     var hist = e.target.closest('[data-history]');
     if (hist) {
@@ -2969,6 +3025,13 @@
         return String(x.id || x.bvid || x.bv_id) === String(vcard.dataset.id);
       });
       if (v) playVideo(v, v.kind === 'local' ? 'local' : 'mine');
+      return;
+    }
+    // 添加 UP主 按钮
+    var addUpBtn = e.target.closest('#btnAddUp');
+    if (addUpBtn) {
+      openAddUpModal();
+      return;
     }
   }
 
@@ -3105,6 +3168,105 @@
     });
     if (els.episodePanel) els.episodePanel.addEventListener('scroll', hideEpisodeTooltip);
     window.addEventListener('resize', hideEpisodeTooltip);
+  }
+
+  /* ==================================================================
+   * UP主 功能
+   * ================================================================== */
+
+  function sortStudyUpsInPlace(list) {
+    var sort = store.get('sort') || 'star';
+    if (sort === 'star' || sort === 'pub') {
+      list.sort(function (a, b) { return (b.stars || 0) - (a.stars || 0) || (b.addedAt || 0) - (a.addedAt || 0); });
+    } else if (sort === 'add') {
+      list.sort(function (a, b) { return (b.addedAt || 0) - (a.addedAt || 0); });
+    } else if (sort === 'play') {
+      list.sort(function (a, b) { return (b.videos || 0) - (a.videos || 0) || (b.addedAt || 0) - (a.addedAt || 0); });
+    } else {
+      list.sort(function (a, b) { return (b.addedAt || 0) - (a.addedAt || 0); });
+    }
+    return list;
+  }
+
+  function studyUpCard(up) {
+    var meta = '';
+    if (up.fans > 0) meta += fmtCount(up.fans) + ' 粉丝';
+    if (up.videos > 0) meta += (meta ? ' · ' : '') + fmtCount(up.videos) + ' 视频';
+    return (
+      '<div class="card up-card" data-up-mid="' + up.mid + '" role="link" tabindex="0" title="' + esc(up.name) + ' 的 B站主页">' +
+        '<div class="up-avatar"><img src="' + esc(fixAvatar(up.face)) + '" alt="' + esc(up.name) + '" loading="lazy" referrerpolicy="no-referrer"></div>' +
+        '<div class="up-info">' +
+          '<div class="up-name">' + esc(up.name) + '</div>' +
+          '<div class="up-sign">' + esc(up.sign || '') + '</div>' +
+          '<div class="up-meta">' +
+            '<span class="muted small">' + meta + '</span>' +
+            starControl(up.mid, up.stars, 'studyUp') +
+          '</div>' +
+        '</div>' +
+      '</div>'
+    );
+  }
+
+  function renderStudyUpsSection() {
+    var list = sortStudyUpsInPlace((store.get('studyUps') || []).slice());
+    var cards = list.map(studyUpCard).join('');
+    return (
+      '<div class="dash-section">' +
+        '<div class="dash-head">' +
+          '<h2 class="section-title">学习 UP主</h2>' +
+        '</div>' +
+        '<div class="up-grid">' +
+          '<div class="card up-card up-add-card" id="btnAddUp">' +
+            '<div class="up-avatar up-avatar-add"><span class="up-add-icon">+</span></div>' +
+            '<div class="up-info">' +
+              '<div class="up-name muted">添加 UP主</div>' +
+              '<div class="up-sign muted small">输入 UID 添加</div>' +
+            '</div>' +
+          '</div>' +
+          cards +
+        '</div>' +
+      '</div>'
+    );
+  }
+
+  function openAddUpModal() {
+    var input = prompt('输入 UP主 UID（数字）：');
+    if (!input) return;
+    var mid = parseInt(input.trim(), 10);
+    if (!mid || mid <= 0) { toast('UID 格式不正确', 'error'); return; }
+    addStudyUp(mid);
+  }
+
+  async function addStudyUp(mid) {
+    mid = parseInt(mid, 10);
+    if (!mid) return;
+    var ups = store.get('studyUps') || [];
+    if (ups.some(function (u) { return String(u.mid) === String(mid); })) {
+      toast('该 UP主 已在学习列表中');
+      return;
+    }
+    toast('正在获取 UP主 信息…');
+    try {
+      var data = await api.userCard(mid, { creds: creds() });
+      var card = (data && data.card) || {};
+      var up = {
+        mid: mid,
+        name: card.name || '',
+        face: fixAvatar(card.face),
+        sign: card.sign || '',
+        fans: parseInt(card.fans || 0, 10),
+        videos: parseInt((data && data.archive_count) || 0, 10),
+        level: parseInt(card.level || 0, 10),
+        addedAt: Date.now(),
+        stars: 0
+      };
+      ups.push(up);
+      store.set({ studyUps: ups });
+      toast('已添加：' + up.name, 'success');
+      if (state.currentView === 'dashboard') renderDashboard();
+    } catch (e) {
+      toast('获取 UP主 信息失败：' + e.message, 'error');
+    }
   }
 
   /* ---------------- 启动 ---------------- */
