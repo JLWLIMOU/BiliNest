@@ -130,7 +130,11 @@
   function fmtDate(ts) {
     if (!ts) return '';
     try {
-      return new Date(Number(ts) * 1000).toLocaleDateString('zh-CN', {
+      // 单位注意：B 站接口给的 fav_time 是「秒」，而本地添加视频存的是 Date.now()（毫秒）。
+      // 统一按秒处理，毫秒值先换算，否则卡片上会显示成"添加于 58667年"。
+      var n = Number(ts);
+      if (n > 1e12) n = Math.round(n / 1000);
+      return new Date(n * 1000).toLocaleDateString('zh-CN', {
         year: 'numeric', month: 'short', day: 'numeric'
       });
     } catch (e) {
