@@ -11,6 +11,8 @@
 
 > 只看你指定的收藏夹 / 手动添加的视频 / 本地文件，**没有推荐、首页、评论、点赞、动态**。画质切换、弹幕、字幕全部在页面内完成，永不跳转 B 站官网。
 
+> ⚠️ **非官方声明**：BiliNest 是第三方个人开源项目，**与哔哩哔哩（Bilibili）没有任何隶属、合作或授权关系**，也不使用其商标与品牌标识。仅供**个人学习自用**：请遵守 B 站用户协议，勿用于商业用途，勿再分发通过本工具获取的任何内容。
+
 ## 它解决什么痛点？
 
 你大概遇到过这些情况：
@@ -32,6 +34,7 @@ BiliNest 的思路很简单：**只把你指定的内容留下来，其它的全
 - **Local-first & private**: a tiny zero-dependency Node proxy on `127.0.0.1` forwards only whitelisted read-only Bilibili APIs. Your credentials stay in your own browser; requests never touch any third party.
 - **Zero install of dependencies**: pure Node 18+ built-ins + static frontend, no `npm install` needed.
 - **Cross-platform**: works on Windows, macOS and Linux.
+- **Unofficial**: a third-party hobby project — not affiliated with, endorsed by, or sponsored by Bilibili. For personal study use only; please respect Bilibili's terms of service.
 
 ### Why BiliNest?
 
@@ -288,6 +291,11 @@ Chromium 内核浏览器自动恢复文件权限；被拒则删除重加。其�
 **Q：数据存在哪里？换了浏览器或清了缓存会不会丢？**
 平时存在浏览器本地（localStorage），同时会自动备份到 `%APPDATA%\BiliNest\state-backup.json`（macOS / Linux 为 `~/.config/BiliNest/state-backup.json`，可用环境变量 `BILINEST_DATA_DIR` 改位置）。换浏览器、换端口或清过浏览器数据后，打开时**自动取回**；两边都有数据时**以较新的一份为准**，不会用旧快照把新数据盖掉。设置 →「数据」里可手动「从备份恢复」，也可以一键清除全部本地数据。
 
+⚠️ 这个备份文件里是**明文**的登录凭据（SESSDATA），请不要分享、同步到网盘或上传；共用电脑上建议用完在「设置 → 数据」里清除。
+
+**Q：这样做会违反 B 站用户协议吗？**
+如实说明：这类第三方客户端通常**不符合**平台的用户协议与 API 使用规范。本项目的立场是——只在本机、用你自己的账号、播放你自己有权观看的内容；不做下载、不做批量抓取、不绕过付费与会员权益、不把任何数据发给第三方。请自行判断是否使用，风险与后果由使用者承担。
+
 **Q：提示没装 Node.js / 双击快捷方式后页面打不开？**
 说明系统里找不到可用的 Node.js 18+。双击快捷方式时会自动打开一份图文安装指引（也可以直接看 `public/setup-help.html`）：按 `Win` 输入 `cmd` 后执行 `winget install OpenJS.NodeJS.LTS`，或者到 [nodejs.org](https://nodejs.org/zh-cn/download) 下载 LTS 版本安装，装好后重新双击快捷方式即可。安装时请保持勾选 **Add to PATH**。
 
@@ -304,27 +312,36 @@ npx electron .
 
 ## 开源依赖与许可（Third-party licenses）
 
-本项目在 `public/vendor/` 中内置了以下以 MIT 许可证发布的开源组件，其完整许可证文本随文件一同分发：
+本项目在 `public/vendor/` 中内置了以下开源组件，其许可证文本随文件一同分发（MIT 全文见 `vendor/ARTPLAYER_LICENSE`，BSD-3-Clause 全文见 `vendor/DASH_LICENSE`）：
 
 | 组件 | 版本 | 作者 | 许可证 | 用途 |
 | --- | --- | --- | --- | --- |
 | [ArtPlayer](https://github.com/zhw2590582/ArtPlayer) | v5.4.0 | Harvey Zhao | MIT（见 `vendor/ARTPLAYER_LICENSE`） | 页内视频播放器内核 |
-| [dash.js](https://github.com/Dash-Industry-Forum/dash.js) | v4.5.2 | Dash Industry Forum | BSD（见 `vendor/dash.all.min.js` 文件头） | DASH 自适应码率流播放引擎 |
-| [artplayer-plugin-dash-control](https://github.com/CGeLon-iwgh/artplayer-plugin-dash-control) | — | CGeLon | MIT | ArtPlayer 清晰度下拉控件（配合 dash.js） |
+| [artplayer-plugin-danmuku](https://github.com/zhw2590582/ArtPlayer) | v5.3.0 | Harvey Zhao | MIT（版权声明见文件头，全文见 `vendor/ARTPLAYER_LICENSE`） | 弹幕渲染 |
+| [dash.js](https://github.com/Dash-Industry-Forum/dash.js) | v4.5.2 | Dash Industry Forum | BSD-3-Clause（见 `vendor/DASH_LICENSE`） | DASH 自适应码率流播放引擎 |
+| [artplayer-plugin-dash-control](https://github.com/zhw2590582/ArtPlayer) | v1.1.0 | Harvey Zhao | MIT（版权声明见文件头，全文见 `vendor/ARTPLAYER_LICENSE`） | ArtPlayer 清晰度下拉控件（配合 dash.js） |
 | [qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator) | — | Kazuhiko Arase | MIT（见 `public/vendor/qrcode.js` 文件头） | 登录二维码渲染 |
 
 本项目本身以 MIT 许可证发布（见仓库根目录 `LICENSE`）。
 
+Windows 安装包用 Inno Setup 6 编译，其中文语言文件来自 Inno Setup 官方源码仓库的未收录翻译（`installer/languages/ChineseSimplified.isl`）。
+
 ## 安全与合规声明
 
 - 代码**不硬编码任何敏感信息**；Cookie / OAuth 密钥全部来自用户输入 / 环境变量；
-- 凭据只存本机（localStorage / 内存 / 服务器内存），不发送任何第三方；
+- 凭据只存本机（浏览器 localStorage / 内存 / `%APPDATA%\BiliNest`），不发送任何第三方；
+- ⚠️ 备份文件 `%APPDATA%\BiliNest\state-backup.json` 与浏览器 localStorage 中**明文保存**登录凭据（SESSDATA）。请勿分享、同步或上传该目录；共用电脑上用完建议在「设置 → 数据」里清除；
+- 本地服务只监听 `127.0.0.1`，不对局域网或公网开放；
 - 服务器仅转发白名单内只读接口并做频率限制；
 - 请遵守 B 站用户协议与 API 规范，仅限个人学习。
 
 ## 免责声明
 
-本项目不隶属于哔哩哔哩，也不提供任何破解、绕过付费或反爬能力。因使用本工具产生的任何账号风险由使用者自行承担。
+本项目为个人开源项目，**与哔哩哔哩没有任何隶属、合作或授权关系**，也不使用其商标与品牌标识。
+
+关于技术实现如实说明：本工具复用 B 站**网页端同款的只读接口**（其中包含网页端公开使用的 WBI 签名参数），并在本机转发视频流时按 CDN 要求携带 Referer —— 这些是让"在本机播放自己账号有权观看的内容"能够工作所必需的。本工具**不**破解付费 / 会员内容，**不**绕过账号权限，**不**提供下载、批量抓取、去水印或地区限制绕过能力，也不向任何第三方发送你的数据。
+
+第三方客户端通常**不符合**平台的用户协议与 API 使用规范；请自行判断是否使用。因使用本工具产生的任何账号风险（包括但不限于风控、限流、封禁）由使用者自行承担。
 
 ## 关于本项目
 

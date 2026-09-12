@@ -2766,13 +2766,16 @@
             '<button id="btnRestoreBackup" type="button" class="btn ghost">从备份恢复</button>' +
           '</div>' +
           '<p class="muted small">清除本地数据不会影响 B 站账号；停止服务后，双击桌面快捷方式可重新启动。<br>' +
-            '备份会自动保存在本机（%APPDATA%\\BiliNest\\state-backup.json）：换浏览器、换端口或清过浏览器数据后会自动取回；两边都有数据时以较新的一份为准（改动晚的一方胜出，不会用旧快照覆盖新数据）。「从备份恢复」可强制用备份覆盖当前数据。</p>' +
+            '备份会自动保存在本机（%APPDATA%\\BiliNest\\state-backup.json）：换浏览器、换端口或清过浏览器数据后会自动取回；两边都有数据时以较新的一份为准（改动晚的一方胜出，不会用旧快照覆盖新数据）。「从备份恢复」可强制用备份覆盖当前数据。<br>' +
+            '⚠️ 这个备份文件里是<b>明文</b>的登录凭据（SESSDATA），请不要分享、同步到网盘或上传；共用电脑上建议用完就清除。</p>' +
         '</section>' +
         '<section class="settings-panel' + (tab === 'about' ? ' active' : '') + '" data-settings-panel="about">' +
           '<h3>关于</h3>' +
           '<p class="muted small">BiliNest ' +
             (state.backend && state.backend.appVersion ? 'v' + state.backend.appVersion : '（版本未知：本地服务未连接，或仍在跑旧版）') +
-            ' · 仅供个人学习使用。请遵守 B 站用户协议与 API 使用规范；本工具不会向任何第三方发送你的凭据。<br>播放器内核版本：' +
+            ' · <b>非官方</b>第三方开源项目，与哔哩哔哩无隶属、合作或授权关系，也不使用其商标与标识；仅供个人学习自用。<br>' +
+            '不破解付费 / 会员内容，不绕过账号权限，不提供下载、批量抓取、去水印或地区限制绕过能力；凭据只存在本机，不会发给任何第三方。<br>' +
+            '第三方客户端通常不符合平台的用户协议与 API 使用规范，账号风险由使用者自行承担。<br>播放器内核版本：' +
             (window.BiliNestPlayer && window.BiliNestPlayer.VERSION ? 'v' + window.BiliNestPlayer.VERSION : '未知') +
             '（若低于 v3，请强制刷新页面 Ctrl+F5 后重试）</p>' +
           '<div class="row">' + guideBtn + '</div>' +
@@ -2999,6 +3002,14 @@
             '<li>字幕默认关闭，点「字幕」开启；「位置」滑块可在底部微调，配「字号」选择；</li>' +
             '<li>选集自动定位到当前集；支持上一集 / 下一集；播完自动连播下一集（5 秒倒计时）或「重温一遍」；</li>' +
             '<li>点视频下方的 UP 名字可直接打开其 B 站主页；观看进度自动记录，随时可续播。</li>' +
+          '</ul>' +
+        '</section>' +
+        '<section><h3>⑤ 免责与隐私</h3>' +
+          '<ul class="faq">' +
+            '<li>BiliNest 是<b>非官方</b>第三方开源项目，与哔哩哔哩没有隶属、合作或授权关系，也不使用其商标与标识；仅供个人学习自用。</li>' +
+            '<li>不破解付费 / 会员内容，不绕过账号权限，不提供下载、批量抓取、去水印或地区限制绕过能力；请求只发往本机代理。</li>' +
+            '<li>登录凭据只存在你这台电脑上，不会发给任何第三方；但备份文件是<b>明文</b>，请不要分享或同步 <code>%APPDATA%\\BiliNest</code> 目录。</li>' +
+            '<li>第三方客户端通常不符合平台的用户协议与 API 使用规范，请自行判断是否使用，账号风险由使用者承担。</li>' +
           '</ul>' +
         '</section>' +
         '<section><h3>常见问题</h3>' +
