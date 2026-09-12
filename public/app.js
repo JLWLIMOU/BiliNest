@@ -75,7 +75,10 @@
     activeEpisode: null,    // { bvid, cid, page }
     episodes: [],
     currentView: 'dashboard',
-    dashQuery: '',          // 首页“添加的视频”搜索关键字
+    dashQuery: '',          // 首页“视频库”搜索关键字
+    tabQuery: {},           // 自定义标签页各自的搜索关键字 { tabId: query }
+    pendingTabId: '',       // 从某个自定义标签页进入收藏夹视图时的目标标签页
+    dragTabId: '',          // 正在拖动的自定义标签页 id（拖动排序用）
     folderQuery: '',        // 收藏夹视图内搜索关键字
     sourceQuery: '',        // 内容源弹窗搜索关键字
     sourceSearchTimer: null, // 内容源搜索防抖定时器
@@ -206,14 +209,43 @@
     renderDashboard();
   }
 
+  /* ---------------- 主页标签页（系统标签 + 自定义标签） ---------------- */
+  var SYSTEM_TABS = [
+    { key: 'continue', label: '继续学习' },
+    { key: 'added', label: '视频库' },
+    { key: 'folders', label: '收藏夹库' },
+    { key: 'ups', label: '学习 UP主' }
+  ];
+
+  function customTabs() {
+    return store.get('customTabs') || [];
+  }
+
+  function findCustomTab(key) {
+    return customTabs().find(function (t) { return String(t.id) === String(key); }) || null;
+  }
+
+  /** 系统标签 + 自定义标签（自定义按创建顺序追加在最后） */
+  function dashTabs() {
+    return SYSTEM_TABS.concat(customTabs().map(function (t) {
+      return { key: t.id, label: t.name, custom: true };
+    }));
+  }
+
+  /** 把任意 key 归一为合法标签；自定义标签已删除或值非法时回落「继续学习」 */
+  function normalizeDashTab(key) {
+    if (findCustomTab(key)) return key;
+    for (var i = 0; i < SYSTEM_TABS.length; i++) {
+      if (SYSTEM_TABS[i].key === key) return key;
+    }
+    return 'continue';
+  }
+
   function renderDashboard() {
-    var tab = state.activeDashTab || 'continue';
-    var tabs = [
-      { key: 'continue', label: '继续学习' },
-      { key: 'added', label: '添加的视频' },
-      { key: 'folders', label: '学习收藏夹' },
-      { key: 'ups', label: '学习 UP主' }
-    ];
+    var tab = normalizeDashTab(state.activeDashTab);
+    state.activeDashTab = tab;
+    var custom = findCustomTab(tab);
+    var tabs = dashTabs();
 
     var hasAny =
       (store.get('watchHistory') || []).length ||
@@ -224,7 +256,7 @@
       els.dashboard.innerHTML =
         '<div class="empty" style="padding:90px 20px">' +
           '<p class="empty-title">还没有学习内容</p>' +
-          '<p>点击右上角「内容源」：把收藏夹添加为学习收藏夹、粘贴单个视频链接，或选择本地视频。</p>' +
+          '<p>点击右上角「内容源」：把收藏夹加入收藏夹库、粘贴单个视频链接，或选择本地视频。</p>' +
           '<div class="row">' +
             '<button type="button" id="btnEmptyAction" class="btn primary">打开内容源</button>' +
             '<button type="button" id="btnEmptyAddUp" class="btn ghost">添加 UP主</button>' +
@@ -233,17 +265,41 @@
       return;
     }
 
-    // 标签栏
-    var tabsHtml = '<div class="dash-tabs">';
+    // 标签栏：系统标签（固定）+ 分隔线 + 滚动区（自定义标签，可拖动排序）+ 新建按钮
+    // 新建按钮放在滚动区末尾并用 sticky right:0 —— 不溢出时它就跟在最后一个标签后面，
+    // 只有内容溢出、横向滚动时才钉在右侧保持可达。
+    var sysHtml = '';
+    var custHtml = '';
     for (var i = 0; i < tabs.length; i++) {
       var t = tabs[i];
-      tabsHtml += '<button type="button" class="dash-tab' + (tab === t.key ? ' active' : '') + '" data-dash-tab="' + t.key + '">' + t.label + '</button>';
+      var btnHtml =
+        '<button type="button" class="dash-tab' + (tab === t.key ? ' active' : '') + (t.custom ? ' custom' : '') + '"' +
+          ' data-dash-tab="' + esc(t.key) + '"' +
+          (t.custom
+            ? ' data-tab-custom="' + esc(t.key) + '" draggable="true" title="双击重命名，按住可拖动排序"'
+            : '') + '>' +
+          '<span class="dash-tab-label"' + (t.custom ? ' draggable="true"' : '') + '>' + esc(t.label) + '</span>' +
+          (t.custom ? '<span class="dash-tab-more" data-tab-menu="' + esc(t.key) + '" title="标签页操作">⋯</span>' : '') +
+        '</button>';
+      if (t.custom) custHtml += btnHtml;
+      else sysHtml += btnHtml;
     }
-    tabsHtml += '</div>';
+    var tabsHtml =
+      '<div class="dash-tabs">' +
+        sysHtml +
+        (custHtml ? '<span class="dash-tabs-sep" aria-hidden="true"></span>' : '') +
+        '<div class="dash-tabs-scroll">' +
+          custHtml +
+          '<button type="button" class="dash-tab dash-tab-new" data-tab-new="1" title="新建标签页">＋</button>' +
+        '</div>' +
+      '</div>';
 
-    // 搜索框（仅「添加的视频」标签显示）
-    var searchHtml = tab === 'added'
-      ? '<div class="dash-search-wrap"><input id="dashSearch" class="search-input" type="search" placeholder="搜索已添加的视频…" autocomplete="off" value="' + esc(state.dashQuery) + '"></div>'
+    // 搜索框：「视频库」与自定义标签页可用（自定义标签页各自记关键字）
+    var searchable = tab === 'added' || !!custom;
+    var searchValue = custom ? (state.tabQuery[tab] || '') : state.dashQuery;
+    var searchHtml = searchable
+      ? '<div class="dash-search-wrap"><input id="dashSearch" class="search-input" type="search" placeholder="' +
+        (custom ? '在本标签页内搜索…' : '在视频库中搜索…') + '" autocomplete="off" value="' + esc(searchValue) + '"></div>'
       : '';
 
     // 当前标签内容
@@ -252,6 +308,7 @@
     else if (tab === 'added') contentHtml += renderAddedVideosSection();
     else if (tab === 'folders') contentHtml += renderStudyFoldersSection();
     else if (tab === 'ups') contentHtml += renderStudyUpsSection();
+    else if (custom) contentHtml += renderCustomTab(custom);
     contentHtml += '</div>';
 
     els.dashboard.innerHTML = tabsHtml + searchHtml + contentHtml;
@@ -263,6 +320,141 @@
         this.style.display = 'none';
       });
     }
+    syncTabsScroll();
+  }
+
+  /** 标签栏横向滚动的状态同步：左侧渐隐提示 + 保证当前自定义标签在可视区内 */
+  function syncTabsScroll() {
+    var sc = els.dashboard.querySelector('.dash-tabs-scroll');
+    if (!sc) return;
+    if (!sc.dataset.syncBound) {
+      sc.dataset.syncBound = '1';
+      sc.addEventListener('scroll', function () { sc.classList.toggle('scrolled', sc.scrollLeft > 4); });
+    }
+    sc.classList.toggle('scrolled', sc.scrollLeft > 4);
+    sc.classList.toggle('overflowing', sc.scrollWidth > sc.clientWidth);
+    var active = sc.querySelector('.dash-tab.active');
+    if (!active) return;
+    var newBtn = sc.querySelector('.dash-tab-new');
+    var reserve = newBtn ? newBtn.getBoundingClientRect().width : 0;
+    var sr = sc.getBoundingClientRect();
+    var ar = active.getBoundingClientRect();
+    // 自己算滚动量：scrollIntoView 不知道右侧贴住的「＋」会盖住内容
+    var rightLimit = sr.right - reserve;
+    if (ar.left < sr.left) sc.scrollLeft -= (sr.left - ar.left) + 8;
+    else if (ar.right > rightLimit) sc.scrollLeft += (ar.right - rightLimit) + 8;
+  }
+
+  /* 拖动排序时靠近边缘自动滚动（否则拖不到看不见的标签） */
+  var tabAutoScrollRaf = 0;
+  var tabAutoScrollEl = null;
+  var tabAutoScrollDir = 0;
+
+  function startTabAutoScroll(sc, dir) {
+    if (!dir) {
+      stopTabAutoScroll();
+      return;
+    }
+    if (tabAutoScrollEl === sc && tabAutoScrollDir === dir) return;
+    stopTabAutoScroll();
+    tabAutoScrollEl = sc;
+    tabAutoScrollDir = dir;
+    var step = function () {
+      if (!tabAutoScrollEl) return;
+      tabAutoScrollEl.scrollLeft += tabAutoScrollDir * 8;
+      tabAutoScrollRaf = requestAnimationFrame(step);
+    };
+    tabAutoScrollRaf = requestAnimationFrame(step);
+  }
+
+  function stopTabAutoScroll() {
+    if (tabAutoScrollRaf) cancelAnimationFrame(tabAutoScrollRaf);
+    tabAutoScrollRaf = 0;
+    tabAutoScrollEl = null;
+    tabAutoScrollDir = 0;
+  }
+
+  /* ---------------- 自定义标签页：成员解析与渲染 ---------------- */
+
+  /**
+   * 把 tab.items 解析成库内实体。
+   * 只存引用：条目在库中被删除后，这里的引用会自然失效并被跳过（渲染自愈）。
+   */
+  function tabMembers(tab) {
+    var out = { videos: [], folders: [], ups: [] };
+    var videos = store.get('customVideos') || [];
+    var folders = store.get('studyFolders') || [];
+    var ups = store.get('studyUps') || [];
+    (tab.items || []).forEach(function (it) {
+      var id = String(it.id);
+      if (it.kind === 'video') {
+        var v = videos.find(function (x) { return String(x.id || x.bvid) === id; });
+        if (v) out.videos.push(v);
+      } else if (it.kind === 'folder') {
+        var f = folders.find(function (x) { return String(x.id) === id; });
+        if (f) out.folders.push(f);
+      } else if (it.kind === 'up') {
+        var u = ups.find(function (x) { return String(x.mid) === id; });
+        if (u) out.ups.push(u);
+      }
+    });
+    return out;
+  }
+
+  function memberKey(kind, id) {
+    return kind + ':' + String(id);
+  }
+
+  function tabHasItem(tab, kind, id) {
+    var k = memberKey(kind, id);
+    return (tab.items || []).some(function (it) { return memberKey(it.kind, it.id) === k; });
+  }
+
+  function renderCustomTab(tab) {
+    var q = (state.tabQuery[tab.id] || '').trim().toLowerCase();
+    var m = tabMembers(tab);
+    var total = m.videos.length + m.folders.length + m.ups.length;
+
+    var hit = function (text) { return !q || String(text || '').toLowerCase().indexOf(q) >= 0; };
+    var videos = m.videos.filter(function (v) {
+      return hit(v.title || v.name) || hit((v.upper && v.upper.name) || v.upper);
+    });
+    var folders = m.folders.filter(function (f) { return hit(f.title || f.name); });
+    var ups = m.ups.filter(function (u) { return hit(u.name) || hit(u.sign); });
+    var matched = videos.length + folders.length + ups.length;
+
+    var ctx = { tab: tab.id };
+    var html =
+      '<div class="dash-section">' +
+        '<div class="section-head tab-head">' +
+          '<h2 class="section-title">' + esc(tab.name) + '</h2>' +
+          '<span class="tab-count">' + (q ? matched + ' / ' + total : total) + ' 项</span>' +
+        '</div>' +
+        '<button type="button" class="tab-add-card" data-tab-add="' + esc(tab.id) + '">' +
+          '<span class="tab-add-icon">＋</span>' +
+          '<span class="tab-add-text">添加内容</span>' +
+        '</button>';
+
+    if (!total) {
+      html += '<div class="empty-inline">这个标签页还是空的 —— 点上方「添加内容」，从收藏夹 / 视频库 / 学习 UP主 里挑。</div>';
+    } else if (!matched) {
+      html += '<div class="empty-inline">没有匹配「' + esc(q) + '」的内容。</div>';
+    } else {
+      if (videos.length) {
+        html += '<h3 class="tab-group-title">视频 <span class="muted small">' + videos.length + '</span></h3>' +
+          '<div class="grid">' + videos.map(function (v) { return videoCard(v, ctx); }).join('') + '</div>';
+      }
+      if (folders.length) {
+        html += '<h3 class="tab-group-title">收藏夹库 <span class="muted small">' + folders.length + '</span></h3>' +
+          '<div class="grid folder-grid">' + folders.map(function (f) { return folderCard(f, ctx); }).join('') + '</div>';
+      }
+      if (ups.length) {
+        html += '<h3 class="tab-group-title">学习 UP主 <span class="muted small">' + ups.length + '</span></h3>' +
+          '<div class="up-grid">' + ups.map(function (u) { return studyUpCard(u, ctx); }).join('') + '</div>';
+      }
+    }
+    html += '</div>';
+    return html;
   }
 
   /** 栏一：继续学习（有观看记录时出现，大封面 + 进度条强调） */
@@ -402,7 +594,7 @@
     );
   }
 
-  /** 栏二：添加的视频（按星级 / 添加时间等排序） */
+  /** 栏二：视频库（按星级 / 添加时间等排序） */
   function renderAddedVideosSection() {
     var items = (store.get('customVideos') || []).slice();
     if (!items.length) return '';
@@ -433,7 +625,7 @@
     return (
       '<section class="dash-section">' +
         '<div class="section-head">' +
-          '<h2 class="section-title">添加的视频</h2>' +
+          '<h2 class="section-title">视频库</h2>' +
           '<label class="sort-wrap"><span class="muted small">排序</span>' +
             '<select id="dashSort" class="select">' + opts + '</select></label>' +
         '</div>' +
@@ -442,7 +634,7 @@
     );
   }
 
-  /** 栏三：学习收藏夹 */
+  /** 栏三：收藏夹库 */
   function renderStudyFoldersSection() {
     var folders = (store.get('studyFolders') || []).slice();
     folders.sort(function (a, b) {
@@ -451,7 +643,7 @@
     var body;
     if (!folders.length) {
       body =
-        '<div class="empty-inline">尚未添加<b>学习收藏夹</b> —— 在「内容源」的收藏夹列表中点击「加入学习」即可显示在这里。<br>' +
+        '<div class="empty-inline"><b>收藏夹库</b>还是空的 —— 在「内容源」的收藏夹列表中点击「加入学习」即可显示在这里。<br>' +
         '也可以先在「内容源」里直接观看某个收藏夹的视频。</div>';
     } else {
       var LIMIT = 12;
@@ -460,11 +652,15 @@
         '<div class="grid folder-grid">' + visible.map(folderCard).join('') + '</div>' +
         (folders.length > LIMIT ? '<div class="bar-more-wrap">' + barMoreBtn('folders', folders.length) + '</div>' : '');
     }
-    return '<section class="dash-section"><h2 class="section-title">学习收藏夹</h2>' + body + '</section>';
+    return '<section class="dash-section"><h2 class="section-title">收藏夹库</h2>' + body + '</section>';
   }
 
-  function folderCard(f) {
+  function folderCard(f, ctx) {
     var cover = (f.cover || '').replace(/^http:\/\//i, 'https://');
+    // ctx.tab 存在时表示卡片渲染在自定义标签页内：✕ 只把成员移出本页，不动库
+    var removeBtn = ctx && ctx.tab
+      ? '<button type="button" class="card-remove" data-tab-remove="' + esc(f.id) + '" data-tab-id="' + esc(ctx.tab) + '" data-tab-kind="folder" title="从本标签页移除（不会移出收藏夹库）" aria-label="从本标签页移除">✕</button>'
+      : '<button type="button" class="card-remove" data-card-remove="' + esc(f.id) + '" title="从收藏夹库移除" aria-label="移除">✕</button>';
     return (
       '<article class="card folder-card" data-folder="' + esc(f.id) + '" title="' + esc(f.title) + '">' +
         (cover ? '<div class="card-cover"><img src="' + esc(cover) + '" alt="" loading="lazy" referrerpolicy="no-referrer"></div>' : '') +
@@ -475,7 +671,7 @@
             starControl(f.id, f.stars || 0, 'folder') +
           '</div>' +
           '<div class="card-foot">' +
-            '<button type="button" class="card-remove" data-card-remove="' + esc(f.id) + '" title="移除学习收藏夹" aria-label="移除">✕</button>' +
+            removeBtn +
           '</div>' +
         '</div>' +
       '</article>'
@@ -490,12 +686,12 @@
       perPage: 12
     },
     added: {
-      title: '添加的视频',
+      title: '视频库',
       sortOptions: [['add', '添加时间'], ['pub', '发布时间'], ['star', '星级'], ['play', '播放量']],
       perPage: 12
     },
     folders: {
-      title: '学习收藏夹',
+      title: '收藏夹库',
       sortOptions: [['star', '星级'], ['add', '添加时间']],
       perPage: 12
     }
@@ -696,6 +892,8 @@
         ? state.activeFolder.media_count
         : state.videos.length;
       meta = '收藏夹 · 共 ' + total + ' 个视频';
+      var ctxTab = state.pendingTabId ? findCustomTab(state.pendingTabId) : null;
+      if (ctxTab) meta += ' · 正在添加到「' + ctxTab.name + '」标签页';
     }
     els.sourceTitle.textContent = title;
     els.sourceMeta.textContent = meta;
@@ -781,21 +979,24 @@
     if (document.getElementById('folderList')) loadFoldersIntoModal();
   }
 
-  /* ---------------- 学习列表（添加的视频 / 学习收藏夹） ---------------- */
+  /* ---------------- 学习列表（视频库 / 收藏夹库） ---------------- */
   function isVideoAdded(bvid) {
     return (store.get('customVideos') || []).some(function (x) {
       return x.kind === 'bili' && x.bvid === bvid;
     });
   }
 
-  /** 从收藏夹视频列表把单个视频加入“添加的视频”（mediaOverride 用于内容源搜索结果） */
-  async function addFolderVideoToStudy(bvid, mediaOverride) {
+  /**
+   * 保证收藏夹里的某个视频已进入「视频库」，返回库内 id。
+   * 已在库中则直接返回既有 id；无法识别该视频时返回 ''（不写库）。
+   */
+  async function ensureVideoInLibrary(bvid, mediaOverride) {
+    var dupe = (store.get('customVideos') || []).find(function (x) {
+      return x.kind === 'bili' && String(x.bvid) === String(bvid);
+    });
+    if (dupe) return dupe.id;
     var v = mediaOverride || state.videos.find(function (x) { return String(x.bvid || x.bv_id) === String(bvid); });
-    if (!v) return;
-    if (isVideoAdded(bvid)) {
-      toast('该视频已在学习列表');
-      return;
-    }
+    if (!v) return '';
     // 自动归类：多 P / 合集视为“列表（剧集）”
     var classify = { isSeries: false, seriesKey: '', episodeCount: 0, cid: (v.data && v.data.cid) || 0 };
     try {
@@ -817,8 +1018,7 @@
     } catch (e) {
       /* 分类失败时按单视频处理 */
     }
-    var list = store.get('customVideos') || [];
-    list.unshift({
+    var item = {
       id: 'bili-' + bvid,
       kind: 'bili',
       bvid: bvid,
@@ -835,8 +1035,21 @@
       isSeries: classify.isSeries,
       seriesKey: classify.seriesKey,
       episodeCount: classify.episodeCount
-    });
+    };
+    var list = store.get('customVideos') || [];
+    list.unshift(item);
     store.set({ customVideos: list });
+    return item.id;
+  }
+
+  /** 从收藏夹视频列表把单个视频加入“视频库”（mediaOverride 用于内容源搜索结果） */
+  async function addFolderVideoToStudy(bvid, mediaOverride) {
+    if (isVideoAdded(bvid)) {
+      toast('该视频已在学习列表');
+      return;
+    }
+    var id = await ensureVideoInLibrary(bvid, mediaOverride);
+    if (!id) return;
     toast('已添加到学习列表', 'success');
     renderGrid();
   }
@@ -854,7 +1067,7 @@
     loadFolder(store.get('source'));
   }
 
-  /** 把收藏夹加入/移出“学习收藏夹” */
+  /** 把收藏夹加入/移出“收藏夹库” */
   function toggleStudyFolder(folderId) {
     var folders = store.get('studyFolders') || [];
     var folder = state.folders.find(function (f) { return String(f.id) === String(folderId); });
@@ -862,7 +1075,7 @@
     if (idx >= 0) {
       folders.splice(idx, 1);
       store.set({ studyFolders: folders });
-      toast('已从学习收藏夹移除');
+      toast('已从收藏夹库移除');
     } else if (folder) {
       folders.unshift({
         id: folder.id,
@@ -873,7 +1086,7 @@
         stars: 0
       });
       store.set({ studyFolders: folders });
-      toast('已添加为学习收藏夹', 'success');
+      toast('已加入收藏夹库', 'success');
     }
     if (document.getElementById('folderList')) loadFoldersIntoModal();
     if (state.currentView === 'dashboard') renderDashboard();
@@ -1287,7 +1500,7 @@
     if (changed) normalizeHistory();
   }
 
-  function videoCard(v) {
+  function videoCard(v, ctx) {
     var dur = v.duration || (v.data && v.data.duration) || 0;
     // 官方接口可能返回 http:// 的封面，统一转 https 避免被 CSP / 混合内容拦截
     var cover = (v.cover || v.pic || '').replace(/^http:\/\//i, 'https://');
@@ -1309,18 +1522,48 @@
     }
     var addBtn = '';
     if (state.activeFolder && v.bvid && !v.kind) {
+      // 右上角状态区：蓝✓ = 在学习列表（库）；绿✓ = 在某个自定义标签页
+      //  · 从自定义标签页进来：只出现一个淡绿 +（一次完成入库 + 入页），加完变两个 ✓
+      //  · 从右上角内容源进来：原有蓝色 +/✓ 保留，另加一个「添加到」用于选标签页
       var added = isVideoAdded(v.bvid);
-      addBtn =
-        '<button type="button" class="card-add' + (added ? ' added' : '') + '" data-video-add="' + esc(v.bvid) + '" ' +
-        'title="' + (added ? '已在学习列表' : '添加到学习列表') + '">' + (added ? '✓' : '+') + '</button>';
+      var libId = 'bili-' + v.bvid;
+      var ctxTab = state.pendingTabId ? findCustomTab(state.pendingTabId) : null;
+      var inTabs = customTabs().filter(function (t) { return tabHasItem(t, 'video', libId); });
+      var flags = '';
+      if (ctxTab) {
+        var inCtxTab = tabHasItem(ctxTab, 'video', libId);
+        var addTabBtn = '<button type="button" class="card-add card-add-tab" data-video-add-tab="' + esc(v.bvid) +
+          '" title="添加到「' + esc(ctxTab.name) + '」标签页（同时加入学习列表）">+</button>';
+        if (!added && !inCtxTab) {
+          flags += addTabBtn;
+        } else {
+          if (added) flags += '<span class="card-flag card-flag-lib" title="已在学习列表">✓</span>';
+          if (inCtxTab) flags += '<span class="card-flag card-flag-tab" title="已在「' + esc(ctxTab.name) + '」标签页">✓</span>';
+          else flags += addTabBtn;
+        }
+      } else {
+        flags += added
+          ? '<span class="card-flag card-flag-lib" title="已在学习列表">✓</span>'
+          : '<button type="button" class="card-add" data-video-add="' + esc(v.bvid) + '" title="添加到学习列表">+</button>';
+        if (inTabs.length) {
+          flags += '<span class="card-flag card-flag-tab" title="已在「' + esc(inTabs[0].name) + '」标签页">✓</span>';
+        }
+        flags += '<button type="button" class="card-add card-add-pick" data-video-pick-tab="' + esc(v.bvid) +
+          '" title="添加到自定义标签页…">添加到</button>';
+      }
+      addBtn = '<div class="card-flags">' + flags + '</div>';
     }
     var stars = isAdded
       ? '<div class="card-stars">' + starControl(v.bvid || v.id, v.stars || 0, 'video') + '</div>'
       : '';
     var cardId = v.id || v.bvid || v.bv_id || '';
-    // 已添加视频的卡片：右下角“×”删除按钮（点击弹确认框；列表/剧集整季删除）
+    // 视频库的卡片：右下角“×”删除按钮（点击弹确认框；列表/剧集整季删除）
     var removeBtn = '';
-    if (isAdded && !state.activeFolder) {
+    if (ctx && ctx.tab) {
+      // 自定义标签页内：只从本页移除，不删除视频
+      removeBtn =
+        '<button type="button" class="card-remove" data-tab-remove="' + esc(cardId) + '" data-tab-id="' + esc(ctx.tab) + '" data-tab-kind="video" title="从本标签页移除（不会删除视频）" aria-label="从本标签页移除">✕</button>';
+    } else if (isAdded && !state.activeFolder) {
       removeBtn =
         '<button type="button" class="card-remove" data-card-remove="' + esc(cardId) + '" title="删除' + (v.isSeries ? '（整个列表）' : '') + '" aria-label="删除">✕</button>';
     }
@@ -1651,7 +1894,7 @@
       pc.episodeLabel = episodeLabel;
       pc.episodeCount = episodeCount;
     }
-    // 旧版本添加的视频没有列表信息：首次播放时自动补上归类
+    // 旧版本入库的视频没有列表信息：首次播放时自动补上归类
     if (seriesKey && state.activeVideo && state.activeVideo.kind === 'bili' && !state.activeVideo.isSeries) {
       var cl = store.get('customVideos') || [];
       var ci = cl.find(function (x) { return x.kind === 'bili' && String(x.bvid) === String(bvid); });
@@ -1824,7 +2067,10 @@
     els.homeView.hidden = view !== 'folder';
     els.browseView.hidden = view !== 'browse';
     els.playerView.hidden = view !== 'player';
-    if (view === 'dashboard') state.activeFolder = null;
+    if (view === 'dashboard') {
+      state.activeFolder = null;
+      state.pendingTabId = '';   // 回主页即结束「往某个标签页加内容」的上下文
+    }
     if (view !== 'player') stopPlayer();
     window.scrollTo({ top: 0 });
   }
@@ -1918,7 +2164,7 @@
             '</div>' +
             starControl(f.id, study ? study.stars : 0, 'modal-folder') +
             '<button type="button" class="btn ghost small" data-folder-use="' + esc(f.id) + '">' + (active ? '当前' : '使用') + '</button>' +
-            '<button type="button" class="btn ghost small' + (study ? ' on' : '') + '" data-folder-study="' + esc(f.id) + '" title="' + (study ? '从学习收藏夹移除' : '添加到学习收藏夹') + '">' + (study ? '已加入学习' : '加入学习') + '</button>' +
+            '<button type="button" class="btn ghost small' + (study ? ' on' : '') + '" data-folder-study="' + esc(f.id) + '" title="' + (study ? '从收藏夹库移除' : '加入收藏夹库') + '">' + (study ? '已加入学习' : '加入学习') + '</button>' +
           '</div>'
         );
       }).join('');
@@ -2294,7 +2540,7 @@
   }
 
   /**
-   * 从“添加的视频”删除：列表/剧集整季删除（含所有分P/合集），并清理对应观看记录。
+   * 从“视频库”删除：列表/剧集整季删除（含所有分P/合集），并清理对应观看记录。
    * 单视频按 bvid/id 匹配；合集按 seriesKey 匹配。
    */
   function removeCustomVideo(cardId) {
@@ -2312,7 +2558,7 @@
     );
   }
 
-  function doRemoveCustomVideo(item, scopeKey) {
+  function doRemoveCustomVideo(item, scopeKey, silent) {
     var isSeries = !!item.seriesKey;
     var list = store.get('customVideos') || [];
     if (item.kind === 'local') local.removeEntry(item);
@@ -2331,7 +2577,7 @@
     if (store.get('source') && store.get('source').kind === 'mine' && remain.length === 0) {
       store.set({ source: null });
     }
-    toast('已删除' + (isSeries ? '整个列表' : '该视频'), 'success');
+    if (!silent) toast('已删除' + (isSeries ? '整个列表' : '该视频'), 'success');
     if (state.currentView === 'dashboard') renderDashboard();
     else if (state.currentView === 'browse') {
       state.browse.items = remain.slice();
@@ -2380,15 +2626,15 @@
     );
   }
 
-  /** 从“学习收藏夹”移除（确认后） */
+  /** 从“收藏夹库”移除（确认后） */
   function removeStudyFolder(folderId) {
     var folders = store.get('studyFolders') || [];
     var f = folders.find(function (s) { return String(s.id) === String(folderId); });
     var name = (f && (f.title || f.name)) || '该收藏夹';
-    confirmAction('确定从学习收藏夹中移除「' + esc(name) + '」？', function () {
+    confirmAction('确定从收藏夹库中移除「' + esc(name) + '」？', function () {
       var next = folders.filter(function (s) { return String(s.id) !== String(folderId); });
       store.set({ studyFolders: next });
-      toast('已从学习收藏夹移除', 'success');
+      toast('已从收藏夹库移除', 'success');
       if (state.currentView === 'dashboard') renderDashboard();
       else if (state.currentView === 'browse') {
         state.browse.items = next.slice();
@@ -2677,7 +2923,7 @@
         '</section>' +
         '<section><h3>② 选择学习内容</h3>' +
           '<ol class="steps">' +
-            '<li>点击右上角「内容源」，选择收藏夹：<b>设为内容源</b> 只显示它，<b>加入学习收藏夹</b> 会显示在主页；</li>' +
+            '<li>点击右上角「内容源」，选择收藏夹：<b>设为内容源</b> 只显示它，<b>加入学习</b> 会显示在收藏夹库；</li>' +
             '<li>进入收藏夹后，点视频卡片上的 <b>+</b> 可把其中单个视频加入学习列表；内容源搜索到的收藏夹视频也能直接「加入学习」；</li>' +
             '<li>也可以粘贴 B 站视频链接 / BV 号添加单个视频，或点「选择本地视频」；</li>' +
             '<li>给视频和收藏夹点星星打分（5 星最重要，优先显示），排序支持：添加时间 / 发布时间 / 星级 / 播放量。</li>' +
@@ -2686,7 +2932,7 @@
         '<section><h3>③ 主页三栏</h3>' +
           '<ol class="steps">' +
             '<li><b>继续学习</b>：有观看记录时置顶，点击自动从上次位置继续（整季只记一个进度）；</li>' +
-            '<li><b>添加的视频</b> 与 <b>学习收藏夹</b>：按星级排列，每栏「展开全部」可翻页 / 搜索 / 排序；</li>' +
+            '<li><b>视频库</b> 与 <b>收藏夹库</b>：按星级排列，每栏「展开全部」可翻页 / 搜索 / 排序；</li>' +
             '<li>卡片右下角 ✕ 可删除（确认后列表 / 整季一并移除）。</li>' +
           '</ol>' +
         '</section>' +
@@ -2861,6 +3107,18 @@
         if (!addBtn.classList.contains('added')) addFolderVideoToStudy(addBtn.dataset.videoAdd);
         return;
       }
+      var addTabBtn = e.target.closest('[data-video-add-tab]');
+      if (addTabBtn) {
+        e.stopPropagation();
+        if (state.pendingTabId) addVideoToTab(addTabBtn.dataset.videoAddTab, state.pendingTabId);
+        return;
+      }
+      var pickTabBtn = e.target.closest('[data-video-pick-tab]');
+      if (pickTabBtn) {
+        e.stopPropagation();
+        openTabChooser(pickTabBtn.dataset.videoPickTab, pickTabBtn);
+        return;
+      }
       var card = e.target.closest('.card');
       if (!card) return;
       var v = state.videos.find(function (x) {
@@ -2871,11 +3129,87 @@
 
     // 主页（仪表盘）委托：继续学习 / 星级 / 收藏夹卡片 / 移除
     els.dashboard.addEventListener('click', onDashboardClick);
+    // 双击自定义标签 → 内联重命名
+    els.dashboard.addEventListener('dblclick', function (e) {
+      var tabBtn = e.target.closest('.dash-tab.custom[data-tab-custom]');
+      if (!tabBtn) return;
+      if (e.target.closest('.dash-tab-more')) return;
+      e.preventDefault();
+      startTabRename(tabBtn.dataset.tabCustom);
+    });
+    // 自定义标签页：按住拖动排序
+    els.dashboard.addEventListener('dragstart', function (e) {
+      var btn = e.target.closest('.dash-tab.custom[data-tab-custom]');
+      if (!btn || e.target.closest('.dash-tab-input')) return;
+      state.dragTabId = btn.dataset.tabCustom;
+      btn.classList.add('dragging');
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = 'move';
+        try { e.dataTransfer.setData('text/plain', state.dragTabId); } catch (err) { /* 忽略 */ }
+      }
+    });
+    els.dashboard.addEventListener('dragover', function (e) {
+      if (!state.dragTabId) return;
+      var over = e.target.closest('.dash-tab.custom[data-tab-custom]');
+      var atEnd = !!e.target.closest('.dash-tab-new');
+      if (!over && !atEnd) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+      // 靠近滚动区两侧时自动滚动，便于拖到看不见的位置
+      var sc = e.target.closest('.dash-tabs-scroll');
+      if (sc) {
+        var sr = sc.getBoundingClientRect();
+        var dir = 0;
+        if (e.clientX - sr.left < 48) dir = -1;
+        else if (sr.right - e.clientX < 48) dir = 1;
+        startTabAutoScroll(sc, dir);
+      }
+      clearTabDropMarks();
+      if (over && String(over.dataset.tabCustom) !== String(state.dragTabId)) {
+        var r = over.getBoundingClientRect();
+        over.classList.add((e.clientX - r.left) > r.width / 2 ? 'drop-after' : 'drop-before');
+      }
+    });
+    els.dashboard.addEventListener('drop', function (e) {
+      var srcId = state.dragTabId;
+      if (!srcId) return;
+      e.preventDefault();
+      var over = e.target.closest('.dash-tab.custom[data-tab-custom]');
+      var atEnd = !!e.target.closest('.dash-tab-new');
+      var after = false;
+      var targetId = '';
+      if (over && String(over.dataset.tabCustom) !== String(srcId)) {
+        var r = over.getBoundingClientRect();
+        after = (e.clientX - r.left) > r.width / 2;
+        targetId = over.dataset.tabCustom;
+      } else if (atEnd) {
+        targetId = '';
+      }
+      stopTabDrag();
+      if (targetId || atEnd) moveCustomTab(srcId, targetId, after);
+    });
+    els.dashboard.addEventListener('dragend', stopTabDrag);
+    window.addEventListener('resize', syncTabsScroll);
+    // 标签栏：滚轮上下滚 → 横向滚动（标签多了才需要）
+    els.dashboard.addEventListener('wheel', function (e) {
+      var sc = e.target.closest('.dash-tabs-scroll');
+      if (!sc || sc.scrollWidth <= sc.clientWidth) return;
+      var delta = Math.abs(e.deltaY) > Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+      if (!delta) return;
+      e.preventDefault();
+      sc.scrollLeft += delta;
+    }, { passive: false });
     els.dashboard.addEventListener('input', function (e) {
       if (e.target && e.target.id === 'dashSearch') {
-        state.dashQuery = e.target.value;
+        var custom = findCustomTab(state.activeDashTab);
         var wrap = els.dashboard.querySelector('#dashContent');
-        if (wrap) wrap.innerHTML = renderAddedVideosSection();
+        if (custom) {
+          state.tabQuery[custom.id] = e.target.value;
+          if (wrap) wrap.innerHTML = renderCustomTab(custom);
+        } else {
+          state.dashQuery = e.target.value;
+          if (wrap) wrap.innerHTML = renderAddedVideosSection();
+        }
       }
     });
     els.dashboard.addEventListener('change', function (e) {
@@ -2963,11 +3297,34 @@
 
   /** 主页（仪表盘）点击委托 */
   function onDashboardClick(e) {
+    // 新建标签页（标签栏末尾的 ＋）
+    var newTabBtn = e.target.closest('[data-tab-new]');
+    if (newTabBtn) {
+      createCustomTab();
+      return;
+    }
+    // 自定义标签页的「⋯」菜单
+    var tabMenuBtn = e.target.closest('[data-tab-menu]');
+    if (tabMenuBtn) {
+      e.stopPropagation();
+      openTabMenu(tabMenuBtn.dataset.tabMenu, tabMenuBtn);
+      return;
+    }
     // 标签页切换
     var tabBtn = e.target.closest('[data-dash-tab]');
     if (tabBtn) {
-      state.activeDashTab = tabBtn.dataset.dashTab;
-      store.set({ activeDashTab: state.activeDashTab });
+      var tabKey = tabBtn.dataset.dashTab;
+      // 双击自定义标签 → 改名。第一次点击已经重渲染过标签栏、换掉了节点，
+      // 所以这里用 click 的 detail 兜住第二次点击（纯 dblclick 事件会丢）。
+      if (e.detail >= 2 && tabBtn.classList.contains('custom') && !e.target.closest('.dash-tab-more')) {
+        e.preventDefault();
+        startTabRename(tabBtn.dataset.tabCustom);
+        return;
+      }
+      // 已经在这个标签页：不再重渲染，否则第二次点击落在新节点上、双击事件丢失
+      if (String(state.activeDashTab) === String(tabKey)) return;
+      state.activeDashTab = tabKey;
+      store.set({ activeDashTab: tabKey });
       renderDashboard();
       return;
     }
@@ -2980,7 +3337,7 @@
     var rmBtn = e.target.closest('[data-card-remove]');
     if (rmBtn) {
       e.stopPropagation();
-      // 学习收藏夹卡片 → 移除收藏夹；其余 → 删除添加的视频
+      // 收藏夹库卡片 → 移除收藏夹；其余 → 从视频库删除
       if (rmBtn.closest('.folder-card')) removeStudyFolder(rmBtn.dataset.cardRemove);
       else removeCustomVideo(rmBtn.dataset.cardRemove);
       return;
@@ -2989,6 +3346,19 @@
     if (upRm) {
       e.stopPropagation();
       removeStudyUp(upRm.dataset.upRemove);
+      return;
+    }
+    // 自定义标签页内卡片 → 只从本页移除
+    var tabRm = e.target.closest('[data-tab-remove]');
+    if (tabRm) {
+      e.stopPropagation();
+      removeFromTab(tabRm.dataset.tabId, tabRm.dataset.tabKind, tabRm.dataset.tabRemove);
+      return;
+    }
+    // 自定义标签页「＋ 添加内容」
+    var tabAdd = e.target.closest('[data-tab-add]');
+    if (tabAdd) {
+      openContentPicker(tabAdd.dataset.tabAdd);
       return;
     }
     var more = e.target.closest('[data-browse]');
@@ -3026,13 +3396,13 @@
       if (entry) playHistoryEntry(entry);
       return;
     }
-    // 学习收藏夹卡片
+    // 收藏夹库卡片
     var fcard = e.target.closest('[data-folder]');
     if (fcard) {
       openFolder(fcard.dataset.folder);
       return;
     }
-    // 添加的视频卡片
+    // 视频库卡片
     var vcard = e.target.closest('.grid .card[data-id]');
     if (vcard) {
       var v = (store.get('customVideos') || []).find(function (x) {
@@ -3202,7 +3572,7 @@
     return list;
   }
 
-  function studyUpCard(up) {
+  function studyUpCard(up, ctx) {
     var meta = '';
     if (up.fans > 0) meta += fmtCount(up.fans) + ' 粉丝';
     if (up.videos > 0) meta += (meta ? ' · ' : '') + fmtCount(up.videos) + ' 视频';
@@ -3217,7 +3587,9 @@
             starControl(up.mid, up.stars, 'studyUp') +
           '</div>' +
         '</div>' +
-        '<button type="button" class="card-remove" data-up-remove="' + esc(String(up.mid)) + '" title="移除 UP主" aria-label="移除">✕</button>' +
+        (ctx && ctx.tab
+          ? '<button type="button" class="card-remove" data-tab-remove="' + esc(String(up.mid)) + '" data-tab-id="' + esc(ctx.tab) + '" data-tab-kind="up" title="从本标签页移除（不会移出学习 UP主）" aria-label="从本标签页移除">✕</button>'
+          : '<button type="button" class="card-remove" data-up-remove="' + esc(String(up.mid)) + '" title="移除 UP主" aria-label="移除">✕</button>') +
       '</div>'
     );
   }
@@ -3227,7 +3599,7 @@
     var cards = list.map(studyUpCard).join('');
     return (
       '<div class="dash-section">' +
-        '<div class="dash-head">' +
+        '<div class="section-head">' +
           '<h2 class="section-title">学习 UP主</h2>' +
         '</div>' +
         '<div class="up-grid">' +
@@ -3297,6 +3669,685 @@
     });
   }
 
+  /* ---------------- 新建 / 重命名 / 删除自定义标签页 ---------------- */
+
+  /** 新建标签页：直接创建，并立刻进入内联重命名 */
+  function createCustomTab() {
+    var list = customTabs();
+    var id = 'tab-' + Date.now();
+    list.push({ id: id, name: nextDefaultTabName(), createdAt: Date.now(), items: [] });
+    store.set({ customTabs: list });
+    state.activeDashTab = id;
+    store.set({ activeDashTab: id });
+    renderDashboard();
+    startTabRename(id);
+  }
+
+  /**
+   * 新标签页的默认名：取当前未被占用的最小序号。
+   * 已有「新标签页」就依次叫「新标签页2」「新标签页3」…；
+   * 若某个默认名被改掉（例如改成了「日语」），该序号会被重新空出来复用。
+   */
+  function nextDefaultTabName() {
+    var used = {};
+    customTabs().forEach(function (t) { used[String(t.name)] = true; });
+    if (!used['新标签页']) return '新标签页';
+    for (var i = 2; i < 1000; i++) {
+      var name = '新标签页' + i;
+      if (!used[name]) return name;
+    }
+    return '新标签页' + Date.now();
+  }
+
+  /** 把自定义标签页挪到目标标签页前/后（targetId 为空表示放到最后） */
+  function moveCustomTab(srcId, targetId, after) {
+    var list = customTabs();
+    var srcIdx = -1;
+    for (var i = 0; i < list.length; i++) {
+      if (String(list[i].id) === String(srcId)) { srcIdx = i; break; }
+    }
+    if (srcIdx < 0) return;
+    var moved = list.splice(srcIdx, 1)[0];
+    if (targetId) {
+      var tgt = -1;
+      for (var j = 0; j < list.length; j++) {
+        if (String(list[j].id) === String(targetId)) { tgt = j; break; }
+      }
+      if (tgt < 0) {
+        list.splice(srcIdx, 0, moved);   // 目标不存在：放回原位
+        return;
+      }
+      list.splice(after ? tgt + 1 : tgt, 0, moved);
+    } else {
+      list.push(moved);
+    }
+    store.set({ customTabs: list });
+    renderDashboard();
+  }
+
+  function clearTabDropMarks() {
+    var marks = els.dashboard.querySelectorAll('.drop-before, .drop-after');
+    for (var i = 0; i < marks.length; i++) marks[i].classList.remove('drop-before', 'drop-after');
+  }
+
+  function stopTabDrag() {
+    stopTabAutoScroll();
+    state.dragTabId = '';
+    clearTabDropMarks();
+    var dragging = els.dashboard.querySelectorAll('.dash-tab.dragging');
+    for (var i = 0; i < dragging.length; i++) dragging[i].classList.remove('dragging');
+  }
+
+  /** 标签内联重命名（双击标签 / 新建后立即进入） */
+  function startTabRename(tabId) {
+    var tab = findCustomTab(tabId);
+    var btn = els.dashboard.querySelector('.dash-tab[data-tab-custom="' + tabId + '"]');
+    if (!tab || !btn) return;
+    closeActionMenu();
+    btn.innerHTML = '<input class="dash-tab-input" type="text" maxlength="20" value="' + esc(tab.name) + '">';
+    var input = btn.querySelector('input');
+    input.focus();
+    input.select();
+    var done = false;
+    var commit = function (save) {
+      if (done) return;
+      done = true;
+      var name = (input.value || '').trim();
+      if (save && name && name !== tab.name) {
+        var list = customTabs();
+        var t = list.find(function (x) { return String(x.id) === String(tabId); });
+        if (t) {
+          t.name = name;
+          store.set({ customTabs: list });
+          toast('已重命名为「' + name + '」', 'success');
+        }
+      }
+      renderDashboard();
+    };
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); commit(true); }
+      else if (e.key === 'Escape') { e.preventDefault(); commit(false); }
+    });
+    input.addEventListener('blur', function () { commit(true); });
+    input.addEventListener('click', function (e) { e.stopPropagation(); });
+  }
+
+  /** 删除标签页（只删容器，库内容不动） */
+  function deleteCustomTab(tabId) {
+    var tab = findCustomTab(tabId);
+    if (!tab) return;
+    var n = (tab.items || []).length;
+    confirmAction(
+      '删除标签页「' + esc(tab.name) + '」？<br><span class="muted small">只删除这个标签页；其中 ' + n + ' 项内容仍保留在各自的栏目里。</span>',
+      function () {
+        store.set({ customTabs: customTabs().filter(function (t) { return String(t.id) !== String(tabId); }) });
+        delete state.tabQuery[tabId];
+        if (String(state.activeDashTab) === String(tabId)) {
+          state.activeDashTab = 'continue';
+          store.set({ activeDashTab: 'continue' });
+        }
+        renderDashboard();
+        toast('已删除标签页', 'success');
+      }
+    );
+  }
+
+  /* 通用小面板（挂到 body，避免被容器裁切）：标签页操作、选择标签页等都用它 */
+  var actionMenuEl = null;
+
+  function closeActionMenu() {
+    if (actionMenuEl) {
+      actionMenuEl.remove();
+      actionMenuEl = null;
+    }
+    document.removeEventListener('mousedown', onActionMenuDocDown);
+    window.removeEventListener('resize', closeActionMenu);
+  }
+
+  function onActionMenuDocDown(e) {
+    if (actionMenuEl && !actionMenuEl.contains(e.target)) closeActionMenu();
+  }
+
+  /** items: [{ label, note?, danger?, onClick }] */
+  function openActionMenu(anchor, items) {
+    closeActionMenu();
+    if (!items.length) return;
+    var pop = document.createElement('div');
+    pop.className = 'tab-menu-pop';
+    pop.innerHTML = items.map(function (it, i) {
+      return '<button type="button" class="tab-menu-item' + (it.danger ? ' danger' : '') + (it.note ? ' note' : '') +
+        '" data-menu-idx="' + i + '">' + esc(it.label) + '</button>';
+    }).join('');
+    document.body.appendChild(pop);
+    var r = anchor.getBoundingClientRect();
+    pop.style.top = (r.bottom + 6) + 'px';
+    pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - pop.offsetWidth - 8)) + 'px';
+    actionMenuEl = pop;
+    var btns = pop.querySelectorAll('[data-menu-idx]');
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].addEventListener('click', function () {
+        var item = items[Number(this.dataset.menuIdx)];
+        closeActionMenu();
+        if (item && item.onClick) item.onClick();
+      });
+    }
+    setTimeout(function () {
+      document.addEventListener('mousedown', onActionMenuDocDown);
+      window.addEventListener('resize', closeActionMenu);
+    }, 0);
+  }
+
+  function openTabMenu(tabId, anchor) {
+    openActionMenu(anchor, [
+      { label: '重命名', onClick: function () { startTabRename(tabId); } },
+      { label: '删除标签页', danger: true, onClick: function () { deleteCustomTab(tabId); } }
+    ]);
+  }
+
+  /**
+   * 把收藏夹里的视频加入指定自定义标签页。
+   * 规则同前：先入库（学习列表）再入页；已在库/已在页都不会重复写。
+   */
+  async function addVideoToTab(bvid, tabId) {
+    var tab = findCustomTab(tabId);
+    if (!tab) return;
+    var media = state.videos.find(function (x) { return String(x.bvid || x.bv_id) === String(bvid); });
+    var id = await ensureVideoInLibrary(bvid, media);
+    if (!id) {
+      toast('无法添加该视频', 'error');
+      return;
+    }
+    var list = customTabs();
+    var t = list.find(function (x) { return String(x.id) === String(tabId); });
+    if (t && !tabHasItem(t, 'video', id)) {
+      t.items = t.items || [];
+      t.items.push({ kind: 'video', id: String(id) });
+      store.set({ customTabs: list });
+      toast('已加入「' + t.name + '」标签页', 'success');
+    }
+    // 停留在收藏夹视图时刷新卡片状态；若已跳到仪表盘（新建标签页那条路径）则重渲染标签页
+    if (state.currentView === 'folder') renderGrid();
+    else if (state.currentView === 'dashboard') renderDashboard();
+  }
+
+  /** 从右上角内容源进来时：选一个自定义标签页把它加进去 */
+  function openTabChooser(bvid, anchor) {
+    var items = customTabs().map(function (t) {
+      return {
+        label: '加入「' + t.name + '」',
+        onClick: function () { addVideoToTab(bvid, t.id); }
+      };
+    });
+    items.push({
+      label: '＋ 新建标签页并加入',
+      note: true,
+      onClick: function () {
+        createCustomTab();
+        addVideoToTab(bvid, state.activeDashTab);
+      }
+    });
+    openActionMenu(anchor, items);
+  }
+
+  /** 在库里查找成员对应的实体（找不到返回 null） */
+  function findLibraryItem(kind, id) {
+    if (kind === 'video') {
+      return (store.get('customVideos') || []).find(function (x) {
+        return String(x.id || x.bvid) === String(id);
+      }) || null;
+    }
+    if (kind === 'folder') {
+      return (store.get('studyFolders') || []).find(function (x) { return String(x.id) === String(id); }) || null;
+    }
+    if (kind === 'up') {
+      return (store.get('studyUps') || []).find(function (x) { return String(x.mid) === String(id); }) || null;
+    }
+    return null;
+  }
+
+  function libraryItemName(kind, id) {
+    var it = findLibraryItem(kind, id);
+    if (!it) return '';
+    return it.title || it.name || String(id);
+  }
+
+  /** 库内实体被删除后，把所有自定义标签页里的引用一并摘掉（不留悬空引用） */
+  function dropMemberEverywhere(kind, id) {
+    var key = memberKey(kind, id);
+    var list = customTabs();
+    var changed = false;
+    list.forEach(function (t) {
+      var before = (t.items || []).length;
+      t.items = (t.items || []).filter(function (it) { return memberKey(it.kind, it.id) !== key; });
+      if (t.items.length !== before) changed = true;
+    });
+    if (changed) store.set({ customTabs: list });
+  }
+
+  /** 直接从库中删除（不弹确认，确认由调用方负责）；返回是否真的删掉了 */
+  function deleteFromLibrary(kind, id) {
+    if (kind === 'video') {
+      var item = findLibraryItem('video', id);
+      if (!item) return false;
+      doRemoveCustomVideo(item, item.seriesKey || (item.bvid ? 'b:' + item.bvid : 'id:' + item.id), true);
+      dropMemberEverywhere(kind, id);
+      return true;
+    }
+    if (kind === 'folder') {
+      var folders = store.get('studyFolders') || [];
+      var next = folders.filter(function (s) { return String(s.id) !== String(id); });
+      if (next.length === folders.length) return false;
+      store.set({ studyFolders: next });
+      dropMemberEverywhere(kind, id);
+      return true;
+    }
+    if (kind === 'up') {
+      var ups = store.get('studyUps') || [];
+      var nextUps = ups.filter(function (s) { return String(s.mid) !== String(id); });
+      if (nextUps.length === ups.length) return false;
+      store.set({ studyUps: nextUps });
+      dropMemberEverywhere(kind, id);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * 自定义标签页里卡片上的 ✕：二级确认。
+   * 默认只从本标签页移除；勾选「同时从库中删除」才连库一起删（默认不勾）。
+   */
+  function removeFromTab(tabId, kind, id) {
+    var tab = findCustomTab(tabId);
+    if (!tab) return;
+    var name = libraryItemName(kind, id) || '该项';
+    var libName = { video: '视频库', folder: '收藏夹库', up: '学习 UP主' }[kind] || '库';
+    confirmAction(
+      '从「' + esc(tab.name) + '」标签页移除「' + esc(name) + '」？' +
+        '<br><label class="check"><input type="checkbox" id="alsoDeleteFromLib"> ' +
+        '同时从库中删除（从「' + libName + '」里一并删掉，其它标签页里的它也会消失）</label>',
+      function (alsoDelete) {
+        var list = customTabs();
+        var t = list.find(function (x) { return String(x.id) === String(tabId); });
+        if (t) {
+          var k = memberKey(kind, id);
+          t.items = (t.items || []).filter(function (it) { return memberKey(it.kind, it.id) !== k; });
+          store.set({ customTabs: list });
+        }
+        var deleted = alsoDelete ? deleteFromLibrary(kind, id) : false;
+        if (state.currentView === 'dashboard') renderDashboard();
+        toast(deleted ? '已从标签页和库中删除' : '已从本标签页移除');
+      },
+      function () {
+        var cb = document.getElementById('alsoDeleteFromLib');
+        return !!(cb && cb.checked);
+      }
+    );
+  }
+
+  /* ---------------- 内容选择器（把源 / 库里的内容加入标签页） ---------------- */
+
+  var PICKER_SECTIONS = [
+    { key: 'folder', label: '源收藏夹' },
+    { key: 'video', label: '视频库' },
+    { key: 'folderLib', label: '收藏夹库' },
+    { key: 'up', label: '学习 UP主' }
+  ];
+
+  var pickerState = null;
+
+  function openContentPicker(tabId) {
+    var tab = findCustomTab(tabId);
+    if (!tab) return;
+    pickerState = {
+      tabId: tabId,
+      section: 'folder',
+      query: '',
+      sel: {},
+      // 各分区各自的排序方式（源收藏夹沿用内容源的做法：外部列表不排序）
+      sortBy: { video: 'star', folderLib: 'star', up: 'star' }
+    };
+    openModal(
+      '<div class="modal-head"><h2>添加内容到「' + esc(tab.name) + '」</h2><button type="button" class="icon-btn" data-close aria-label="关闭">×</button></div>' +
+      '<div class="modal-body">' +
+        '<div class="picker-tabs">' +
+          PICKER_SECTIONS.map(function (s) {
+            return '<button type="button" class="picker-tab' + (s.key === pickerState.section ? ' active' : '') +
+              '" data-picker-tab="' + s.key + '">' + s.label + '</button>';
+          }).join('') +
+        '</div>' +
+        '<div class="picker-tools">' +
+          '<input id="pickerSearch" class="search-input" type="search" placeholder="搜索…" autocomplete="off">' +
+          '<select id="pickerSort" class="select picker-sort" aria-label="排序"></select>' +
+        '</div>' +
+        '<p class="muted small" id="pickerHint"></p>' +
+        '<div id="pickerList" class="picker-list"></div>' +
+        '<div class="row picker-foot">' +
+          '<span class="muted small" id="pickerCount">已选 0 项</span>' +
+          '<button type="button" class="btn ghost" data-close>取消</button>' +
+          '<button type="button" class="btn primary" id="btnPickerAdd" disabled>添加</button>' +
+        '</div>' +
+      '</div>',
+      { wide: true }
+    );
+    bindClose();
+    bindPickerEvents();
+    renderPickerList();
+    loadPickerFolders();
+  }
+
+  function bindPickerEvents() {
+    var tabs = document.querySelectorAll('.picker-tab');
+    for (var i = 0; i < tabs.length; i++) {
+      tabs[i].addEventListener('click', function () {
+        pickerState.section = this.dataset.pickerTab;
+        pickerState.query = '';
+        var input = document.getElementById('pickerSearch');
+        if (input) input.value = '';
+        var all = document.querySelectorAll('.picker-tab');
+        for (var j = 0; j < all.length; j++) all[j].classList.toggle('active', all[j] === this);
+        renderPickerSort();
+        renderPickerList();
+        if (pickerState.section === 'folder') loadPickerFolders();
+      });
+    }
+    document.getElementById('pickerSearch').addEventListener('input', function () {
+      pickerState.query = this.value;
+      renderPickerList();
+    });
+    var sortEl = document.getElementById('pickerSort');
+    if (sortEl) {
+      sortEl.addEventListener('change', function () {
+        pickerState.sortBy[pickerState.section] = this.value;
+        renderPickerList();
+      });
+    }
+    document.getElementById('pickerList').addEventListener('click', function (e) {
+      if (!pickerState) return;
+      var row = e.target.closest('[data-pick-key]');
+      if (!row) return;
+      var toggle = e.target.closest('[data-pick-toggle]');
+      // 源收藏夹：点整行进入收藏夹视图挑视频（点左侧方框仍是「选中这个收藏夹」）
+      if (row.dataset.pickOpenId && !toggle) {
+        enterFolderFromPicker(row.dataset.pickOpenId);
+        return;
+      }
+      if (row.classList.contains('disabled')) return;
+      togglePick((toggle && toggle.dataset.pickToggle) || row.dataset.pickKey);
+    });
+    document.getElementById('btnPickerAdd').addEventListener('click', commitPicker);
+    renderPickerSort();
+  }
+
+  function togglePick(key) {
+    if (!pickerState || !key) return;
+    if (pickerState.sel[key]) delete pickerState.sel[key];
+    else pickerState.sel[key] = true;
+    renderPickerList();
+  }
+
+  /**
+   * 从选择器进入收藏夹视图挑视频：复用内容源的收藏夹浏览（自带排序 / 搜索 / 分页），
+   * 只额外带上「正在往哪个标签页加」的上下文，卡片右上角据此换一套状态显示。
+   */
+  function enterFolderFromPicker(folderId) {
+    var tabId = pickerState ? pickerState.tabId : '';
+    var tab = findCustomTab(tabId);
+    closeModal();
+    pickerState = null;
+    state.pendingTabId = tabId;
+    openFolder(folderId);
+    if (tab) toast('正在添加到「' + tab.name + '」：点视频右上角的绿色 +', 'info', 5000);
+  }
+
+  var PICKER_SORTS = {
+    video: [['star', '星级'], ['add', '添加时间'], ['play', '播放量'], ['pub', '发布时间']],
+    folderLib: [['star', '星级'], ['add', '添加时间'], ['count', '视频数']],
+    up: [['star', '星级'], ['add', '添加时间'], ['fans', '粉丝数']]
+  };
+
+  /** 库侧分区的排序下拉（源收藏夹沿用内容源，不显示排序） */
+  function renderPickerSort() {
+    var el = document.getElementById('pickerSort');
+    if (!el || !pickerState) return;
+    var opts = PICKER_SORTS[pickerState.section];
+    if (!opts) {
+      el.style.display = 'none';
+      el.innerHTML = '';
+      return;
+    }
+    el.style.display = '';
+    var cur = pickerState.sortBy[pickerState.section] || 'star';
+    el.innerHTML = opts.map(function (o) {
+      return '<option value="' + o[0] + '"' + (cur === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
+    }).join('');
+    el.value = cur;
+  }
+
+  function sortPickerRows(list) {
+    var by = pickerState.sortBy[pickerState.section] || 'star';
+    var cmp = {
+      star: function (a, b) { return (b.stars || 0) - (a.stars || 0) || (b.addedAt || 0) - (a.addedAt || 0); },
+      add: function (a, b) { return (b.addedAt || 0) - (a.addedAt || 0); },
+      play: function (a, b) { return (b.play || 0) - (a.play || 0) || (b.addedAt || 0) - (a.addedAt || 0); },
+      pub: function (a, b) { return (b.pub || 0) - (a.pub || 0) || (b.addedAt || 0) - (a.addedAt || 0); },
+      count: function (a, b) { return (b.count || 0) - (a.count || 0) || (b.addedAt || 0) - (a.addedAt || 0); },
+      fans: function (a, b) { return (b.fans || 0) - (a.fans || 0) || (b.addedAt || 0) - (a.addedAt || 0); }
+    }[by];
+    if (cmp) list.sort(cmp);
+    return list;
+  }
+
+  /** 列表行的缩略图（无图时显示占位文字） */
+  function pickerThumb(url, fallback) {
+    if (!url) return '<span class="picker-thumb picker-thumb-empty">' + esc(fallback || '—') + '</span>';
+    return '<img class="picker-thumb" src="' + esc(String(url).replace(/^http:\/\//i, 'https://')) +
+      '" alt="" loading="lazy" referrerpolicy="no-referrer">';
+  }
+
+  /** 源收藏夹需要联网拉取（复用内容源的 10 分钟缓存） */
+  async function loadPickerFolders() {
+    if (!store.get('login')) return;
+    if (state.folders.length && Date.now() - state.foldersFetchedAt < 10 * 60 * 1000) return;
+    try {
+      state.folders = await api.folders(store.get('login').mid, creds());
+      state.foldersFetchedAt = Date.now();
+      if (pickerState) renderPickerList();
+    } catch (e) {
+      var list = document.getElementById('pickerList');
+      if (list && pickerState && pickerState.section === 'folder') {
+        list.innerHTML = '<p class="muted" style="padding:14px">收藏夹加载失败：' + esc(e.message) + '</p>';
+      }
+    }
+  }
+
+  function pickerRows() {
+    var sec = pickerState.section;
+    var q = (pickerState.query || '').trim().toLowerCase();
+    var hit = function (t) { return !q || String(t || '').toLowerCase().indexOf(q) >= 0; };
+    if (sec === 'folder') {
+      if (!store.get('login')) return { hint: '未登录：请先到「设置」完成 B 站登录，才能读取收藏夹。', rows: [] };
+      var lib = store.get('studyFolders') || [];
+      var fRows = (state.folders || []).filter(function (f) { return hit(f.title); }).map(function (f) {
+        var inLib = lib.some(function (s) { return String(s.id) === String(f.id); });
+        return {
+          kind: 'folder',
+          id: f.id,
+          title: f.title,
+          meta: (f.media_count != null ? f.media_count + ' 个视频' : '') + (inLib ? ' · 已加入' : ''),
+          enter: true,
+          plain: true   // 源收藏夹列表不显示封面（B站收藏夹列表接口不返回封面，占位图没有辨识度）
+        };
+      });
+      return {
+        hint: '点收藏夹进入后可挑单个视频（那个界面有排序和搜索）；勾选左侧方框则把整个收藏夹加入。',
+        rows: fRows
+      };
+    }
+    if (sec === 'video') {
+      var vRows = (store.get('customVideos') || []).filter(function (v) { return hit(v.title || v.name); }).map(function (v) {
+        return {
+          kind: 'video',
+          id: v.id,
+          title: v.title || v.name || '未命名',
+          meta: v.kind === 'local' ? '本地视频' : 'B站视频',
+          cover: v.cover,
+          fallback: v.kind === 'local' ? '本地' : 'B站',
+          stars: v.stars || 0,
+          addedAt: v.addedAt || 0,
+          play: v.play || 0,
+          pub: v.pubtime || 0
+        };
+      });
+      return { hint: '', rows: sortPickerRows(vRows) };
+    }
+    if (sec === 'folderLib') {
+      var flRows = (store.get('studyFolders') || []).filter(function (f) { return hit(f.title || f.name); }).map(function (f) {
+        return {
+          kind: 'folder',
+          id: f.id,
+          title: f.title || f.name,
+          meta: f.mediaCount != null ? f.mediaCount + ' 个视频' : '',
+          cover: f.cover,
+          fallback: '夹',
+          stars: f.stars || 0,
+          addedAt: f.addedAt || 0,
+          count: f.mediaCount || 0
+        };
+      });
+      return { hint: '', rows: sortPickerRows(flRows) };
+    }
+    var uRows = (store.get('studyUps') || []).filter(function (u) { return hit(u.name); }).map(function (u) {
+      return {
+        kind: 'up',
+        id: u.mid,
+        title: u.name,
+        meta: u.fans ? fmtCount(u.fans) + ' 粉丝' : '',
+        cover: u.face,
+        fallback: 'UP',
+        stars: u.stars || 0,
+        addedAt: u.addedAt || 0,
+        fans: u.fans || 0
+      };
+    });
+    return { hint: '', rows: sortPickerRows(uRows) };
+  }
+
+  function renderPickerList() {
+    var list = document.getElementById('pickerList');
+    if (!list || !pickerState) return;
+    var res = pickerRows();
+    var hintEl = document.getElementById('pickerHint');
+    if (hintEl) hintEl.textContent = res.hint || '';
+    var tab = findCustomTab(pickerState.tabId);
+    if (!res.rows.length) {
+      list.innerHTML = '<p class="muted" style="padding:14px">' +
+        (res.hint ? '—' : '暂无可选内容。') + '</p>';
+      updatePickerCount();
+      return;
+    }
+    list.innerHTML = res.rows.map(function (r) {
+      var key = memberKey(r.kind, r.id);
+      var inTab = tab ? tabHasItem(tab, r.kind, r.id) : false;
+      var on = !!pickerState.sel[key];
+      var metaText = (inTab ? '已在本页' + (r.meta ? ' · ' + r.meta : '') : (r.meta || ''));
+      return '<div class="picker-row' + (on ? ' on' : '') + (!r.enter && inTab ? ' disabled' : '') +
+          '" data-pick-key="' + esc(key) + '"' +
+          (r.enter ? ' data-pick-open-id="' + esc(r.id) + '"' : '') + '>' +
+          '<span class="picker-check" data-pick-toggle="' + esc(key) + '">' + (inTab || on ? '✓' : '') + '</span>' +
+          (r.plain ? '' : pickerThumb(r.kind === 'up' ? fixAvatar(r.cover) : r.cover, r.fallback)) +
+          '<span class="picker-text">' +
+            '<span class="picker-name">' + esc(r.title) + '</span>' +
+            '<span class="picker-meta muted small">' + esc(metaText) + '</span>' +
+          '</span>' +
+          (r.enter ? '<span class="picker-go">进入 ›</span>' : '') +
+        '</div>';
+    }).join('');
+    hideBrokenThumbs(list);
+    updatePickerCount();
+  }
+
+  function updatePickerCount() {
+    var el = document.getElementById('pickerCount');
+    if (!el || !pickerState) return;
+    var n = Object.keys(pickerState.sel).length;
+    el.textContent = '已选 ' + n + ' 项';
+    var btn = document.getElementById('btnPickerAdd');
+    if (btn) btn.disabled = n === 0;
+  }
+
+  /**
+   * 确认添加。规则：来源内容先入库、再入页（标签页的成员一定都在库里）——
+   * 「源收藏夹」的收藏夹写入 studyFolders；「源收藏夹」里的单个视频写入 customVideos；
+   * 其余三个分区的内容本来就在库里，只建立引用。
+   */
+  async function commitPicker() {
+    if (!pickerState) return;
+    var keys = Object.keys(pickerState.sel);
+    if (!keys.length) return;
+    var addBtn = document.getElementById('btnPickerAdd');
+    if (addBtn) {
+      addBtn.disabled = true;
+      addBtn.textContent = '添加中…';
+    }
+    var list = customTabs();
+    var tab = list.find(function (t) { return String(t.id) === String(pickerState.tabId); });
+    if (!tab) return;
+    tab.items = tab.items || [];
+    var studyFolders = store.get('studyFolders') || [];
+    var foldersChanged = false;
+    var added = 0;
+    var failed = 0;
+
+    for (var i = 0; i < keys.length; i++) {
+      var k = keys[i];
+      var idx = k.indexOf(':');
+      var kind = k.slice(0, idx);
+      var id = k.slice(idx + 1);
+      if (tabHasItem(tab, kind, id)) continue;
+
+      if (kind === 'folder') {
+        if (!studyFolders.some(function (s) { return String(s.id) === id; })) {
+          var f = (state.folders || []).find(function (x) { return String(x.id) === id; });
+          if (f) {
+            studyFolders.unshift({
+              id: f.id,
+              title: f.title,
+              cover: (f.cover || '').replace(/^http:\/\//i, 'https://'),
+              mediaCount: f.media_count || 0,
+              addedAt: Date.now(),
+              stars: 0
+            });
+            foldersChanged = true;
+          }
+        }
+        tab.items.push({ kind: 'folder', id: String(id) });
+        added++;
+        continue;
+      }
+
+      if (kind === 'video') {
+        // 选择器里的视频都来自「视频库」（已在库），只建立引用
+        tab.items.push({ kind: 'video', id: String(id) });
+        added++;
+        continue;
+      }
+
+      tab.items.push({ kind: kind, id: String(id) });
+      added++;
+    }
+
+    if (foldersChanged) store.set({ studyFolders: studyFolders });
+    store.set({ customTabs: list });
+    closeModal();
+    pickerState = null;
+    renderDashboard();
+    if (failed) {
+      toast('已添加 ' + added + ' 项，' + failed + ' 项未能加入', 'error');
+    } else {
+      toast('已添加 ' + added + ' 项', 'success');
+    }
+  }
+
   /* ---------------- 启动 ---------------- */
   (async function init() {
     applyTheme();
@@ -3330,8 +4381,8 @@
     if (!state.backend.ok) {
       els.backendBanner.hidden = false;
     }
-    // 恢复上次选中的主页标签（非法/缺失时回落到「继续学习」）
-    state.activeDashTab = store.get('activeDashTab') || 'continue';
+    // 恢复上次选中的主页标签（标签页被删或值非法时回落到「继续学习」）
+    state.activeDashTab = normalizeDashTab(store.get('activeDashTab'));
     await checkLogin();
     await loadDashboard();
     // 首次启动展示登录与设置引导

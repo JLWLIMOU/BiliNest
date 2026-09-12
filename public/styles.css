@@ -15,6 +15,9 @@
   --accent: #2f6fed;
   --accent-soft: rgba(47, 111, 237, 0.10);
   --accent-text: #ffffff;
+  /* 自定义标签页 / “加入标签页”统一使用的绿色强调色（与系统标签页的蓝色区分） */
+  --tab-green: #2fa84f;
+  --tab-green-soft: rgba(47, 168, 79, 0.6);
   --danger: #d33;
   --ok: #1a7f37;
   --warn: #b45309;
@@ -38,6 +41,8 @@
     --text-2: #9a9aa2;
     --accent: #4d8dff;
     --accent-soft: rgba(77, 141, 255, 0.14);
+    --tab-green: #45c46c;
+    --tab-green-soft: rgba(69, 196, 108, 0.62);
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
     --shadow-md: 0 10px 30px rgba(0, 0, 0, 0.5);
   }
@@ -54,6 +59,8 @@
   --text-2: #9a9aa2;
   --accent: #4d8dff;
   --accent-soft: rgba(77, 141, 255, 0.14);
+  --tab-green: #45c46c;
+  --tab-green-soft: rgba(69, 196, 108, 0.62);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-md: 0 10px 30px rgba(0, 0, 0, 0.5);
 }
@@ -383,9 +390,31 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
 /* 标签页 */
 .dash-tabs {
   display: flex;
+  align-items: stretch;
   gap: 0;
   border-bottom: 1px solid var(--border);
   margin-bottom: 24px;
+}
+/* 自定义标签的滚动区：标签太多时横向滚动（隐藏滚动条，滚轮可直接横向滚） */
+.dash-tabs-scroll {
+  display: flex;
+  align-items: stretch;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-behavior: smooth;
+  scrollbar-width: none;
+}
+.dash-tabs-scroll::-webkit-scrollbar { display: none; }
+/* 向左滚出内容时左侧渐隐，提示还有更多 */
+.dash-tabs-scroll.scrolled {
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 24px);
+  mask-image: linear-gradient(to right, transparent 0, #000 24px);
+}
+/* 溢出时「＋」会贴住右侧，用一点左侧阴影说明有内容从下面滑过 */
+.dash-tabs-scroll.overflowing .dash-tab-new {
+  box-shadow: -8px 0 10px -8px rgba(0, 0, 0, 0.28);
 }
 .dash-tab {
   padding: 12px 24px;
@@ -403,6 +432,26 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
 .dash-tab.active {
   color: var(--accent);
   border-bottom-color: var(--accent);
+}
+
+/* 自定义标签页：绿色强调 + 可拖动排序 */
+.dash-tab.custom { cursor: grab; }
+.dash-tab.custom:active { cursor: grabbing; }
+.dash-tab.custom:hover { color: var(--tab-green); }
+.dash-tab.custom.active {
+  color: var(--tab-green);
+  border-bottom-color: var(--tab-green);
+}
+.dash-tab.custom.dragging { opacity: 0.45; }
+.dash-tab.custom.drop-before { box-shadow: inset 3px 0 0 var(--tab-green); }
+.dash-tab.custom.drop-after { box-shadow: inset -3px 0 0 var(--tab-green); }
+/* 系统标签与自定义标签之间的分隔线 */
+.dash-tabs-sep {
+  align-self: center;
+  width: 1px;
+  height: 18px;
+  margin: 0 10px;
+  background: var(--border-strong);
 }
 
 .dash-section { display: flex; flex-direction: column; gap: 14px; }
@@ -580,6 +629,43 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
 }
 .card-add:hover { background: var(--accent); }
 .card-add.added { background: var(--accent); cursor: default; }
+
+/* 卡片右上角状态区：蓝 ✓ = 在学习列表（库）；绿 ✓ = 在自定义标签页 */
+.card-flags {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.card-flags .card-add { position: static; right: auto; top: auto; }
+.card-flag {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 15px;
+  line-height: 1;
+}
+.card-flag-lib { background: var(--accent); }
+.card-flag-tab { background: var(--tab-green); }
+/* 淡绿 + ：加入当前自定义标签页（同时写入学习列表） */
+.card-add-tab { background: var(--tab-green-soft); }
+.card-add-tab:hover { background: var(--tab-green); }
+/* 文字按钮：添加到自定义标签页… */
+.card-add-pick {
+  width: auto;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  background: rgba(0, 0, 0, 0.62);
+}
+.card-add-pick:hover { background: var(--accent); }
 
 /* 卡片正文右下角的“×”删除按钮（与左侧星级并排） */
 .card-foot {
@@ -1085,7 +1171,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .search-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-.dash-search-wrap { display: flex; }
+.dash-search-wrap { display: flex; margin-bottom: 18px; }
 .dash-search-wrap .search-input { max-width: 520px; }
 .browse-search { margin-bottom: 18px; }
 .home-tools { display: flex; align-items: center; gap: 12px; }
@@ -1307,6 +1393,178 @@ details.help .steps { margin-top: 4px; }
   justify-content: space-between;
   gap: 8px;
 }
+
+/* ---------- 响应式 ---------- */
+/* ---------- 自定义标签页 ---------- */
+
+.dash-tab.custom { position: relative; padding-right: 30px; }
+.dash-tab-more {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  line-height: 17px;
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--text-2);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.dash-tab.custom:hover .dash-tab-more { opacity: 1; }
+.dash-tab-more:hover { background: var(--surface-2); color: var(--text); }
+/* 新建按钮：不溢出时跟在最后一个标签后面；溢出滚动时才贴住右侧（sticky）保持可达 */
+.dash-tab-new {
+  position: sticky;
+  right: 0;
+  background: var(--bg);
+  color: var(--text-2);
+}
+.dash-tab-new:hover { color: var(--accent); }
+.dash-tab-input {
+  width: 108px;
+  padding: 3px 6px;
+  font-size: 15px;
+  font-family: inherit;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.tab-menu-pop {
+  position: fixed;
+  z-index: 80;
+  min-width: 132px;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+}
+.tab-menu-item {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+.tab-menu-item:hover { background: var(--surface-2); }
+.tab-menu-item.danger { color: var(--danger); }
+.tab-menu-item.danger:hover { background: rgba(221, 51, 51, 0.08); }
+
+.tab-add-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 6px;
+  background: none;
+  color: var(--text-2);
+  font-family: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.tab-add-card:hover { border-color: var(--accent); color: var(--accent); }
+.tab-add-icon { font-size: 18px; line-height: 1; }
+/* 自定义标签页头部：标题 + 计数胶囊，靠左成组 */
+.tab-head { justify-content: flex-start; gap: 10px; }
+.tab-count {
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.tab-group-title {
+  margin: 22px 0 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+/* ---------- 内容选择器 ---------- */
+.picker-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.picker-tab {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: none;
+  color: var(--text-2);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.picker-tab:hover { border-color: var(--border-strong); color: var(--text); }
+.picker-tab.active { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.picker-list {
+  max-height: 46vh;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.picker-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+.picker-row:last-child { border-bottom: 0; }
+.picker-row:hover { background: var(--surface-2); }
+.picker-row.on { background: var(--accent-soft); }
+.picker-row.disabled { opacity: 0.55; cursor: default; }
+.picker-row.disabled:hover { background: none; }
+.picker-check {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  color: var(--accent);
+  font-size: 12px;
+  line-height: 16px;
+  text-align: center;
+}
+.picker-row.on .picker-check { border-color: var(--accent); }
+.picker-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.picker-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picker-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picker-thumb {
+  flex: none;
+  width: 64px;
+  height: 40px;
+  border-radius: 4px;
+  object-fit: cover;
+  background: var(--surface-2);
+}
+.picker-thumb-empty {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: var(--text-2);
+}
+/* UP主 用圆形头像 */
+.picker-row[data-pick-key^="up:"] .picker-thumb { width: 40px; height: 40px; border-radius: 50%; }
+.picker-go { flex: none; font-size: 12px; color: var(--accent); }
+.picker-tools { display: flex; align-items: center; gap: 8px; }
+.picker-tools .search-input { flex: 1; }
+.picker-sort { flex: none; width: auto; min-width: 104px; }
+.picker-foot { align-items: center; justify-content: space-between; margin-top: 14px; }
+.btn:disabled { opacity: 0.5; cursor: default; }
 
 /* ---------- 响应式 ---------- */
 @media (max-width: 720px) {

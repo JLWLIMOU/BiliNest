@@ -26,8 +26,10 @@ window.BiliNestStore = (function () {
     activeDashTab: 'continue', // 主页当前标签：continue | added | folders | ups
     subSettings: { pos: 100, size: 'md' }, // 字幕位置（滑块 0~100）/ 字号
     customVideos: [],         // 手动添加的 B 站视频 / 本地视频
-    studyFolders: [],         // 学习收藏夹：{ id, title, cover, mediaCount, addedAt, stars }
+    studyFolders: [],         // 收藏夹库：{ id, title, cover, mediaCount, addedAt, stars }
     studyUps: [],             // 学习 UP主（本地书签）：{ mid, name, face, sign, fans, videos, level, addedAt, stars }
+    customTabs: [],           // 自定义标签页：{ id, name, createdAt, items:[{ kind:'video'|'folder'|'up', id }] }
+                              //   items 只存库内实体的引用（customVideos[].id / studyFolders[].id / studyUps[].mid）
     watchHistory: [],         // 观看记录（参考 DanmuTV 的播放记录 schema，向后兼容）：
                                //   { key, kind, bvid, cid, page, title, cover, upper, seriesKey,
                                //     seriesTitle, episodeLabel, episodeCount, danmaku,

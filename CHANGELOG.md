@@ -14,27 +14,6 @@
 
 ---
 
-## [Unreleased]
-
-### Added（新增）
-
-- **移除学习 UP主**：学习 UP主 卡片右侧新增「✕」按钮，点击后弹出确认框，确认即从列表中移除。
-  - 涉及文件：`public/app.js`
-  - 技术细节：复用 `confirmAction()`（与「移除学习收藏夹」一致）；卡片渲染新增 `data-up-remove`，`onDashboardClick` 中在卡片跳转之前处理并 `stopPropagation`，避免误触发跳转 B站主页。
-
-- **空状态补充「添加 UP主」入口**：仪表盘没有任何内容时（包括移除最后一个 UP主 之后），空状态在「打开内容源」旁新增「添加 UP主」按钮，避免进入再也加不了 UP主 的死角。
-  - 涉及文件：`public/app.js`
-
-### Fixed（修复）
-
-- **主页标签页选中状态刷新后丢失**：`state.activeDashTab` 从未从 localStorage 恢复，「记住上次选中的标签」实际不生效（刷新后总是回到「继续学习」）。
-  - 涉及文件：`public/app.js`
-  - 技术细节：`init()` 中在 `loadDashboard()` 之前补 `state.activeDashTab = store.get('activeDashTab') || 'continue'`。
-
-- **学习 UP主 卡片排版错误（竖排）**：卡片标记同时带有通用 `.card` 类，其 `flex-direction: column` 覆盖了 `.up-card` 的横排意图，导致头像居中在上、文字堆叠在下。
-  - 涉及文件：`public/styles.css`
-  - 技术细节：`.up-card` 显式补 `flex-direction: row`。
-
 ## [1.1.0] - 2026-09-12
 
 ### Added（新增）
@@ -47,15 +26,89 @@
     - 卡片点击 `window.open('https://space.bilibili.com/{mid}', '_blank')`；
     - 补充 `fmtCount`、`fixAvatar` 工具函数。
 
-- **主页标签页**：主页从纵向堆叠改为标签页切换模式（继续学习 / 添加的视频 / 学习收藏夹 / 学习 UP主），每次只显示一个栏位，标签状态持久化。
+- **主页标签页**：主页从纵向堆叠改为标签页切换模式（继续学习 / 视频库 / 收藏夹库 / 学习 UP主），每次只显示一个栏位，标签状态持久化。
   - 涉及文件：`public/app.js`、`public/styles.css`、`public/storage.js`
   - 技术细节：
     - `renderDashboard()` 重写为标签栏 + 内容区两层结构；
     - `state.activeDashTab` 持久化到 localStorage，记住上次选中的标签；
-    - 每个标签独占整个主页空间，默认显示更多卡片（继续学习 12 / 添加的视频 20 / 收藏夹 12 / UP主 12）；
-    - 搜索框仅在「添加的视频」标签下显示。
+    - 每个标签独占整个主页空间，默认显示更多卡片（继续学习 12 / 视频库 20 / 收藏夹 12 / UP主 12）；
+    - 搜索框仅在「视频库」标签下显示。
+
+- **移除学习 UP主**：学习 UP主 卡片右侧新增「✕」按钮，点击后弹出确认框，确认即从列表中移除。
+  - 涉及文件：`public/app.js`
+  - 技术细节：复用 `confirmAction()`（与「从收藏夹库移除」一致）；卡片渲染新增 `data-up-remove`，`onDashboardClick` 中在卡片跳转之前处理并 `stopPropagation`，避免误触发跳转 B站主页。
+
+- **空状态补充「添加 UP主」入口**：仪表盘没有任何内容时（包括移除最后一个 UP主 之后），空状态在「打开内容源」旁新增「添加 UP主」按钮，避免进入再也加不了 UP主 的死角。
+  - 涉及文件：`public/app.js`
+
+- **自定义标签页**：标签栏末尾新增「＋」直接新建标签页（建完立即内联改名，双击标签也能改名；悬浮标签出现的「⋯」可重命名 / 删除标签页）。空标签页内有一张「＋ 添加内容」卡片，点开是四分区选择器：源收藏夹 / 视频库 / 收藏夹库 / 学习 UP主；库侧三个分区的条目带缩略图（封面 / 头像，无图时显示占位文字），源收藏夹列表不显示封面。选视频不再另做一套浏览界面——点「源收藏夹」里的收藏夹会直接进入右上角「内容源」那套收藏夹视图（自带搜索 / 排序 / 分页），只是带着「正在往哪个标签页加」的上下文。
+  - 涉及文件：`public/storage.js`、`public/app.js`、`public/styles.css`
+  - 技术细节：
+    - `customTabs` 存于 localStorage，结构 `{ id, name, createdAt, items:[{ kind:'video'|'folder'|'up', id }] }`；`items` 只存库内实体的引用，不拷贝数据，删标签页不会删内容；
+    - `tabMembers()` 解析成员时跳过已失效的引用（条目从库中删除后自愈）；成员按 视频 / 收藏夹库 / 学习 UP主 分组渲染，复用 `videoCard()` / `folderCard()` / `studyUpCard()`（三者新增可选 `ctx` 参数：`ctx.tab` 存在时卡片上的 ✕ 变为「从本标签页移除」，不动库）；
+    - 选择器里「源收藏夹」分区勾选收藏夹本体 → 先写入 `studyFolders`（入库）再入页；点收藏夹行则关闭选择器、进入收藏夹视图（复用内容源那一套），并设置 `state.pendingTabId` 记录目标标签页；另外三个分区只入页（内容已在库）；已在本页的条目置灰、不可重复勾选；
+    - 库侧三个分区支持排序：视频「星级 / 添加时间 / 播放量 / 发布时间」、收藏夹库「星级 / 添加时间 / 视频数」、UP主「星级 / 添加时间 / 粉丝数」，默认星级优先（次键为添加时间）；
+    - 源收藏夹列表不显示封面：B站收藏夹列表接口本身不返回封面，显示占位图没有辨识度（`pickerRows()` 里给该分区行标记 `plain: true`，渲染时跳过缩略图）；
+    - 新增 `ensureVideoInLibrary(bvid, media)`：把收藏夹里的单个视频补进「视频库」并返回库内 id，与内容源里的「加入学习」共用同一段「多P / 合集」归类逻辑；提交时逐条 await，失败的条目会单独计数并提示；
+    - 主页标签栏改为数据驱动（`SYSTEM_TABS` + `customTabs()`）；新增 `normalizeDashTab()`，标签页被删或存储值非法时回落到「继续学习」；
+    - 自定义标签页的搜索关键字各自记录（`state.tabQuery`，内存态，不持久化），不会与其他标签页串台。
+
+- **收藏夹视图的卡片右上角状态区**：同一张视频卡片按来源渲染不同状态，一眼看出「在不在库里」和「在不在某个自定义标签页」。
+  - 涉及文件：`public/app.js`、`public/styles.css`
+  - 技术细节：
+    - 蓝色 ✓ = 已在「学习列表」（库）；绿色 ✓ = 已在自定义标签页（从标签页进入时指当前页，从内容源进入时指任意标签页，悬浮显示标签页名）；
+    - 从自定义标签页进来（`state.pendingTabId` 有值）时，未入库的视频显示一个**淡绿色 +**，悬浮提示「添加到「xx」标签页（同时加入学习列表）」，点一下同时完成入库 + 入页，随后变为蓝 ✓ + 绿 ✓；
+    - 从右上角「内容源」进来（无上下文）时保留原有蓝色 +/✓，另加一个「添加到」按钮：点击弹出标签页菜单（已有标签页 + 「新建标签页并加入」），选完自动补上绿色 ✓；
+    - 收藏夹视图头部在有上下文时显示「正在添加到「xx」标签页」；回主页即清除该上下文；
+    - `addVideoToTab()` 复用 `ensureVideoInLibrary()` 完成「先入库再入页」；通用小面板 `openActionMenu()` 由标签页「⋯」菜单与本次的标签页选择菜单共用。
+
+- **新标签页默认名自动编号**：连续新建时依次叫「新标签页」「新标签页2」「新标签页3」…；某个默认名被改掉后，该序号会重新空出来复用（改成「日语」后，再新建又叫「新标签页」）。
+  - 涉及文件：`public/app.js`
+  - 技术细节：`nextDefaultTabName()` 用现有标签页名做集合，取最小可用序号。
+
+- **自定义标签页改成绿色强调色 + 与系统标签加分隔线**：系统标签页保持原来的蓝色，自定义标签页（选中态、悬浮态、下划线）改用绿色，与「加入标签页」的绿色 +/✓ 统一；系统标签与自定义标签之间加一条竖分隔线。
+  - 涉及文件：`public/styles.css`
+  - 技术细节：新增设计令牌 `--tab-green` / `--tab-green-soft`（深色模式单独取值），`.dash-tab.custom(.active/:hover)` 使用它；原来写死的绿色（`.card-flag-tab`、`.card-add-tab`）改为引用同一令牌；分隔线 `.dash-tabs-sep` 只在存在自定义标签页时渲染。
+
+- **自定义标签页支持拖动排序**：按住标签横向拖动即可调整顺序，拖到「＋」上可移到最末。
+  - 涉及文件：`public/app.js`、`public/styles.css`
+  - 技术细节：自定义标签（含内部文字）标记 `draggable`；在 `els.dashboard` 上委托 `dragstart/dragover/drop/dragend`，`dragover` 时按鼠标在目标标签左/右半边显示 `.drop-before` / `.drop-after` 插入指示；落点交给 `moveCustomTab(srcId, targetId, after)` 重排 `customTabs` 数组并持久化；改名输入框上不触发拖动。
+
+- **标签页过多时的处理：横向滚动**：系统标签固定在左侧，自定义标签放进可横向滚动的区域，标签再多也不会把「＋」挤出屏幕或撑破页面。
+  - 涉及文件：`public/app.js`、`public/styles.css`
+  - 技术细节：
+    - 标签栏改为三段结构：系统标签（固定）+ 分隔线（固定）+ `.dash-tabs-scroll`（`flex:1; min-width:0; overflow-x:auto`，隐藏滚动条）；
+    - 「＋」放在滚动区末尾并用 `position: sticky; right: 0`：**不溢出时它就是普通流式位置（跟在最后一个标签后面），只有内容溢出、横向滚动时才贴住右侧**保持可达；溢出时给一层左侧阴影说明有内容从下面滑过；
+    - 滚动区向左滚出内容时左侧渐隐（`.scrolled` + `mask-image`）；鼠标滚轮在标签栏上时纵向增量转成横向滚动；
+    - `syncTabsScroll()` 在每次渲染后把当前标签滚进可视区，并**预留贴住的「＋」的宽度**（不能用 `scrollIntoView`，它不知道右侧被覆盖，会把当前标签塞到「＋」底下）；窗口 resize 时重新计算；
+    - 拖动排序时靠近滚动区两侧 48px 内自动滚动（rAF 循环），否则拖不到看不见的位置。
+
+- **从标签页移除内容时可选「同时从库中删除」**：自定义标签页里卡片上的 ✕ 不再直接移除，改成二级确认框，内含一个**默认不勾选**的「同时从库中删除」复选框；勾选则连同库里的实体一起删（从「视频库」/「收藏夹库」/「学习 UP主」里删掉，其它标签页里的它也会一起消失）。
+  - 涉及文件：`public/app.js`
+  - 技术细节：`removeFromTab()` 改用 `confirmAction(msg, onConfirm, beforeClose)` 的 `beforeClose` 读取复选框；新增 `deleteFromLibrary(kind,id)`（不弹确认的裸删除）、`findLibraryItem()` / `libraryItemName()`、`dropMemberEverywhere(kind,id)`（清掉所有标签页里的悬空引用）；视频走 `doRemoveCustomVideo(..., silent)` 复用既有的整季删除 + 历史记录清理，并新增 `silent` 参数避免重复 toast。
+
+### Fixed（修复）
+
+- **主页标签页选中状态刷新后丢失**：`state.activeDashTab` 从未从 localStorage 恢复，「记住上次选中的标签」实际不生效（刷新后总是回到「继续学习」）。
+  - 涉及文件：`public/app.js`
+  - 技术细节：`init()` 中在 `loadDashboard()` 之前补 `state.activeDashTab = store.get('activeDashTab') || 'continue'`。
+
+- **学习 UP主 卡片排版错误（竖排）**：卡片标记同时带有通用 `.card` 类，其 `flex-direction: column` 覆盖了 `.up-card` 的横排意图，导致头像居中在上、文字堆叠在下。
+  - 涉及文件：`public/styles.css`
+  - 技术细节：`.up-card` 显式补 `flex-direction: row`。
+
+- **自定义标签页头部排版错乱**：头部用的是 `.dash-head`，但样式表里只有 `.section-head`，于是 `display` 落到默认的 `block`——标签页名和右侧计数被挤成上下两行，且搜索框底部与该行**零间距**，看起来又挤又不对齐。
+  - 涉及文件：`public/app.js`、`public/styles.css`
+  - 技术细节：两处 `.dash-head` 改用已有的 `.section-head`（flex + 居中 + space-between）；`.dash-search-wrap` 补 `margin-bottom: 18px`；计数改为紧跟标题的胶囊（`.tab-head` + `.tab-count`），不再被推到页面最右侧。
+
+- **双击标签改名不生效**：第一次点击会 `renderDashboard()` 重建整个标签栏，第二次点击落在新节点上，`dblclick` 事件因此丢失。
+  - 涉及文件：`public/app.js`
+  - 技术细节：标签点击处理里，若点的已是当前标签则跳过重渲染（保住 DOM 节点）；同时用 `click` 的 `e.detail >= 2` 兜住第二次点击并转入改名，`.dash-tab-more`（⋯）上的双击不触发改名。
 
 ### Changed（变更）
+
+- **主页两个栏位改名**：「添加的视频」→「视频库」，「学习收藏夹」→「收藏夹库」。同名的二级浏览页标题、内容选择器分区名、空状态提示、引导文案与各处提示语一并同步（`内容源` 弹窗内的「我的视频」保持不变，那是内容源自己的叫法）。
+  - 涉及文件：`public/app.js`、`public/storage.js`、`public/index.html`、`README.md`
 
 - **UP主 功能确定只做最小版本，完整规划作废**：本版本对 UP主 只做「本地书签」——输入 UID 添加、卡片展示头像/名称/简介/粉丝数/星级、点击卡片跳转 B站个人主页。原规划中的「搜索 UP主」「已关注列表」「站内 UP主 主页（投稿 / 合集 / 列表）」因功能过于复杂，已主动放弃，对应规划文档 `docs/feature-add-up.md` 一并删除。
   - 涉及文件：`docs/feature-add-up.md`（删除）、`CHANGELOG.md`
