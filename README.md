@@ -2,6 +2,8 @@
 
 > B 站小窝：窝在里面安安静静看课，外面的推荐、广告、争吵都跟你无关。
 
+> English: a distraction-free **Bilibili** study player — no recommendations, no ads, no comments; local-first and privacy-friendly. Windows / macOS / Linux.
+
 [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](https://nodejs.org)
 [![License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](#)
