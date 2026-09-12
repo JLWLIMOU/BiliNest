@@ -1,6 +1,6 @@
 {
   "name": "bilinest",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "BiliNest —— 无干扰 B 站学习播放器（零依赖本地代理 + 纯前端）",
   "private": true,
   "type": "module",

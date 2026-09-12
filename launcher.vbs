@@ -41,10 +41,20 @@ Dim portFilePath
 portFilePath = fso.BuildPath(scriptDir, PORT_FILE)
 If fso.FileExists(portFilePath) Then fso.DeleteFile portFilePath
 
-' 4) Start the local server (window style 0 = hidden, do not wait).
-shell.Run "node server.mjs", 0, False
+' 4) Make sure Node.js is actually available first. A missing Node used to
+'    fail silently and leave the user staring at a browser error page, so
+'    send them to the setup help page instead.
+Dim nodeCmd
+nodeCmd = ResolveNode()
+If Len(nodeCmd) = 0 Then
+  ShowSetupHelp
+  WScript.Quit
+End If
 
-' 5) Poll until ready: prefer the port file, fall back to default port.
+' 5) Start the local server (window style 0 = hidden, do not wait).
+shell.Run nodeCmd & " server.mjs", 0, False
+
+' 6) Poll until ready: prefer the port file, fall back to default port.
 Dim i, p
 For i = 1 To MAX_WAIT
   WScript.Sleep 500
@@ -60,7 +70,7 @@ For i = 1 To MAX_WAIT
   End If
 Next
 
-' 6) Timeout fallback: try the port file or default port one last time.
+' 7) Timeout fallback: try the port file or default port one last time.
 p = ReadPortFile()
 If p > 0 And HealthOk(p) Then
   OpenBrowser p
@@ -106,6 +116,62 @@ Function HealthOk(port)
   End If
   On Error GoTo 0
 End Function
+
+' ------------------------------------------------------------
+' Node.js command used to run the local server. Prefers whatever
+' "node" resolves to on PATH; falls back to the usual install
+' locations so a Node installed without "Add to PATH" still works.
+' Returns "" when nothing usable is found.
+' ------------------------------------------------------------
+Function ResolveNode()
+  Dim candidates, i, p
+  ResolveNode = ""
+  If CommandWorks("node -v") Then
+    ResolveNode = "node"
+    Exit Function
+  End If
+  candidates = Array( _
+    shell.ExpandEnvironmentStrings("%ProgramFiles%") & "\nodejs\node.exe", _
+    shell.ExpandEnvironmentStrings("%ProgramFiles(x86)%") & "\nodejs\node.exe", _
+    shell.ExpandEnvironmentStrings("%LOCALAPPDATA%") & "\Programs\nodejs\node.exe")
+  For i = 0 To UBound(candidates)
+    p = candidates(i)
+    If fso.FileExists(p) Then
+      If CommandWorks("""" & p & """ -v") Then
+        ResolveNode = """" & p & """"
+        Exit Function
+      End If
+    End If
+  Next
+End Function
+
+' Run "cmd /C <cmd>" hidden; report whether it exited cleanly.
+Function CommandWorks(cmd)
+  Dim rc
+  CommandWorks = False
+  On Error Resume Next
+  rc = shell.Run("cmd /C " & cmd, 0, True)
+  If Err.Number = 0 Then
+    If rc = 0 Then CommandWorks = True
+  End If
+  Err.Clear
+  On Error GoTo 0
+End Function
+
+' Open the "Node.js is required" help page. The Chinese wording lives in
+' the HTML file so this script can stay pure ASCII (WSH reads .vbs as ANSI
+' unless it is UTF-16).
+Sub ShowSetupHelp()
+  Dim page
+  page = fso.BuildPath(scriptDir, "public\setup-help.html")
+  If fso.FileExists(page) Then
+    shell.Run """" & page & """", 1, False
+  Else
+    MsgBox "Node.js was not found. BiliNest needs Node.js 18 or newer." & vbCrLf & _
+           "Install it from https://nodejs.org/ and start BiliNest again.", _
+           vbExclamation, "BiliNest"
+  End If
+End Sub
 
 ' ------------------------------------------------------------
 ' Open BiliNest in the default browser.

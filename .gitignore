@@ -2,6 +2,7 @@
 node_modules/
 dist/
 build/
+dist/
 
 # 环境变量（含敏感信息，切勿提交）
 .env

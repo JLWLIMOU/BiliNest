@@ -46,6 +46,8 @@ npm start
 # 2. open http://127.0.0.1:4173 in your browser
 ```
 
+Windows users can also grab `BiliNest-x.y.z-Setup.exe` from Releases — it checks for Node.js and creates the shortcuts for you.
+
 See the Chinese section below for login methods, usage and the full feature list.
 
 ---
@@ -54,17 +56,20 @@ See the Chinese section below for login methods, usage and the full feature list
 
 - **登录与授权**：设置里直接**扫码登录**（B 站 App 扫码确认即可，无需复制粘贴 Cookie）；手动 SESSDATA / Cookie 与 OAuth 作为备选。
 - **收藏夹锁定**：从自己创建的收藏夹列表中选择一个作为唯一内容源（可随时更换）。
-- **主页（仪表盘）**：分栏展示「继续学习 / 视频库 / 收藏夹库」；收藏夹可在内容源中一键「加入学习」，收藏夹里的单个视频也可直接「+ 添加到学习列表」。
+- **主页（仪表盘）**：标签页形式展示「继续学习 / 视频库 / 收藏夹库 / 学习 UP主」四个系统标签；收藏夹可在内容源中一键「加入学习」，收藏夹里的单个视频也可直接「+ 添加到学习列表」。
 - **星级评分**：收藏夹库和视频库都可打 1-5 星（5 星最重要、优先显示；未评分按添加顺序），并支持按「添加时间 / 发布时间 / 星级 / 播放量」排序。
 - **观看记录与续播**：自动记录每个视频（含分 P / 合集选集）的观看进度，下次播放自动从上次位置继续；有记录时首页第一栏显示「继续学习」（大封面 + 进度条）。
 - **列表（剧集）归类**：添加视频时自动识别「多 P / 合集」，标记为列表而非单视频；整季在「继续学习」中合并为**一张卡片**（指向最近看的集），点「视频库」也会自动继续最近看的集，手动点回某集则按该集自己的进度续播。
 - **视频列表**：封面、标题、UP 主、时长；支持按“添加时间 / 发布时间”排序；分页加载。
 - **搜索**：首页搜索框实时筛选「视频库」；内容源弹窗可同时搜索收藏夹与「我的视频」；收藏夹视图内可搜索当前收藏夹的视频。
-- **栏位与二级页**：首页各栏位（继续学习 / 视频库 / 收藏夹库）默认只显示前几个，超出后点「展开全部」进入二级浏览页，支持翻页、排序与搜索（不再横向滚动）。
+- **栏位与二级页**：各标签默认只显示前几个，超出后点「展开全部」进入二级浏览页，支持翻页、排序与搜索（不再横向滚动）。
 - **纯净播放**：应用内置自研播放器——用应用内的登录态获取 B 站 DASH 自适应码率流，**画质切换由 dash.js 自动完成，永不跳转 B 站官网**；弹幕显示（**无弹幕输入框，不能发送弹幕**）、CC 字幕、播放/暂停/进度/音量/全屏均支持。播放地址服务暂不可用时自动降级为官方嵌入播放器。
 - **选集**：支持多 P 视频与 UP 主合集（视频系列）的选集切换。
 - **单个视频**：粘贴视频链接 / BV 号 / av 号即可添加。
 - **本地视频**：通过系统文件选择器添加本地视频文件（Chromium 内核浏览器可跨会话保留文件权限，其余浏览器本次会话可播放）。
+- **自定义标签页**：标签栏末尾的「＋」直接新建标签页（建完可内联改名；双击标签改名；按住标签拖动排序；标签过多时横向滚动，系统标签固定在左侧）。空标签页里的「＋ 添加内容」可从 **源收藏夹 / 视频库 / 收藏夹库 / 学习 UP主** 四处挑选（库侧条目带封面 / 头像），卡片右下角 ✕ 移除时可选是否连库内一并删除。标签页只存引用，**删标签页不会删内容**。
+- **学习 UP主**：在「学习 UP主」标签输入 UID 即可收藏 UP主（头像 / 昵称 / 简介 / 粉丝数 / 星级），点卡片跳转其 B 站主页。
+- **数据不丢**：状态存在浏览器本地，同时自动备份到 `%APPDATA%\BiliNest\state-backup.json`；换浏览器、换端口或清过浏览器数据后打开会自动取回，两边都有数据时以较新的一份为准。
 - **极简界面**：Notion / Apple 风格，深色 / 浅色 / 跟随系统三档主题。
 - **隐私友好**：凭据只保存在你自己的浏览器里，请求只发给本机代理，不经过任何第三方服务器。
 
@@ -83,6 +88,7 @@ See the Chinese section below for login methods, usage and the full feature list
 ### 第二步：获取本程序
 - 方式 A（推荐）：到本仓库右侧 **Releases** 页面，下载 `Source code (zip)` 并解压；
 - 方式 B：已装 git 则执行 `git clone https://github.com/JLWLIMOU/BiliNest.git`。
+- 方式 C（Windows，最省事）：直接下载 Releases 里的 `BiliNest-x.y.z-Setup.exe` 安装包，详见下方「安装包」。
 
 ### 第三步：启动
 - **Windows**：进入文件夹，**双击 `launcher.vbs`**（自动起服务并打开浏览器，无黑窗口）；
@@ -109,6 +115,24 @@ powershell -ExecutionPolicy Bypass -File create-shortcut.ps1
 ```
 
 会在桌面生成 **BiliNest.lnk**，双击即可一键启动。停止服务：应用内「设置 → 停止本地服务」，或结束 `node` 进程。
+
+### 安装包（Windows，可选）
+
+到 **Releases** 页面下载 `BiliNest-x.y.z-Setup.exe`，双击一路「下一步」即可。安装包会：
+
+- 默认装到 `%LOCALAPPDATA%\Programs\BiliNest`（**不需要管理员权限**，安装位置可以在向导里改）；
+- 自动创建桌面与开始菜单快捷方式，并在「应用和功能」里登记卸载项；
+- **检测 Node.js**（不自带——不让安装包为运行时白白多出 87MB）：找到 18 或更高版本就直接装；没找到（或版本过低）会出现「运行环境检查」页，三选一：用 winget 自动安装 / 打开 nodejs.org 自己装 / 先跳过；
+- 卸载时会先停掉正在跑的本地服务，再问一句是否连用户数据一起删（**默认保留**，重新安装后还能接着用）。
+
+想自己从源码打包：
+
+```powershell
+winget install JRSoftware.InnoSetup        # 只需装一次，约 5MB
+powershell -ExecutionPolicy Bypass -File installer\build.ps1
+```
+
+产物在 `dist\BiliNest-<版本>-Setup.exe`。`build.ps1` 会顺手校验 `installer\bilinest.iss` 的版本号与 `package.json` 是否一致，避免打出对不上号的包。
 
 ### 直接用 `index.html` 打开（不推荐）
 
@@ -180,7 +204,7 @@ node --env-file=.env server.mjs
 ## 使用说明
 
 0. **首次启动引导**：第一次打开自动弹出「使用引导」（含 SESSDATA 获取步骤、内容源选择、常见问题）；之后可在「设置 → 查看使用引导」再看。
-1. **主页**：默认进入仪表盘，从上到下为「继续学习 / 视频库 / 收藏夹库」；点品牌名（BiliNest）返回主页。
+1. **主页**：默认进入仪表盘，标签页为「继续学习 / 视频库 / 收藏夹库 / 学习 UP主」；标签栏末尾的「＋」可新建自定义标签页（双击改名、拖动排序）；点品牌名（BiliNest）返回主页。
 2. **添加学习内容**：点右上角「内容源」→ 收藏夹列表点「加入学习」（可打星）；收藏夹内某视频点封面右上角「+」加入学习列表；也可粘贴单个视频链接或选择本地视频。
 3. **观看**：点击视频卡片播放；多 P / 合集右侧有选集；进度自动记录，下次续播。
 4. **排序**：「视频库」与收藏夹列表支持按「添加时间 / 发布时间 / 星级 / 播放量」排序。
@@ -196,6 +220,9 @@ bilinest/
 ├── .env.example          # 环境变量模板（含敏感项，勿提交真实值）
 ├── LICENSE               # MIT 许可证
 ├── start.sh              # macOS / Linux 一键启动脚本
+├── launcher.vbs          # Windows 一键启动（起服务 + 打开浏览器；缺 Node 时给安装指引）
+├── create-shortcut.ps1   # Windows 桌面快捷方式
+├── installer/            # Windows 安装包脚本（Inno Setup，产物在 dist/）
 ├── public/
 │   ├── index.html        # 页面骨架（含 CSP）
 │   ├── styles.css        # 深/浅色主题与全部样式
@@ -204,6 +231,7 @@ bilinest/
 │   ├── localfiles.js     # 本地视频：File System Access API + IndexedDB
 │   ├── player.js         # 自研播放器：DASH + dash.js + 弹幕 + CC 字幕
 │   ├── app.js            # 主逻辑：渲染、播放、设置、OAuth 回调
+│   ├── setup-help.html   # 没装 Node.js 时的安装指引页
 │   ├── oauth_done.html   # OAuth 完成页
 │   └── vendor/           # ArtPlayer v5（MIT）、dash.js（BSD）、dash-control（MIT）、qrcode.js（MIT）
 └── README.md
@@ -256,6 +284,12 @@ B 站对异常频率会风控。放慢节奏；服务端已限频，勿短时间
 
 **Q：本地视频刷新后需重新授权？**
 Chromium 内核浏览器自动恢复文件权限；被拒则删除重加。其它浏览器仅本次会话可播放。
+
+**Q：数据存在哪里？换了浏览器或清了缓存会不会丢？**
+平时存在浏览器本地（localStorage），同时会自动备份到 `%APPDATA%\BiliNest\state-backup.json`（macOS / Linux 为 `~/.config/BiliNest/state-backup.json`，可用环境变量 `BILINEST_DATA_DIR` 改位置）。换浏览器、换端口或清过浏览器数据后，打开时**自动取回**；两边都有数据时**以较新的一份为准**，不会用旧快照把新数据盖掉。设置 →「数据」里可手动「从备份恢复」，也可以一键清除全部本地数据。
+
+**Q：提示没装 Node.js / 双击快捷方式后页面打不开？**
+说明系统里找不到可用的 Node.js 18+。双击快捷方式时会自动打开一份图文安装指引（也可以直接看 `public/setup-help.html`）：按 `Win` 输入 `cmd` 后执行 `winget install OpenJS.NodeJS.LTS`，或者到 [nodejs.org](https://nodejs.org/zh-cn/download) 下载 LTS 版本安装，装好后重新双击快捷方式即可。安装时请保持勾选 **Add to PATH**。
 
 **Q：如何打包成桌面应用？**
 本应用即“静态页面 + 本地服务”，可用任意壳包装，例如 Electron：

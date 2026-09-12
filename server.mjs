@@ -24,12 +24,67 @@ import https from 'node:https';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const LOG_FILE = path.join(__dirname, 'bilinest.log');
 const PORT_FILE = path.join(__dirname, 'bilinest.port');
+
+/* ------------------------------------------------------------------
+ * 0.1 本机数据目录（服务端自己落盘的东西放这里）
+ *     故意放在用户配置目录而不是安装目录：
+ *       - 安装到 Program Files 时普通用户没有写权限；
+ *       - 卸载 / 覆盖安装时不会被一起清掉。
+ *     Windows: %APPDATA%\BiliNest\
+ *     其他平台: ~/.config/BiliNest/
+ * ------------------------------------------------------------------ */
+const DATA_DIR = process.env.BILINEST_DATA_DIR
+  || (process.platform === 'win32'
+    ? path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'BiliNest')
+    : path.join(os.homedir(), '.config', 'BiliNest'));
+// 客户端状态（localStorage）的备份：换浏览器 / 清过浏览器数据时用来恢复
+const STATE_BACKUP_FILE = path.join(DATA_DIR, 'state-backup.json');
+const STATE_BACKUP_LIMIT = 8 * 1024 * 1024;   // 8MB，够装很长的观看记录
+
+/** 读取请求体（限长，避免被塞大文件） */
+function readJsonBody(req, limit = 4096) {
+  return new Promise((resolve) => {
+    let size = 0;
+    const chunks = [];
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > limit) {
+        req.destroy();
+        resolve(null);
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on('end', () => {
+      try {
+        resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+      } catch {
+        resolve(null);
+      }
+    });
+    req.on('error', () => resolve(null));
+  });
+}
+
+/**
+ * 同源检查：备份文件里含 SESSDATA 等凭据，绝不能像普通只读接口那样
+ * 允许任意站点跨域读取（那等于把 Cookie 送给用户访问的任意网页）。
+ * 同源请求可能不带 Origin；跨域请求一定带，且不等于本机地址时拒绝。
+ */
+function isSameOriginRequest(req) {
+  const host = String(req.headers.host || '');
+  if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host)) return false;
+  const origin = String(req.headers.origin || '');
+  if (!origin) return true;
+  return origin === 'http://' + host || origin === 'https://' + host;
+}
 
 // ---------- 基础配置（全部来自环境变量，不硬编码任何敏感信息） ----------
 const HOST = process.env.BILINEST_HOST || '127.0.0.1';
@@ -1275,11 +1330,60 @@ const server = http.createServer((req, res) => {
         res.writeHead(204, corsHeaders());
         return res.end();
       }
-      if (req.method !== 'GET' && req.method !== 'HEAD') {
+      // 只读接口之外，仅放行白名单里的本机写接口
+      const POST_PATHS = new Set(['/api/state/backup']);
+      if (req.method !== 'GET' && req.method !== 'HEAD' && !(req.method === 'POST' && POST_PATHS.has(url.pathname))) {
         return sendJson(res, 405, { code: -405, message: '仅支持 GET 请求' });
       }
       if (url.pathname === '/api/health') {
         return sendJson(res, 200, { ok: true, app: 'bilinest', oauthEnabled: oauth.enabled, version: 1 });
+      }
+      // 客户端状态备份（仅供换环境时无感迁移）：仅同源可读写
+      if (url.pathname === '/api/state/backup') {
+        if (!isSameOriginRequest(req)) {
+          return sendJson(res, 403, { code: -403, message: '仅允许本应用页面访问' });
+        }
+        if (req.method === 'GET' || req.method === 'HEAD') {
+          let state = null;
+          let savedAt = 0;
+          try {
+            const parsed = JSON.parse(fs.readFileSync(STATE_BACKUP_FILE, 'utf8'));
+            if (parsed && parsed.state && parsed.state.v === 1) {
+              state = parsed.state;
+              savedAt = Number(parsed.savedAt) || 0;
+            }
+          } catch { /* 没有备份或文件损坏：按“无备份”处理 */ }
+          return sendJson(res, 200, { ok: true, exists: !!state, savedAt, state });
+        }
+        const body = await readJsonBody(req, STATE_BACKUP_LIMIT);
+        if (body && body.clear === true) {
+          try { fs.unlinkSync(STATE_BACKUP_FILE); } catch { /* 本来就没有备份 */ }
+          return sendJson(res, 200, { ok: true, cleared: true });
+        }
+        if (!body || typeof body !== 'object' || !body.state || typeof body.state !== 'object' || body.state.v !== 1) {
+          return sendJson(res, 400, { code: -400, message: '备份内容格式不正确' });
+        }
+        // 旧的那一份不上传：避免"另一个浏览器里停了几天的快照"把较新的备份覆盖掉。
+        // 两边都带时间戳时才比较；任一侧缺失（旧版本数据）一律放行，保持宽容。
+        const incomingTs = Number(body.state.updatedAt) || 0;
+        try {
+          const cur = JSON.parse(fs.readFileSync(STATE_BACKUP_FILE, 'utf8'));
+          const curTs = Number(cur && cur.state && cur.state.updatedAt) || 0;
+          if (incomingTs && curTs && incomingTs < curTs) {
+            return sendJson(res, 200, { ok: true, savedAt: Number(cur.savedAt) || 0, kept: 'newer' });
+          }
+        } catch { /* 没有旧备份（或文件损坏）：正常写入 */ }
+        const savedAt = Date.now();
+        try {
+          fs.mkdirSync(DATA_DIR, { recursive: true });
+          // 先写临时文件再改名：避免写一半被读到（原子替换）
+          const tmp = STATE_BACKUP_FILE + '.tmp';
+          fs.writeFileSync(tmp, JSON.stringify({ savedAt, state: body.state }), 'utf8');
+          fs.renameSync(tmp, STATE_BACKUP_FILE);
+        } catch (e) {
+          return sendJson(res, 500, { code: -500, message: '备份写入失败：' + e.message });
+        }
+        return sendJson(res, 200, { ok: true, savedAt });
       }
       // 扫码登录：生成二维码 / 轮询扫码状态
       if (url.pathname === '/api/qr/generate') return await handleQrGenerate(res);

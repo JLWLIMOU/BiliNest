@@ -14,6 +14,66 @@
 
 ---
 
+## [1.2.0] - 2026-09-12
+
+### Added（新增）
+
+- **Windows 安装包**：新增 `installer\`，用 Inno Setup 6 编译出 `dist\BiliNest-<版本>-Setup.exe`（约 2.3MB）。向导为简体中文，默认装到 `%LOCALAPPDATA%\Programs\BiliNest`（**不需要管理员权限**，安装位置可改），自动创建桌面与开始菜单快捷方式、在「应用和功能」登记卸载项；卸载时先停掉正在跑的本地服务，再询问是否连用户数据一起删（默认保留）。
+  - 涉及文件：`installer\bilinest.iss`、`installer\build.ps1`、`installer\languages\ChineseSimplified.isl`、`.gitignore`、`README.md`
+  - 技术细节：
+    - Node.js **不自带**（不为一个运行时白胖 87MB）：按「PATH → `%ProgramW6432%\nodejs` → `%ProgramFiles%\nodejs` → `%ProgramFiles(x86)%\nodejs` → `%LOCALAPPDATA%\Programs\nodejs`」逐个探测；缺失或低于 18 时出现「运行环境检查」页，三选一：winget 自动安装 / 打开 nodejs.org / 先跳过。探测结果会写进安装日志（`/LOG=` 可查），Ready 页也会显示最终状态；
+    - **踩坑留档（第一版误报"没装 Node"的根因）**：探测最初写成 `Exec('{cmd}', '/C "node" -v > "out.txt"')`——cmd 在 `/C` 之后同时遇到引号包裹的路径和 `>` 重定向时会把最外层引号剥掉，于是 `C:\Program Files\nodejs\node.exe` 这类带空格的路径全部执行失败。改成先写出一个临时 `.bat` 再执行，彻底绕开引号规则；
+    - 另外两个 Inno 的坑：`[Code]` 里以 `[` 开头的续行会被当成新段标签（`Format(..., [` 必须写在同一行）；Pascal Script 不允许前向引用，函数必须先定义后使用；
+    - 编译需要 Inno Setup 6（`winget install JRSoftware.InnoSetup`，约 5MB）；简体中文语言包 Inno 不自带，取自官方源码仓库 `Files/Languages/Unofficial/ChineseSimplified.isl`，放在 `installer\languages\`；
+    - `build.ps1` 会校验 `bilinest.iss` 的 `AppVersion` 与 `package.json` 的 `version` 一致，避免发出对不上号的包；
+    - 实测：安装后 26 个文件、桌面/开始菜单快捷方式与卸载项齐全，装出来的文件与仓库**逐字节一致**（SHA256 比对）；`/VERYSILENT` 安装与卸载都能跑通，卸载后目录、快捷方式、注册表项全部清空、用户数据按默认保留。
+
+- **没装 Node.js 时给出明确指引**：`launcher.vbs` 启动服务前先确认 Node 可用，找不到就打开 `public\setup-help.html`（中文说明页：winget 命令、官网下载链接、PATH 注意事项），而不是像以前那样静默失败、让用户对着一片打不开的页面发愣。
+  - 涉及文件：`launcher.vbs`、`public\setup-help.html`
+  - 技术细节：`ResolveNode()` 先试 PATH 上的 `node`，再依次试 `%ProgramFiles%\nodejs`、`%ProgramFiles(x86)%\nodejs`、`%LOCALAPPDATA%\Programs\nodejs`，命中后返回可执行命令（带空格的路径会加引号）；中文文案放在 HTML 里，`launcher.vbs` 保持**纯 ASCII + 无 BOM**（WSH 只认 UTF-16 的 BOM，UTF-8 BOM 会报 800A0408）。
+
+- **状态备份 / 自动恢复**：客户端状态会防抖上传到本地服务，存成 `%APPDATA%\BiliNest\state-backup.json`；本地没有真实数据时（清过浏览器数据、换了浏览器、换过端口）自动恢复并刷新一次。定位是"清一次浏览器数据就全没了"的防丢兜底。
+  - 涉及文件：`server.mjs`、`public/storage.js`、`public/app.js`
+  - 技术细节：
+    - `POST /api/state/backup` 写入（先写 `.tmp` 再改名，原子替换）、`GET` 读回、`POST {"clear":true}` 删除；请求体限长 8MB；只接受 `state.v === 1` 的对象，其余返回 400；
+    - **只允许同源访问**：校验 Host 必须是 `127.0.0.1` / `localhost`，且请求若带 `Origin` 必须与 Host 一致，否则 403。备份里含 SESSDATA，不能像其它只读接口那样开放跨域，否则用户访问的任意网页都能把 Cookie 读走；
+    - 客户端 `save()` 之后防抖 1.5s 上传一次（连续改动只传一次）；`store.restoreIfNeeded()` 在"本地无状态 + 服务端有备份"时写入 localStorage 并让应用 `location.reload()` 一次；应用启动时另有一次 `backupNow()`，保证在原环境打开一次就把备份建好；
+    - 新增 `hasRealData()` 守卫：登录态 / 视频库 / 收藏夹库 / 学习 UP主 / 自定义标签页 / 观看记录 任一非空才算"有数据"，**空状态不上传、也不当作可恢复的备份**（否则空壳状态会把好备份写脏）；
+    - 「清除全部本地数据」会同时删除服务端备份（否则刷新就被恢复回来）；设置 →「数据」另有「从备份恢复」按钮可手动触发；
+    - 服务端数据目录：Windows `%APPDATA%\BiliNest\`，其他平台 `~/.config/BiliNest/`，可用环境变量 `BILINEST_DATA_DIR` 覆盖。**刻意不放安装目录**：装到 Program Files 时普通用户没有写权限，卸载也会被一并删掉；
+    - 除只读接口外，这是本服务唯一的写接口（`POST_PATHS` 白名单，其余非 GET/HEAD 仍返回 405）；
+    - **不在备份范围内**：本地视频的文件句柄存在 IndexedDB 里，无法序列化成 JSON，换环境后需要重新添加本地文件。
+
+- **备份升级为"跨环境的权威副本"：两边都有数据时以较新的一份为准**。以前只有"本地为空"才会恢复，于是换浏览器时容易各存一份、并且长时间没用过的那份可能反过来把较新的备份覆盖掉；现在会按时间戳自动收敛到较新的那份。
+  - 涉及文件：`public/storage.js`、`server.mjs`、`public/app.js`
+  - 技术细节：
+    - 状态里新增 `updatedAt`（毫秒），由 `save()` 在每次真实改动时写入；旧数据没有该字段时按 `0` 处理；
+    - 启动时 `restoreIfNeeded()` 的判定改为：本地没有真实数据 → 直接取备份；本地也有数据 → 只在**备份的 `updatedAt` 更大**时覆盖本地，否则以本地为准并照常上传。**刻意不用服务端的 `savedAt` 比较**——它总比改动晚一点点，会让每次启动都误判成"备份更新"而反复恢复刷新；
+    - 上传侧加了一道保险：`POST /api/state/backup` 在两边都带时间戳、且传入的更旧时，保留现有备份并返回 `{ kept: 'newer' }`，防止旧快照覆盖新数据；任一侧时间戳缺失（旧版本数据）一律放行，保持宽容；
+    - 「从备份恢复」按钮仍是**强制**覆盖（不比较时间戳），用于数据被改坏时手动回滚。
+
+### Changed（变更）
+
+- **设置弹窗改为「左侧栏位 + 右侧内容」**：原来一长条纵向堆叠的设置项拆成四个分类（登录与授权 / 外观 / 数据 / 关于），左栏切换、右栏只显示当前分类，并记住上次打开的是哪一栏。
+  - 涉及文件：`public/app.js`、`public/styles.css`、`public/storage.js`
+  - 技术细节：
+    - 所有原有控件 id 保持不变（`btnQrLogin` / `btnSaveCookie` / `btnClearAuth` / `themeSelect` / `btnClearData` / `btnShutdown` / `btnGuide` 等），`bindSettingsEvents()` 除新增左栏绑定外无需改动，隐藏面板里的控件也照常可绑定；
+    - `.modal-body.settings-body` 用 flex 分成左右两栏，右栏独立滚动；`openModal()` 新增可选 `cls` 参数，设置弹窗宽 780px（`.modal-settings`）；
+    - 当前栏位存进 localStorage 的 `settingsTab`（默认 `login`，非法值回落 `login`）。
+
+### Other（其他）
+
+- **路线决定：放弃"独立窗口（`--app`）/ 桌面外壳"，回到双击快捷方式用默认浏览器打开标签页**。`launcher.vbs` 回退为只做「起服务 → 打开 `http://127.0.0.1:<实际端口>`」，随之移除 `/api/prefs`（窗口模式偏好）、设置里的「启动方式」选项与 Edge / Chrome 探测；WebView2 外壳（`shell/`）也不再作为可选入口。
+  - 涉及文件：`launcher.vbs`、`create-shortcut.ps1`、`server.mjs`、`public/api.js`、`public/app.js`、`.gitignore`
+  - 理由：这条路线换来的只有"窗口没有地址栏 / 尺寸可控"，代价却是每次都要多起一套浏览器进程树，而这两件事都不值（见下条实测）。
+
+- **核查记录：启动 BiliNest 会带起多少浏览器进程**（留档，避免以后重复调研）。
+  - 实测（2560x1440 / 125% / 本机 Edge，私有内存）：**同一个空白页**在一个全新浏览器配置目录下就是 **15 个进程**；换成 BiliNest 页面仍是 15 个（约 540MB）；加上 `--disable-component-extensions-with-background-pages --disable-extensions` 后降到 10 个（约 382MB）。
+  - 构成：浏览器主进程 / GPU / Network Service / Storage Service / Extractor / CollectionsDataManager / Crashpad / 备用呈现器（约 9 个）+ Edge **自带的**约 6 个扩展宿主（Copilot / 收藏集 / 购物助手那一批，任何配置目录都会加载，与用户装没装扩展无关）。BiliNest 自己的增量只有一个页面渲染进程（约 35–75MB）和一个隐藏的 `node` 进程（约 40–60MB）。
+  - 下限就是如此：Chromium 系宿主一个窗口就是 8–10 个进程、几百 MB；想明显更省只能换非浏览器宿主，而 WebView2 外壳试过，又因数据目录隔离与冷启动慢被否掉。
+  - 顺带查清的两条浏览器机制（以后少走弯路）：① `--window-size` / `--window-position` **只在浏览器新起进程、且该配置目录没有记录过窗口位置时生效**——Edge 即使关掉所有窗口也会留后台进程，此时参数被直接丢弃，窗口沿用记忆值；② `--window-size` 收的是 CSS 像素，WMI 报的是物理像素，中间差一个显示缩放比（本机 125%），不换算会算出越界尺寸被系统丢弃。
+  - 反例留档：往 Edge 的 `browser.app_window_placement` 里手写尺寸确实能改变窗口，但坐标系与缩放换算难以稳定复现（同一台机器先后出现过 ×1.25 与 ×1.8 两种结果），所以没有采用"改浏览器记录"这条路线。
+
 ## [1.1.0] - 2026-09-12
 
 ### Added（新增）

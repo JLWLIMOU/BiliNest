@@ -2663,7 +2663,33 @@
     });
   }
 
-  /* ---------------- 设置弹窗 ---------------- */
+  /* ---------------- 设置弹窗（左侧栏位 + 右侧内容） ---------------- */
+  var SETTINGS_TABS = [
+    { key: 'login', label: '登录与授权' },
+    { key: 'general', label: '外观' },
+    { key: 'data', label: '数据' },
+    { key: 'about', label: '关于' }
+  ];
+
+  function currentSettingsTab() {
+    var k = store.get('settingsTab') || 'login';
+    for (var i = 0; i < SETTINGS_TABS.length; i++) {
+      if (SETTINGS_TABS[i].key === k) return k;
+    }
+    return 'login';
+  }
+
+  function showSettingsTab(key) {
+    var panels = els.modalRoot.querySelectorAll('[data-settings-panel]');
+    for (var i = 0; i < panels.length; i++) {
+      panels[i].classList.toggle('active', panels[i].dataset.settingsPanel === key);
+    }
+    var items = els.modalRoot.querySelectorAll('[data-settings-tab]');
+    for (var j = 0; j < items.length; j++) {
+      items[j].classList.toggle('active', items[j].dataset.settingsTab === key);
+    }
+  }
+
   function openSettingsModal() {
     var login = store.get('login');
     var hasCookie = !!store.getCookie();
@@ -2688,10 +2714,19 @@
       guideBtn = '<button id="btnGuide" type="button" class="btn ghost">查看使用引导</button>';
     }
 
+    var tab = currentSettingsTab();
+    var navHtml = SETTINGS_TABS.map(function (t) {
+      return '<button type="button" class="settings-nav-item' + (t.key === tab ? ' active' : '') +
+        '" data-settings-tab="' + t.key + '">' + t.label + '</button>';
+    }).join('');
+
     openModal(
       '<div class="modal-head"><h2>设置</h2><button type="button" class="icon-btn" data-close aria-label="关闭">×</button></div>' +
-      '<div class="modal-body">' +
-        '<section><h3>登录与授权</h3>' +
+      '<div class="modal-body settings-body">' +
+        '<nav class="settings-nav">' + navHtml + '</nav>' +
+        '<div class="settings-panels">' +
+        '<section class="settings-panel' + (tab === 'login' ? ' active' : '') + '" data-settings-panel="login">' +
+          '<h3>登录与授权</h3>' +
           '<p class="muted">登录状态：' + statusHtml + '</p>' +
           '<label class="field-label" for="cookieInput">SESSDATA / Cookie（推荐）</label>' +
           '<input id="cookieInput" class="text-input" type="password" placeholder="粘贴 SESSDATA 或完整 Cookie" autocomplete="off">' +
@@ -2714,27 +2749,35 @@
           '</details>' +
           oauthNote +
         '</section>' +
-        '<section><h3>外观</h3>' +
+        '<section class="settings-panel' + (tab === 'general' ? ' active' : '') + '" data-settings-panel="general">' +
+          '<h3>外观</h3>' +
+          '<label class="field-label" for="themeSelect">主题</label>' +
           '<select id="themeSelect" class="select">' +
             '<option value="auto"' + (theme === 'auto' ? ' selected' : '') + '>跟随系统</option>' +
             '<option value="light"' + (theme === 'light' ? ' selected' : '') + '>浅色</option>' +
             '<option value="dark"' + (theme === 'dark' ? ' selected' : '') + '>深色</option>' +
           '</select>' +
         '</section>' +
-        '<section><h3>数据</h3>' +
+        '<section class="settings-panel' + (tab === 'data' ? ' active' : '') + '" data-settings-panel="data">' +
+          '<h3>数据</h3>' +
           '<div class="row">' +
             '<button id="btnClearData" type="button" class="btn ghost danger">清除全部本地数据</button>' +
             '<button id="btnShutdown" type="button" class="btn ghost danger">停止本地服务</button>' +
+            '<button id="btnRestoreBackup" type="button" class="btn ghost">从备份恢复</button>' +
           '</div>' +
-          '<p class="muted small">清除本地数据不会影响 B 站账号；停止服务后，双击桌面快捷方式可重新启动。</p>' +
+          '<p class="muted small">清除本地数据不会影响 B 站账号；停止服务后，双击桌面快捷方式可重新启动。<br>' +
+            '备份会自动保存在本机（%APPDATA%\\BiliNest\\state-backup.json）：换浏览器、换端口或清过浏览器数据后会自动取回；两边都有数据时以较新的一份为准（改动晚的一方胜出，不会用旧快照覆盖新数据）。「从备份恢复」可强制用备份覆盖当前数据。</p>' +
         '</section>' +
-        '<section><h3>关于</h3>' +
+        '<section class="settings-panel' + (tab === 'about' ? ' active' : '') + '" data-settings-panel="about">' +
+          '<h3>关于</h3>' +
           '<p class="muted small">BiliNest 仅供个人学习使用。请遵守 B 站用户协议与 API 使用规范；本工具不会向任何第三方发送你的凭据。<br>播放器内核版本：' +
             (window.BiliNestPlayer && window.BiliNestPlayer.VERSION ? 'v' + window.BiliNestPlayer.VERSION : '未知') +
             '（若低于 v3，请强制刷新页面 Ctrl+F5 后重试）</p>' +
           '<div class="row">' + guideBtn + '</div>' +
         '</section>' +
-      '</div>'
+        '</div>' +
+      '</div>',
+      { wide: true, cls: 'modal-settings' }
     );
     bindClose();
     bindSettingsEvents();
@@ -2751,10 +2794,21 @@
       applyTheme();
     });
     document.getElementById('btnClearData').addEventListener('click', onClearData);
+    var restoreBtn = document.getElementById('btnRestoreBackup');
+    if (restoreBtn) restoreBtn.addEventListener('click', onRestoreBackup);
     var guideBtnEl = document.getElementById('btnGuide');
     if (guideBtnEl) guideBtnEl.addEventListener('click', openGuideModal);
     var shutdownBtn = document.getElementById('btnShutdown');
     if (shutdownBtn) shutdownBtn.addEventListener('click', onShutdown);
+    // 左侧栏位切换
+    var navItems = els.modalRoot.querySelectorAll('[data-settings-tab]');
+    for (var i = 0; i < navItems.length; i++) {
+      navItems[i].addEventListener('click', function () {
+        var key = this.dataset.settingsTab;
+        store.set({ settingsTab: key });
+        showSettingsTab(key);
+      });
+    }
   }
 
   /* ---------------- 首次启动 / 使用引导 ---------------- */
@@ -2912,7 +2966,7 @@
     openModal(
       '<div class="modal-head"><h2>使用引导</h2><button type="button" class="icon-btn" data-close aria-label="关闭">×</button></div>' +
       '<div class="modal-body">' +
-        '<p class="muted">首次使用请先启动本地代理：Windows 双击 <code>launcher.vbs</code>，macOS / Linux 运行 <code>./start.sh</code>（或通用 <code>npm start</code>），否则收藏夹与 B 站接口不可用。详见仓库 README「快速开始」。</p>' +
+        '<p class="muted">首次使用请先启动本地代理：Windows 双击桌面上的 <b>BiliNest</b> 快捷方式（或项目目录里的 <code>launcher.vbs</code>），macOS / Linux 运行 <code>./start.sh</code>（或通用 <code>npm start</code>），否则收藏夹与 B 站接口不可用。详见仓库 README「快速开始」。</p>' +
         '<section><h3>① 登录 B 站账号</h3>' +
           '<ol class="steps">' +
             '<li>点击右上角「设置」→ <b>扫码登录（推荐）</b>；</li>' +
@@ -2929,11 +2983,11 @@
             '<li>给视频和收藏夹点星星打分（5 星最重要，优先显示），排序支持：添加时间 / 发布时间 / 星级 / 播放量。</li>' +
           '</ol>' +
         '</section>' +
-        '<section><h3>③ 主页三栏</h3>' +
+        '<section><h3>③ 主页标签页</h3>' +
           '<ol class="steps">' +
-            '<li><b>继续学习</b>：有观看记录时置顶，点击自动从上次位置继续（整季只记一个进度）；</li>' +
-            '<li><b>视频库</b> 与 <b>收藏夹库</b>：按星级排列，每栏「展开全部」可翻页 / 搜索 / 排序；</li>' +
-            '<li>卡片右下角 ✕ 可删除（确认后列表 / 整季一并移除）。</li>' +
+            '<li>主页分四个系统标签：<b>继续学习</b>（有观看记录时置顶，点击自动从上次位置继续）、<b>视频库</b>、<b>收藏夹库</b>、<b>学习 UP主</b>；每个标签「展开全部」可翻页 / 搜索 / 排序。</li>' +
+            '<li>标签栏末尾的 <b>＋</b> 可以新建<b>自定义标签页</b>（例如「动画课程」）：双击标签改名，按住标签左右拖动可排序，标签再多也不会挤出屏幕（横向滚动）。</li>' +
+            '<li>自定义标签页里的「＋ 添加内容」能从 <b>源收藏夹 / 视频库 / 收藏夹库 / 学习 UP主</b> 里挑内容（都带封面便于辨认）；卡片右下角 ✕ 移除时可选是否连库内一并删除。</li>' +
           '</ol>' +
         '</section>' +
         '<section><h3>④ 播放器小技巧</h3>' +
@@ -2951,7 +3005,7 @@
             '<li><b>提示 412 或频繁失败？</b> 属于 B 站风控，请稍后再试，避免短时间内反复刷新。</li>' +
             '<li><b>字幕按钮置灰 / 没有字幕？</b> 说明该视频没有 CC 字幕，或字幕加载失败；换一集或刷新页面重试。</li>' +
             '<li><b>想用 OAuth 登录？</b> 需自行在 B 站开放平台注册应用并配置环境变量，见 README。</li>' +
-            '<li><b>数据存在哪里？</b> 全部保存在本机浏览器 localStorage，可在「设置」中一键清除。</li>' +
+            '<li><b>数据存在哪里？</b> 保存在本机浏览器里，同时会自动备份到 <code>%APPDATA%\\BiliNest\\state-backup.json</code>：换浏览器、换端口或清过浏览器数据后打开会自动取回，两边都有数据时以较新的一份为准；「设置 → 数据」里可一键清除或手动恢复。</li>' +
           '</ul>' +
         '</section>' +
         '<div class="row guide-actions">' +
@@ -3042,11 +3096,23 @@
     toast('已清除全部本地数据');
   }
 
+  /** 设置 →「从备份恢复」：用服务端保存的备份覆盖本地 */
+  async function onRestoreBackup() {
+    if (!window.confirm('用本机保存的备份覆盖当前数据吗？页面会刷新一次。')) return;
+    var ok = await store.restoreFromBackup();
+    if (!ok) {
+      toast('没有可用的备份（或本地服务未运行）', 'error');
+      return;
+    }
+    location.reload();
+  }
+
   /* ---------------- 弹窗 / Toast 通用 ---------------- */
   function openModal(html, opts) {
     opts = opts || {};
     els.modalRoot.innerHTML =
-      '<div class="overlay"><div class="modal' + (opts.wide ? ' wide' : '') + '">' + html + '</div></div>';
+      '<div class="overlay"><div class="modal' + (opts.wide ? ' wide' : '') + (opts.cls ? ' ' + opts.cls : '') + '">' +
+      html + '</div></div>';
   }
 
   function bindClose() {
@@ -4350,6 +4416,17 @@
 
   /* ---------------- 启动 ---------------- */
   (async function init() {
+    // 新环境首次打开（本地无状态、但服务端有备份）→ 恢复后刷新一次
+    try {
+      if (await store.restoreIfNeeded()) {
+        location.reload();
+        return;
+      }
+    } catch (e) {
+      /* 恢复失败就按全新状态继续 */
+    }
+    // 把当前数据补成一份备份（空状态不会上传，见 storage.js 的守卫）
+    try { store.backupNow(); } catch (e) { /* 忽略 */ }
     applyTheme();
     // 旧版历史记录迁移：系列/分P 归并为整季一条，避免继续学习栏重复
     normalizeHistory();

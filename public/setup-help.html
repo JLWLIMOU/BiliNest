@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>还差一步：需要 Node.js —— BiliNest</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 48px 20px;
+    font: 15px/1.7 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    background: #f6f7f9;
+    color: #1f2328;
+  }
+  .card {
+    max-width: 680px;
+    margin: 0 auto;
+    background: #fff;
+    border-radius: 14px;
+    padding: 36px 40px 32px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, .08);
+  }
+  h1 { margin: 0 0 6px; font-size: 22px; }
+  .lead { margin: 0 0 26px; color: #57606a; }
+  h2 { margin: 26px 0 8px; font-size: 16px; }
+  ol { padding-left: 22px; }
+  li { margin: 6px 0; }
+  code {
+    background: #f0f1f3;
+    border: 1px solid #e2e4e8;
+    border-radius: 6px;
+    padding: 2px 7px;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 13px;
+  }
+  .cmd {
+    display: block;
+    margin: 10px 0;
+    padding: 12px 14px;
+    background: #1f2328;
+    color: #e6edf3;
+    border-radius: 8px;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 13.5px;
+    user-select: all;
+  }
+  a { color: #0a63c9; }
+  .note {
+    margin-top: 26px;
+    padding: 14px 16px;
+    background: #fff8e1;
+    border-left: 3px solid #f0b429;
+    border-radius: 6px;
+    color: #4d3800;
+    font-size: 14px;
+  }
+  .foot { margin-top: 28px; color: #6b7280; font-size: 13px; }
+  @media (prefers-color-scheme: dark) {
+    body { background: #16181c; color: #e6edf3; }
+    .card { background: #1f2328; box-shadow: 0 10px 30px rgba(0, 0, 0, .4); }
+    .lead, .foot { color: #9aa4b2; }
+    code { background: #2b3138; border-color: #3a4149; }
+    .note { background: #2c2613; color: #f2d999; }
+  }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>还差一步：需要 Node.js</h1>
+  <p class="lead">BiliNest 的本地服务由 Node.js 驱动。系统里没找到可用的 Node.js 18 或更高版本，所以这次没能启动。</p>
+
+  <h2>方法一：命令行安装（推荐）</h2>
+  <p>按 <code>Win</code> 打开开始菜单，输入 <code>cmd</code>，在「命令提示符」里粘贴下面这行并回车：</p>
+  <code class="cmd">winget install OpenJS.NodeJS.LTS</code>
+
+  <h2>方法二：官网下载安装</h2>
+  <ol>
+    <li>打开 <a href="https://nodejs.org/zh-cn/download" target="_blank" rel="noopener">nodejs.org 下载页</a>；</li>
+    <li>下载 <b>LTS</b> 版本的 Windows 安装包（<code>.msi</code>），一路下一步即可。</li>
+  </ol>
+
+  <div class="note">
+    安装过程中如果看到 <b>Add to PATH</b> 这个选项，请保持勾选。装好之后，重新双击桌面上的 <b>BiliNest</b> 快捷方式就行。
+  </div>
+
+  <h2>已经装过了？</h2>
+  <p>如果你用的是绿色版 / 便携版 Node.js，它可能不在系统 PATH 里。把 <code>node.exe</code> 所在的文件夹加入 PATH 后重试即可；也可以在安装 Node.js 后，用命令 <code>node -v</code> 确认能输出版本号。</p>
+
+  <p class="foot">本页只是安装指引，不会修改你的系统。可以关掉这个标签页。</p>
+</div>
+</body>
+</html>
