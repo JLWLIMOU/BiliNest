@@ -474,7 +474,10 @@
   var tabAutoScrollDir = 0;
 
   function startTabAutoScroll(sc, dir) {
-    if (!dir) {
+    // 只有"确实溢出"才需要自动滚动。分段控件的容器是 fit-content，
+    // 标签不多时根本不溢出；此时若还起 rAF 循环，就会以 60fps 空转，
+    // 表现得像整页卡死（这正是改成分段控件后拖拽"卡住"的原因）。
+    if (!dir || sc.scrollWidth <= sc.clientWidth) {
       stopTabAutoScroll();
       return;
     }
@@ -484,7 +487,13 @@
     tabAutoScrollDir = dir;
     var step = function () {
       if (!tabAutoScrollEl) return;
+      var before = tabAutoScrollEl.scrollLeft;
       tabAutoScrollEl.scrollLeft += tabAutoScrollDir * 8;
+      // 已经滚到边界就不再空转
+      if (tabAutoScrollEl.scrollLeft === before) {
+        stopTabAutoScroll();
+        return;
+      }
       tabAutoScrollRaf = requestAnimationFrame(step);
     };
     tabAutoScrollRaf = requestAnimationFrame(step);

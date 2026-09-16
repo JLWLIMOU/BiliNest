@@ -5,15 +5,23 @@
 
 /* ---------- 设计令牌（浅色为默认，深色见下方覆盖） ---------- */
 :root {
-  --bg: #f7f7f5;
+  /* 对齐 Apple 的语义色（浅色）：
+     - 页面底 = systemGroupedBackground（浅灰），卡片 = systemBackground（纯白）
+       —— "白卡片浮在浅灰底上"正是 Apple 的分组列表/网格形态；
+     - 文字只分两级（label / secondaryLabel），层级靠这两级 + 字重，不靠多套颜色；
+     - 分隔线与控件填充都是**半透明**（Apple 的 separator / systemFill），
+       所以它们能自动适配任何底色，而不是一个写死的灰。 */
+  --bg: #f2f2f7;
   --surface: #ffffff;
-  --surface-2: #f0f0ed;
-  --border: #e6e6e1;
-  --border-strong: #d7d7d1;
-  --text: #1d1d1f;
-  --text-2: #6e6e73;
-  --accent: #2f6fed;
-  --accent-soft: rgba(47, 111, 237, 0.10);
+  --surface-2: #f2f2f7;
+  --separator: rgba(60, 60, 67, 0.13);
+  --fill: rgba(120, 120, 128, 0.12);
+  --border: var(--separator);
+  --border-strong: rgba(60, 60, 67, 0.22);
+  --text: #1c1c1e;
+  --text-2: #8e8e93;
+  --accent: #0071e3;
+  --accent-soft: rgba(0, 113, 227, 0.12);
   --accent-text: #ffffff;
   /* 自定义标签页 / “加入标签页”统一使用的绿色强调色（与系统标签页的蓝色区分） */
   --tab-green: #2fa84f;
@@ -67,17 +75,20 @@
 /* 深色模式：跟随系统（未显式设置主题时） */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #101014;
-    --surface: #1b1b20;
-    --surface-2: #24242a;
-    --border: #2c2c33;
-    --border-strong: #3a3a42;
-    --text: #f5f5f7;
-    --text-2: #9a9aa2;
-    --accent: #4d8dff;
-    --accent-soft: rgba(77, 141, 255, 0.14);
-    --tab-green: #45c46c;
-    --tab-green-soft: rgba(69, 196, 108, 0.62);
+    /* 深色是另一套调色板，不是把浅色反过来：底更沉、层次往上"变亮" */
+    --bg: #000000;
+    --surface: #1c1c1e;
+    --surface-2: #2c2c2e;
+    --separator: rgba(84, 84, 88, 0.6);
+    --fill: rgba(120, 120, 128, 0.36);
+    --border: var(--separator);
+    --border-strong: rgba(120, 120, 128, 0.6);
+    --text: #ffffff;
+    --text-2: #98989f;
+    --accent: #0a84ff;
+    --accent-soft: rgba(10, 132, 255, 0.18);
+    --tab-green: #30d158;
+    --tab-green-soft: rgba(48, 209, 88, 0.62);
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
     --shadow-md: 0 16px 40px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
     --card-inner: inset 0 1px 0 rgba(255, 255, 255, 0.05);
@@ -87,17 +98,19 @@
 
 /* 深色模式：用户显式选择 */
 :root[data-theme="dark"] {
-  --bg: #101014;
-  --surface: #1b1b20;
-  --surface-2: #24242a;
-  --border: #2c2c33;
-  --border-strong: #3a3a42;
-  --text: #f5f5f7;
-  --text-2: #9a9aa2;
-  --accent: #4d8dff;
-  --accent-soft: rgba(77, 141, 255, 0.14);
-  --tab-green: #45c46c;
-  --tab-green-soft: rgba(69, 196, 108, 0.62);
+  --bg: #000000;
+  --surface: #1c1c1e;
+  --surface-2: #2c2c2e;
+  --separator: rgba(84, 84, 88, 0.6);
+  --fill: rgba(120, 120, 128, 0.36);
+  --border: var(--separator);
+  --border-strong: rgba(120, 120, 128, 0.6);
+  --text: #ffffff;
+  --text-2: #98989f;
+  --accent: #0a84ff;
+  --accent-soft: rgba(10, 132, 255, 0.18);
+  --tab-green: #30d158;
+  --tab-green-soft: rgba(48, 209, 88, 0.62);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-md: 0 16px 40px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
   --card-inner: inset 0 1px 0 rgba(255, 255, 255, 0.05);
@@ -259,7 +272,7 @@ code {
   border-radius: 999px;
   /* 只是品牌旁的一句定位说明，不该和「内容源」按钮抢注意力：
      去掉边框、背景再压淡一档，让它退到第二层。 */
-  background: color-mix(in srgb, var(--surface-2) 70%, transparent);
+  background: var(--fill);
 }
 
 .topbar-actions { display: flex; align-items: center; gap: 6px; }
@@ -314,8 +327,8 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
 .select {
   font: inherit;
   color: var(--text);
-  /* 填充式控件（Apple 习惯：控件本身有底色，而不是描一圈线） */
-  background: var(--surface-2);
+  /* 填充式控件（Apple 习惯）：底色用半透明的 systemFill，自动适配深浅底色 */
+  background: var(--fill);
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   padding: 7px 10px;
@@ -335,30 +348,31 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
 }
 
 .card {
+  position: relative;
   display: flex;
   flex-direction: column;
   cursor: pointer;
-  /* Apple 的网格不是一格格"盒子"：去掉描边、底色和卡片阴影，
-     让画面本身成为内容，文字直接坐在页面底色上；层次由画面自己的阴影承担。 */
-  background: none;
+  /* Apple 的卡片是"一块表面"，不是描了边的盒子：
+     边界由「圆角 + 底色」表达，层次由阴影表达——所以没有 border。
+     卡片的价值正在于"把相关的东西框在一起"（分组），这点必须保留。 */
+  background: var(--surface);
   border: none;
-  border-radius: 0;
-  overflow: visible;
-  box-shadow: none;
-  transition: transform var(--dur-1) var(--ease-out);
+  border-radius: var(--radius);
+  overflow: hidden;      /* 画面贴到卡片边缘，圆角由卡片裁切 */
+  box-shadow: var(--shadow-sm), var(--card-inner);
+  transition: box-shadow var(--dur-3) var(--ease-state), transform var(--dur-1) var(--ease-out);
 }
-/* 悬浮时是"画面浮起来"（阴影加深 + 画面推近），卡片本身不动 */
-.card:hover .card-cover { box-shadow: var(--shadow-md); }
+/* 悬浮 = 抬高（阴影加深）：卡片不位移、画面轻微推近 */
+@media (hover: hover) and (pointer: fine) {
+  .card:hover { box-shadow: var(--shadow-md), var(--card-inner); }
+}
 .card:active { transform: scale(0.99); }
 
 .card-cover {
   position: relative;
   aspect-ratio: 16 / 9;
   background: var(--surface-2);
-  border-radius: var(--radius);
   overflow: hidden;
-  box-shadow: var(--shadow-sm);
-  transition: box-shadow var(--dur-3) var(--ease-state);
 }
 .card-cover img {
   width: 100%;
@@ -423,7 +437,8 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
   flex: 1;
   display: flex;
   flex-direction: column;
-  padding: 10px 2px 0;
+  /* 卡片内部的呼吸：四周同一档内边距，让"框在一起"这件事读得出来 */
+  padding: 13px 14px 14px;
 }
 
 .card-title {
@@ -473,9 +488,12 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
 
 /* 标签页 */
 .dash-tabs {
-  /* 分段控件（Apple 切换视图的标准形态）：一个填充的圆角容器 + 一块会滑的滑块。
-     宽度按内容收缩，不再整行铺开。 */
-  position: relative;
+  /* 分段控件（Apple 切换视图的标准形态）：一块会滑的滑块 + 一个"浮动玻璃"容器。
+     用 sticky 让它悬浮在内容之上（Apple 的浮动 chrome），滚动时留在视口里；
+     材质用半透明 + 背景模糊，而不是一块实心灰。 */
+  position: sticky;
+  top: calc(var(--topbar-h) + 10px);
+  z-index: 15;                 /* 低于顶栏（20） */
   display: flex;
   align-items: stretch;
   gap: 2px;
@@ -483,7 +501,10 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
   width: fit-content;
   max-width: 100%;
   border-radius: 14px;
-  background: var(--surface-2);
+  background: color-mix(in srgb, var(--surface) 74%, transparent);
+  backdrop-filter: blur(20px) saturate(1.8);
+  -webkit-backdrop-filter: blur(20px) saturate(1.8);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 8px 24px rgba(0, 0, 0, 0.07);
   margin-bottom: 22px;
 }
 /* 滑块：跟着选中的那一段走（位移 + 宽度，弹簧曲线） */
@@ -1387,7 +1408,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
   font: inherit;
   color: var(--text);
   /* 填充式搜索框：控件自己带底色，聚焦时才浮起并亮出焦点环 */
-  background: var(--surface-2);
+  background: var(--fill);
   border: 1px solid transparent;
   border-radius: 12px;
   padding: 9px 13px;
@@ -1881,6 +1902,11 @@ details.help .steps { margin-top: 4px; }
   }
   .dash-tab-new {
     background: var(--bg);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .dash-tabs {
+    background: var(--surface);
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
   }
