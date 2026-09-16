@@ -257,6 +257,7 @@
       (store.get('studyFolders') || []).length ||
       (store.get('studyUps') || []).length;
     if (!hasAny) {
+      pendingTabsScroll = null;   // 空状态没有标签栏，别把位置留给下一次
       els.dashboard.innerHTML =
         '<div class="empty" style="padding:90px 20px">' +
           '<p class="empty-title">还没有学习内容</p>' +
@@ -318,6 +319,11 @@
     else if (custom) contentHtml += renderCustomTab(custom);
     contentHtml += '</div>';
 
+    // 重建前记下标签栏的横向位置。下面的 innerHTML 会把滚动容器的 scrollLeft 清零，
+    // 不记住的话，每次切换标签看起来都是"从最左边重新滚过来"，而不是从上一个标签滑到新的。
+    var prevSc = els.dashboard.querySelector('.dash-tabs-scroll');
+    pendingTabsScroll = prevSc ? prevSc.scrollLeft : null;
+
     els.dashboard.innerHTML = tabsHtml + searchHtml + contentHtml;
 
     // 封面加载失败时隐藏图片
@@ -334,11 +340,20 @@
   function syncTabsScroll() {
     var sc = els.dashboard.querySelector('.dash-tabs-scroll');
     if (!sc) return;
+    // 先把横向位置瞬时还原到重建前的位置（这一步必须"瞬时"，平滑就成了从左滑过来），
+    // 后面再按需要平滑地把当前选中的标签滚进视野。
+    if (pendingTabsScroll !== null) {
+      var keep = pendingTabsScroll;
+      pendingTabsScroll = null;
+      try { sc.scrollTo({ left: keep, behavior: 'instant' }); }
+      catch (e) { sc.scrollLeft = keep; }
+    }
     if (!sc.dataset.syncBound) {
       sc.dataset.syncBound = '1';
       sc.addEventListener('scroll', function () {
         sc.classList.toggle('scrolled', sc.scrollLeft > 4);
         syncTabIndicator();   // 指示条在滚动区里，横向滚动时要跟着走
+        markTabsScrolling();  // 滚动期间关掉指示条的过渡，避免它被"拖在后面"
       });
     }
     sc.classList.toggle('scrolled', sc.scrollLeft > 4);
@@ -354,6 +369,26 @@
     var rightLimit = sr.right - reserve;
     if (ar.left < sr.left) sc.scrollLeft -= (sr.left - ar.left) + 8;
     else if (ar.right > rightLimit) sc.scrollLeft += (ar.right - rightLimit) + 8;
+  }
+
+  /* 标签栏横向滚动位置：重建后要瞬时还原，见 syncTabsScroll */
+  var pendingTabsScroll = null;
+  var tabsScrollTimer = null;
+
+  /**
+   * 滚动进行中给标签栏加 .scrolling，稍后移除。
+   * 指示条本身有 200ms 过渡；滚动时目标每帧都在变，过渡会让它滞后于标签
+   * （手跟不跟手就是这种细节决定的）。滚动期间关掉过渡即可 1:1 跟随。
+   */
+  function markTabsScrolling() {
+    var bar = els.dashboard.querySelector('.dash-tabs');
+    if (!bar) return;
+    bar.classList.add('scrolling');
+    clearTimeout(tabsScrollTimer);
+    tabsScrollTimer = setTimeout(function () {
+      var b = els.dashboard.querySelector('.dash-tabs');
+      if (b) b.classList.remove('scrolling');
+    }, 140);
   }
 
   /**

@@ -457,6 +457,8 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
 }
 .dash-tab-ind[data-tone="custom"] { background: var(--tab-green); }
 .dash-tab-ind.ready { opacity: 1; }
+/* 横向滚动过程中，指示条要 1:1 跟着标签走，不能带自己的过渡（否则会滞后） */
+.dash-tabs.scrolling .dash-tab-ind { transition: none; }
 /* 自定义标签的滚动区：标签太多时横向滚动（隐藏滚动条，滚轮可直接横向滚） */
 .dash-tabs-scroll {
   display: flex;
