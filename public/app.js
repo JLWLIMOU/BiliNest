@@ -306,8 +306,13 @@
     var searchable = tab === 'added' || !!custom;
     var searchValue = custom ? (state.tabQuery[tab] || '') : state.dashQuery;
     var searchHtml = searchable
-      ? '<div class="dash-search-wrap"><input id="dashSearch" class="search-input" type="search" placeholder="' +
-        (custom ? '在本标签页内搜索…' : '在视频库中搜索…') + '" autocomplete="off" value="' + esc(searchValue) + '"></div>'
+      ? '<div class="dash-search-wrap">' +
+          '<span class="search-icon" aria-hidden="true">' +
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.6-3.6"></path></svg>' +
+          '</span>' +
+          '<input id="dashSearch" class="search-input" type="search" placeholder="' +
+          (custom ? '在本标签页内搜索…' : '在视频库中搜索…') + '" autocomplete="off" value="' + esc(searchValue) + '">' +
+        '</div>'
       : '';
 
     // 当前标签内容
@@ -323,6 +328,17 @@
     // 不记住的话，每次切换标签看起来都是"从最左边重新滚过来"，而不是从上一个标签滑到新的。
     var prevSc = els.dashboard.querySelector('.dash-tabs-scroll');
     pendingTabsScroll = prevSc ? prevSc.scrollLeft : null;
+
+    // 首屏入场动画只播一次：切标签、输入搜索都会重跑这里，每次都播就成了闪屏。
+    // 动画结束后摘掉 .first-paint —— 否则 animation 的 fill 会盖住卡片自己的
+    // hover / :active transform（CSS 动画优先级高于普通声明）。
+    if (!state.dashboardPainted) {
+      state.dashboardPainted = true;
+      els.dashboard.classList.add('first-paint');
+      els.dashboard.addEventListener('animationend', function () {
+        els.dashboard.classList.remove('first-paint');
+      }, { once: true });
+    }
 
     els.dashboard.innerHTML = tabsHtml + searchHtml + contentHtml;
 
