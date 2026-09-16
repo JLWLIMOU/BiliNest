@@ -151,7 +151,17 @@ powershell -ExecutionPolicy Bypass -File installer\build.ps1
 
 > **重要：你的个人数据（登录态、收藏夹、观看记录、星级）全部保存在浏览器中（localStorage / IndexedDB），不在项目文件夹内。更新代码文件不会丢失这些数据——但请按下面的方式操作，不要直接删除整个文件夹再重新下载。**
 
-### 方式一：Git 拉取（推荐）
+### 方式一：设置里一键更新（推荐）
+
+打开 `设置 → 关于 → 更新`：平时按钮是「检查更新」，查到新版本会变成「更新到 vX.Y.Z」，点一下、确认即可。
+
+- **安装包版**：自动下载 `BiliNest-x.y.z-Setup.exe`，运行安装包就完成了 —— 它会自己停掉旧服务、装完重启，数据不动。
+- **源码版（git 检出）**：自动 `git pull` → 重启本地服务 → 刷新页面，全程不用开终端。本地有未提交的改动时会中止，不会动你的工作区。
+- 检查方式可以切换：**自动（打开页面时）**——发现新版本只在设置图标右上角点一个小圆点，不弹窗打扰；或者**仅手动**，只在点按钮时检查。
+
+> 提示：这个按钮是较新版本才有的功能。如果你装的是更早的版本，先按下面「方式二 / 方式三」手动更新一次，之后就都能在设置里一键更新了。
+
+### 方式二：Git 拉取（源码版手动更新）
 
 ```bash
 cd bilinest
@@ -160,9 +170,9 @@ git pull origin main
 
 重启服务即可（双击 `launcher.vbs` / `./start.sh` / `npm start`）。无需 `npm install`，所有依赖已 vendor 化。
 
-### 方式二：下载 Release ZIP
+### 方式三：覆盖安装 / 覆盖解压
 
-1. 到 [Releases](https://github.com/JLWLIMOU/BiliNest/releases) 下载最新 `Source code (zip)`；
+1. 到 [Releases](https://github.com/JLWLIMOU/BiliNest/releases) 下载最新的 `BiliNest-x.y.z-Setup.exe`，双击覆盖安装即可；或者下载 `Source code (zip)`；
 2. **不要删除旧文件夹**，将 ZIP 解压到一个临时目录；
 3. 把解压出来的文件**覆盖复制**到旧项目文件夹（替换同名文件，保留你自己的 `.env` 等个人配置）；
 4. 重启服务。

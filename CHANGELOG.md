@@ -24,7 +24,8 @@
     - **源码版（git 检出）**：弹窗问"是否拉取并重启服务"→ 点是 → 服务端 `git pull --ff-only` → **重启自己** → 前端轮询 `/api/health` 等它回来 → 自动刷新页面（新前端一起生效）。实测 6 秒左右完成；本地有未提交改动时直接中止，不动工作区。
     - **安装包版**：弹窗问"是否开始下载安装包"→ 点是 → 下载 `BiliNest-x.y.z-Setup.exe`，运行它即可（安装程序会停掉旧服务、装完重启），并提示"数据不会动"。
   - 自动检查不打扰：发现新版本只在**设置图标右上角点一个小圆点**，不弹任何东西；点进设置即清掉。
-  - 涉及文件：`server.mjs`、`public/app.js`、`public/storage.js`、`public/styles.css`
+  - README 的「更新方法」也按新机制重写了：方式一 = 设置里一键更新（安装包版 / 源码版分别在做什么），方式二 / 三保留为手动兜底（`git pull`、覆盖安装 / 覆盖解压）。
+  - 涉及文件：`server.mjs`、`public/app.js`、`public/storage.js`、`public/styles.css`、`README.md`
   - 验证（无头 Edge + 真实 GitHub API）：① 已是最新 → 无圆点、面板显示"已是最新版本 v1.3.0（最新版发布于 2026-09-16）"；② 模拟旧版 1.2.0 → 打开页面即出现圆点、按钮变"更新到 v1.3.0"、展开 release 说明；点按钮 → 确认弹窗 → 确定后**服务真的重启**（`/api/health` 从 1.2.0 变 1.3.0）、页面 6 秒内自动刷新、刷新后圆点消失；③ 桩掉接口模拟安装包版（`canGitPull:false`）→ 弹窗文案为"开始下载安装包（2.3 MB）…安装程序会自动停掉旧服务并重启，数据不会动"；④ 切到"仅手动" → 打开页面不再自动检查（无圆点）。
   - ⚠️ 两个实测踩到的坑（都已修，留档）：
     - 重启辅助脚本用 `require('child_process')` 写 → 本仓库 `type: module`，`node -e` 按 ESM 解析，脚本秒崩、**响应成功但服务根本没重启**。现在用 `--input-type=module` + `import`。（当时日志里一句 `spawn is not defined` 直接指出了另一个疏漏：`server.mjs` 只 import 了 `execFile` 没 import `spawn`。）
