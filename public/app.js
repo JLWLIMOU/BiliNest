@@ -417,7 +417,8 @@
   /* 上一次指示条的位置。标签栏每次重建都会生成一个新的指示条节点（从
      translateX(0) scaleX(0) 起步），不先把旧位置恢复给它，切标签就会变成
      "从最左端刷一下拉过来"，而不是从上一个标签滑到选中。 */
-  var lastIndTransform = '';
+  var lastIndX = null;
+  var lastIndW = 0;
   var lastIndTone = '';
 
   function syncTabIndicator() {
@@ -429,34 +430,41 @@
     var br = bar.getBoundingClientRect();
     var ar = active.getBoundingClientRect();
     var tone = active.classList.contains('custom') ? 'custom' : 'system';
-    // 注意 scaleX 只接受无单位数字：写成 scaleX(114px) 会让整条声明失效
-    // （元素只剩 CSS 里的 scaleX(0)，看起来就是"指示条没出来"）。
-    var target =
-      'translateX(' + Math.round(ar.left - br.left) + 'px) scaleX(' + Math.round(ar.width) + ')';
+    // 指示条现在是分段控件里那块"胶囊滑块"：只平移 + 改宽度。
+    // （不用 scaleX 拉伸，是因为拉伸会把圆角一起拉变形。）
+    var x = Math.round(ar.left - br.left);
+    var w = Math.round(ar.width);
 
     if (ind.dataset.synced === '1') {
       // 同一个节点（例如横向滚动中反复调用）：正常补间即可，
       // 滚动期间由 .scrolling 关掉过渡，让指示条 1:1 跟着标签走。
-      ind.style.transform = target;
+      ind.style.transform = 'translateX(' + x + 'px)';
+      ind.style.width = w + 'px';
       ind.dataset.tone = tone;
-      lastIndTransform = target;
+      lastIndX = x;
+      lastIndW = w;
       lastIndTone = tone;
       return;
     }
 
     // 新节点：先"无过渡"地放到上一次的位置（首次渲染则直接放到目标位置），
     // 强制一次样式计算让浏览器采纳这个起点，再恢复过渡并补间到目标。
+    var fromX = lastIndX === null ? x : lastIndX;
+    var fromW = lastIndX === null ? w : lastIndW;
     ind.style.transition = 'none';
-    ind.style.transform = lastIndTransform || target;
+    ind.style.transform = 'translateX(' + fromX + 'px)';
+    ind.style.width = fromW + 'px';
     ind.dataset.tone = lastIndTone || tone;
     ind.classList.add('ready');
     void ind.offsetWidth;
     ind.style.transition = '';
     ind.dataset.synced = '1';
 
-    ind.style.transform = target;
+    ind.style.transform = 'translateX(' + x + 'px)';
+    ind.style.width = w + 'px';
     ind.dataset.tone = tone;
-    lastIndTransform = target;
+    lastIndX = x;
+    lastIndW = w;
     lastIndTone = tone;
   }
 
@@ -1690,6 +1698,9 @@
           '<span class="dur">' + esc(durLabel) + '</span>' +
           badge +
           addBtn +
+          // ✕ 也放到画面上（与续播卡一致，也和「+ / ✓」用同一种材质）；
+          // 它与 addBtn 互斥：flags 只在内容源里出现，✕ 只在库里出现。
+          removeBtn +
         '</div>' +
         '<div class="card-body">' +
           '<h3 class="card-title">' + esc(v.title || v.name || '未命名视频') + '</h3>' +
@@ -1698,9 +1709,7 @@
             '<span>' + esc(timeLabel) + '</span>' +
           '</div>' +
           (isAdded
-            ? '<div class="card-foot">' + stars +
-              (removeBtn ? removeBtn : '') +
-              '</div>'
+            ? '<div class="card-foot">' + stars + '</div>'
             : '') +
         '</div>' +
       '</article>'
