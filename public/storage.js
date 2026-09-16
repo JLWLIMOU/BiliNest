@@ -45,6 +45,7 @@ window.BiliNestStore = (function () {
     source: null,             // { kind:'folder', id, name } 或 { kind:'mine', name }
     sort: 'star',             // add=添加时间 | pub=发布时间 | star=星级 | play=播放量
     activeDashTab: 'continue', // 主页当前标签：continue | added | folders | ups
+    updateCheck: 'auto',      // 更新检查方式：auto=打开时自动检查（只在设置里显示一个小圆点）| manual=只在点按钮时检查
     settingsTab: 'login',     // 设置弹窗左栏当前分类：login | general | data | about
     subSettings: { pos: 100, size: 'md' }, // 字幕位置（滑块 0~100）/ 字号
     customVideos: [],         // 手动添加的 B 站视频 / 本地视频

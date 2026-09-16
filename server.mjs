@@ -25,7 +25,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import os from 'node:os';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -133,6 +133,46 @@ function gitPull() {
       resolve({ ok: true, output, changed: !/Already up[ -]to[ -]date/i.test(output) });
     });
   });
+}
+
+/**
+ * 重启自己：开一个 detached 的辅助进程，等当前进程退出后（端口释放）再拉起新的一份。
+ * 不能直接 spawn 新进程——旧进程还占着端口，server 的"端口被占用就顺延"逻辑会让新进程
+ * 跑到别的端口上去（用户书签 / 端口文件就全乱了）。所以先等 pid 消失。
+ */
+function restartServerSoon() {
+  const serverPath = path.join(__dirname, 'server.mjs');
+  /*
+   * 辅助脚本必须是 ESM：本仓库 package.json 里 type=module，
+   * `node -e` 会按 ESM 解析这段代码 —— 用 require() 会直接抛错、进程秒退，
+   * 症状就是"响应成功、但服务根本没重启"（页面刷新了，版本还是旧的）。
+   */
+  const script =
+    'import { spawn } from "node:child_process";' +
+    `const pid = ${process.pid};` +
+    'const boot = () => {' +
+    `  spawn(${JSON.stringify(process.execPath)}, [${JSON.stringify(serverPath)}], {` +
+    `    cwd: ${JSON.stringify(__dirname)}, detached: true, stdio: "ignore", env: process.env, windowsHide: true` +
+    '  }).unref();' +
+    '};' +
+    'const wait = () => {' +
+    '  let alive = true;' +
+    '  try { process.kill(pid, 0); } catch { alive = false; }' +
+    '  if (alive) setTimeout(wait, 200); else setTimeout(boot, 300);' +
+    '};' +
+    'wait();';
+  try {
+    spawn(process.execPath, ['--input-type=module', '-e', script], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+  } catch (e) {
+    log(`[update] 起重启辅助进程失败：${e.message}`);
+    return false;
+  }
+  // 留一点时间把响应写回去，再退出（退出后辅助进程会拉起新的）
+  setTimeout(() => {
+    // 端口文件不删：新进程接管后会写回同一个端口，删掉反而让启动脚本可能读不到
+    process.exit(0);
+  }, 400);
+  return true;
 }
 
 /** 读取请求体（限长，避免被塞大文件） */
@@ -1418,7 +1458,7 @@ const server = http.createServer((req, res) => {
         return res.end();
       }
       // 只读接口之外，仅放行白名单里的本机写接口
-      const POST_PATHS = new Set(['/api/state/backup', '/api/update/pull']);
+      const POST_PATHS = new Set(['/api/state/backup', '/api/update/apply']);
       if (req.method !== 'GET' && req.method !== 'HEAD' && !(req.method === 'POST' && POST_PATHS.has(url.pathname))) {
         return sendJson(res, 405, { code: -405, message: '仅支持 GET 请求' });
       }
@@ -1440,12 +1480,20 @@ const server = http.createServer((req, res) => {
           });
         }
       }
-      // 拉取源码更新：只有 git 检出可用；仅同源可写（和备份接口同一道门槛）
-      if (url.pathname === '/api/update/pull') {
+      /*
+       * 一键更新：拉取源码（仅 git 检出）→ 重启服务。
+       * 重启后端口不变，前端会轮询 /api/health，等它回来就刷新页面（于是新前端也一起生效）。
+       * 非 git 的安装包版不做自动替换：那种装法由安装程序负责更新与重启，
+       * 前端会引导用户下载安装包（见 public/app.js 的 runUpdate）。
+       */
+      if (url.pathname === '/api/update/apply') {
         if (!isSameOriginRequest(req)) {
           return sendJson(res, 403, { ok: false, message: '仅允许本机同源请求' });
         }
-        return sendJson(res, 200, await gitPull());
+        const pulled = await gitPull();
+        if (!pulled.ok) return sendJson(res, 200, pulled);
+        const restarting = restartServerSoon();
+        return sendJson(res, 200, { ok: true, changed: pulled.changed, output: pulled.output, restarting });
       }
       // 客户端状态备份（仅供换环境时无感迁移）：仅同源可读写
       if (url.pathname === '/api/state/backup') {

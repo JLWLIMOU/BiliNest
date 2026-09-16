@@ -226,6 +226,7 @@ code {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  position: relative;   /* 供「有新版本」小圆点定位 */
   width: 36px;
   height: 36px;
   border: 1px solid transparent;
@@ -234,6 +235,19 @@ code {
   transition: background var(--dur-2) var(--ease-state), transform var(--dur-3) var(--ease-spring-soft);
 }
 .icon-btn:hover { background: var(--surface-2); }
+/* 有新版本：设置图标右上角一个小圆点（只在自动检查发现新版本时出现）。
+   不弹提示、不打断，但一眼能看到 —— 点进设置 → 关于 即可一键更新。 */
+.icon-btn.has-update::after {
+  content: '';
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--bg);
+}
 .icon-btn:active {
   transform: scale(0.94);
   transition: transform var(--dur-1) var(--ease-out);
@@ -1415,6 +1429,8 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
 
 /* 设置 →「关于」里的更新区：状态行 + 可展开的更新说明 */
 .update-row { flex-wrap: wrap; gap: 8px; }
+.update-mode { display: inline-flex; align-items: center; gap: 6px; }
+.update-mode .select { width: auto; min-width: 120px; }
 .update-notes {
   margin-top: 8px;
   max-height: 220px;

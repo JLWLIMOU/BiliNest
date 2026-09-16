@@ -3294,12 +3294,15 @@
            */
           '<h3>更新</h3>' +
           '<div class="row update-row">' +
-            '<button id="btnCheckUpdate" type="button" class="btn ghost">检查更新</button>' +
-            '<a id="btnDownloadUpdate" class="btn primary" target="_blank" rel="noopener noreferrer" hidden>下载安装包</a>' +
-            '<button id="btnPullUpdate" type="button" class="btn ghost" hidden>拉取源码更新</button>' +
-            '<a id="btnUpdatePage" class="btn ghost" target="_blank" rel="noopener noreferrer" hidden>打开 Releases</a>' +
+            '<button id="btnRunUpdate" type="button" class="btn primary">检查更新</button>' +
+            '<label class="update-mode"><span class="muted small">检查方式</span>' +
+              '<select id="updateMode" class="select">' +
+                '<option value="auto"' + ((store.get('updateCheck') || 'auto') === 'auto' ? ' selected' : '') + '>自动（打开时）</option>' +
+                '<option value="manual"' + (store.get('updateCheck') === 'manual' ? ' selected' : '') + '>仅手动</option>' +
+              '</select>' +
+            '</label>' +
           '</div>' +
-          '<p id="updateStatus" class="muted small">点「检查更新」看看有没有新版本。</p>' +
+          '<p id="updateStatus" class="muted small">点「检查更新」看看有没有新版本；有的话会问你要不要拉取并重启服务。</p>' +
           '<details id="updateNotesWrap" class="help" hidden><summary>这次更新了什么</summary><div id="updateNotes" class="update-notes"></div></details>' +
           '<div class="row">' + guideBtn + '</div>' +
         '</section>' +
@@ -3325,82 +3328,162 @@
   }
 
   var updateCheckedOnce = false;
+  var lastUpdate = null;        // 最近一次检查结果（打开设置时据此直接渲染，不用再等网络）
 
-  /** 检查更新。manual=false 时是打开设置时的静默检查（服务端有 10 分钟缓存，代价很低） */
-  async function checkForUpdate(manual) {
-    var status = document.getElementById('updateStatus');
-    if (!status) return;
-    var btn = document.getElementById('btnCheckUpdate');
-    if (btn) btn.disabled = true;
-    status.textContent = '正在检查更新…';
-    try {
-      var res = await fetch('/api/update/check' + (manual ? '?force=1' : ''), { cache: 'no-store' });
-      renderUpdateResult(await res.json());
-    } catch (e) {
-      status.textContent = '检查更新失败：' + (e.message || '网络错误') + '。可以点「打开 Releases」手动看看。';
-      var page = document.getElementById('btnUpdatePage');
-      if (page) { page.href = 'https://github.com/JLWLIMOU/BiliNest/releases'; page.hidden = false; }
-    } finally {
-      if (btn) btn.disabled = false;
-    }
+  /** 检查更新：manual=true 时绕过服务端缓存 */
+  async function fetchUpdate(manual) {
+    var res = await fetch('/api/update/check' + (manual ? '?force=1' : ''), { cache: 'no-store' });
+    var d = await res.json();
+    lastUpdate = d;
+    return d;
   }
 
+  /** 把检查结果画到设置面板上（面板没打开就只更新按钮上的小圆点） */
   function renderUpdateResult(d) {
+    // 设置图标上的小圆点：自动检查发现新版本时提示，不打扰
+    if (els.btnSettings) els.btnSettings.classList.toggle('has-update', !!(d && d.ok && d.hasUpdate));
+
     var status = document.getElementById('updateStatus');
     if (!status) return;
-    var dl = document.getElementById('btnDownloadUpdate');
-    var pull = document.getElementById('btnPullUpdate');
-    var page = document.getElementById('btnUpdatePage');
     var notesWrap = document.getElementById('updateNotesWrap');
     var notes = document.getElementById('updateNotes');
-    [dl, pull, page].forEach(function (el) { if (el) el.hidden = true; });
+    var btn = document.getElementById('btnRunUpdate');
     if (notesWrap) notesWrap.hidden = true;
+    if (btn) btn.textContent = '检查更新';
 
     if (!d || !d.ok) {
-      status.textContent = '检查失败：' + ((d && d.message) || '未知错误') + '。可以点「打开 Releases」手动看看。';
-      if (page && d && d.htmlUrl) { page.href = d.htmlUrl; page.hidden = false; }
+      status.textContent = '检查失败：' + ((d && d.message) || '未知错误') + '。可以稍后再试，或到 Releases 页面看看。';
       return;
     }
     if (!d.hasUpdate) {
       status.textContent = '已是最新版本 v' + d.current +
         (d.publishedAt ? '（最新版发布于 ' + fmtDay(d.publishedAt) + '）' : '') + '。';
-      if (page) { page.href = d.htmlUrl; page.hidden = false; }
       return;
     }
     status.textContent = '有新版本：v' + d.current + ' → v' + d.latest +
       (d.publishedAt ? '，发布于 ' + fmtDay(d.publishedAt) : '') + '。';
-    var setup = (d.assets || []).find(function (a) { return /Setup\.exe$/i.test(a.name); });
-    if (setup && dl) {
-      dl.href = setup.url;
-      dl.textContent = '下载安装包（' + fmtMB(setup.size) + '）';
-      dl.hidden = false;
-    }
-    if (d.canGitPull && pull) pull.hidden = false;
-    if (!setup && page) { page.href = d.htmlUrl; page.hidden = false; }
+    if (btn) btn.textContent = '更新到 v' + d.latest;
     if (d.notes && notes && notesWrap) {
       notes.textContent = d.notes;
       notesWrap.hidden = false;
     }
   }
 
-  async function pullUpdate() {
-    var status = document.getElementById('updateStatus');
-    var pull = document.getElementById('btnPullUpdate');
-    if (pull) pull.disabled = true;
-    if (status) status.textContent = '正在拉取更新…';
-    try {
-      var res = await fetch('/api/update/pull', { method: 'POST' });
-      var d = await res.json();
-      if (status) {
-        status.textContent = d.ok
-          ? (d.changed ? '已拉取新代码。' : '已经是最新代码。') + '接下来：关掉本地服务的窗口，再双击桌面快捷方式重启（然后刷新页面）。'
-          : '拉取失败：' + (d.message || '未知错误');
-      }
-    } catch (e) {
-      if (status) status.textContent = '拉取失败：' + (e.message || '网络错误');
-    } finally {
-      if (pull) pull.disabled = false;
+  /**
+   * 拉取源码后等新服务起来（端口不变，起来就刷新页面，新前端一起生效）。
+   *
+   * 必须等"先掉下去、再起来"：旧进程还在应答时直接返回，页面会在旧服务上刷新一遍 ——
+   * 看起来"更新成功"，其实版本一点没变（这个坑实测踩过）。
+   * 所以要么亲眼看到一次请求失败，要么看到版本号真的变了。
+   */
+  async function waitForServerBack(prevVersion) {
+    var deadline = Date.now() + 45000;
+    var seenDown = false;
+    await new Promise(function (r) { setTimeout(r, 700); });
+    while (Date.now() < deadline) {
+      var ok = false;
+      var ver = '';
+      try {
+        var res = await fetch('/api/health', { cache: 'no-store' });
+        if (res.ok) {
+          var d = await res.json();
+          ok = !!(d && d.app === 'bilinest');
+          ver = (d && d.appVersion) || '';
+        }
+      } catch (e) { /* 服务不在了 */ }
+      if (!ok) seenDown = true;
+      else if (seenDown || (prevVersion && ver && ver !== prevVersion)) return true;
+      await new Promise(function (r) { setTimeout(r, 400); });
     }
+    return false;
+  }
+
+  /** 一键更新：git 检出 → 拉取 + 重启 + 自动刷新；安装包版 → 下载安装包 */
+  async function runUpdate() {
+    var status = document.getElementById('updateStatus');
+    var btn = document.getElementById('btnRunUpdate');
+    if (btn) btn.disabled = true;
+    if (status) status.textContent = '正在检查更新…';
+    var d;
+    try {
+      d = await fetchUpdate(true);
+    } catch (e) {
+      if (status) status.textContent = '检查更新失败：' + (e.message || '网络错误');
+      if (btn) btn.disabled = false;
+      return;
+    }
+    renderUpdateResult(d);
+    if (btn) btn.disabled = false;
+    if (!d || !d.ok) return;
+    if (!d.hasUpdate) {
+      toast('已是最新版本 v' + d.current, 'success');
+      return;
+    }
+
+    var setup = (d.assets || []).find(function (a) { return /Setup\.exe$/i.test(a.name); });
+    if (d.canGitPull) {
+      // 源码版：拉取 + 重启 + 重新打开页面，全自动
+      confirmAction(
+        '发现新版本：v' + d.current + ' → <b>v' + d.latest + '</b>。<br>' +
+        '<span class="muted small">将执行 git pull，然后重启本地服务并重新打开页面（约几秒，期间页面会短暂断开）。' +
+        '本地有未提交的改动时会中止，不会动你的工作区。</span>',
+        async function () {
+          var st = document.getElementById('updateStatus');
+          if (st) st.textContent = '正在拉取新代码并重启服务…';
+          try {
+            var res = await fetch('/api/update/apply', { method: 'POST' });
+            var r = await res.json();
+            if (!r.ok) {
+              if (st) st.textContent = '更新失败：' + (r.message || '未知错误');
+              toast('更新失败，已保持原状', 'error');
+              return;
+            }
+            if (r.restarting === false) {
+              if (st) st.textContent = '代码已更新，但自动重启没成功 —— 请关掉本地服务的窗口，再双击桌面快捷方式重启。';
+              toast('已更新，请手动重启服务', 'info', 6000);
+              return;
+            }
+            toast(r.changed ? '已拉取新版本，正在重启服务…' : '代码已是最新，正在重启服务…', 'info', 4000);
+            var back = await waitForServerBack(d.current);
+            if (back) location.reload();
+            else if (st) st.textContent = '服务重启超时，请手动关闭服务窗口后重新双击快捷方式。';
+          } catch (e) {
+            if (st) st.textContent = '更新失败：' + (e.message || '网络错误') + '（服务可能正在重启，刷新页面试试）';
+          }
+        }
+      );
+      return;
+    }
+
+    if (setup) {
+      // 安装包版：不做文件替换，交给安装程序（它会停掉旧服务、装完重启）
+      confirmAction(
+        '发现新版本：v' + d.current + ' → <b>v' + d.latest + '</b>。<br>' +
+        '<span class="muted small">现在开始下载安装包（' + fmtMB(setup.size) + '）？下载完运行它即可完成更新 —— ' +
+        '安装程序会自动停掉旧服务并重启，数据不会动。</span>',
+        function () {
+          window.open(setup.url, '_blank', 'noopener');
+          var st = document.getElementById('updateStatus');
+          if (st) st.textContent = '已开始下载安装包。运行它即可更新到 v' + d.latest + '（数据不受影响）。';
+        }
+      );
+      return;
+    }
+
+    // 既不能拉取、也没有安装包（例如只有源码压缩包）：去 release 页面
+    confirmAction(
+      '发现新版本：v' + d.current + ' → <b>v' + d.latest + '</b>。<br>' +
+      '<span class="muted small">打开下载页面手动更新？</span>',
+      function () { window.open(d.htmlUrl, '_blank', 'noopener'); }
+    );
+  }
+
+  /** 自动检查（打开页面时跑一次；服务端有 10 分钟缓存，代价很低） */
+  async function autoCheckUpdate() {
+    if ((store.get('updateCheck') || 'auto') === 'manual') return;
+    try {
+      renderUpdateResult(await fetchUpdate(false));
+    } catch (e) { /* 自动检查失败就静默，别打扰 */ }
   }
 
   function bindSettingsEvents() {
@@ -3420,15 +3503,20 @@
     if (guideBtnEl) guideBtnEl.addEventListener('click', openGuideModal);
     var shutdownBtn = document.getElementById('btnShutdown');
     if (shutdownBtn) shutdownBtn.addEventListener('click', onShutdown);
-    var checkUpdateBtn = document.getElementById('btnCheckUpdate');
-    if (checkUpdateBtn) checkUpdateBtn.addEventListener('click', function () { checkForUpdate(true); });
-    var pullUpdateBtn = document.getElementById('btnPullUpdate');
-    if (pullUpdateBtn) pullUpdateBtn.addEventListener('click', pullUpdate);
-    // 打开设置时静默检查一次（服务端有 10 分钟缓存，不会频繁打 GitHub）
-    if (!updateCheckedOnce) {
-      updateCheckedOnce = true;
-      checkForUpdate(false);
+    var runUpdateBtn = document.getElementById('btnRunUpdate');
+    if (runUpdateBtn) runUpdateBtn.addEventListener('click', runUpdate);
+    var modeSelect = document.getElementById('updateMode');
+    if (modeSelect) {
+      modeSelect.addEventListener('change', function (e) {
+        store.set({ updateCheck: e.target.value === 'manual' ? 'manual' : 'auto' });
+        toast(e.target.value === 'manual' ? '只在点「检查更新」时检查' : '打开页面时自动检查是否有新版本', 'success');
+      });
     }
+    // 打开设置时把上次的结果画出来（没有结果就静默查一次）
+    if (lastUpdate) renderUpdateResult(lastUpdate);
+    else if (!updateCheckedOnce) { updateCheckedOnce = true; autoCheckUpdate(); }
+    // 用户已经看到过提示：把设置图标上的小圆点撤掉
+    if (els.btnSettings) els.btnSettings.classList.remove('has-update');
     // 左侧栏位切换
     var navItems = els.modalRoot.querySelectorAll('[data-settings-tab]');
     for (var i = 0; i < navItems.length; i++) {
@@ -5136,6 +5224,9 @@
     state.activeDashTab = normalizeDashTab(store.get('activeDashTab'));
     await checkLogin();
     await loadDashboard();
+    // 打开页面时自动检查更新（设置里可切成"仅手动"）。检查结果只体现在设置图标的小圆点上，
+    // 不弹任何东西；服务端有 10 分钟缓存，代价极低。
+    autoCheckUpdate();
     // 首次启动展示登录与设置引导
     if (store.get('guideSeen') !== true) openGuideModal();
   })();
