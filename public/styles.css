@@ -779,7 +779,7 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
   font-size: 38px; font-weight: 700; letter-spacing: -1px; line-height: 1.1;
   font-variant-numeric: tabular-nums;
 }
-.study-hero-num small { font-size: 15px; font-weight: 600; color: var(--text-2); margin: 0 6px 0 3px; }
+.study-hero-num small { font-size: 15px; font-weight: 600; color: var(--text-2); margin: 0 2px 0 3px; }
 .study-hero-label { color: var(--text-2); font-size: 13px; margin-top: 4px; }
 .study-hero-sub { color: var(--text-2); font-size: 12.5px; margin-top: 8px; line-height: 1.5; }
 
