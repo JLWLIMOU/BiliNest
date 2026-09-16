@@ -597,6 +597,49 @@ window.BiliNestPlayer = (function () {
     armHotkeys();
   });
 
+  /**
+   * 播放页内的任何"按下"都重新激活快捷键 —— 用 pointerdown，而不是 click。
+   *
+   * 为什么必须有这一条：bindClick() 会在捕获阶段把**画面**上的 click 吞掉
+   * （`stopImmediatePropagation()`，用来避免双击进出全屏时闪一次暂停）——
+   * 那次 click 根本到不了 document，所以 ArtPlayer 的 `document:click`（它才是
+   * 决定 isFocus 的地方）和上面那个 document 监听都不会跑。
+   * 结果就是：一旦 isFocus 因为"点到播放页以外"变成 false，
+   * **点画面永远复活不了快捷键**，只有点控制条（进度条等）才行 ——
+   * 这正是"全屏里还得先激活进度条才能用空格 / 方向键"的原因。
+   *
+   * pointerdown 比 click 早、且在捕获阶段，任何 click 层面的拦截都影响不到它。
+   * 点在输入框（弹幕输入等）上时不动：ArtPlayer 自己也会跳过 INPUT，
+   * 免得把输入状态搅乱。
+   */
+  if (els.playerView) {
+    els.playerView.addEventListener('pointerdown', function (e) {
+      if (!state.art) return;
+      var t = e.target;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
+      armHotkeys();
+    }, true);
+  }
+
+  /**
+   * 进出全屏也重新激活一次。
+   * 全屏是"另一个上下文"：进全屏时浏览器会把焦点挪到全屏元素上，
+   * 而且如果进全屏前光标停在某个输入框里（例如刚发过弹幕），
+   * 空格会被那个输入框吃掉 —— 所以进全屏时先把输入框失焦，再置位。
+   */
+  document.addEventListener('fullscreenchange', function () {
+    if (!state.art) return;
+    var fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+    if (fsEl && els.playerView && els.playerView.contains(fsEl)) {
+      var ae = document.activeElement;
+      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) {
+        try { ae.blur(); } catch (err) { /* 忽略 */ }
+      }
+    }
+    if (!els.playerView || els.playerView.hidden) return;
+    armHotkeys();
+  });
+
   async function load(bvid, cid, resumeSeconds, opts) {
     opts = opts || {};
     reset();

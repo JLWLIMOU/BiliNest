@@ -78,7 +78,6 @@
     dashQuery: '',          // 首页“视频库”搜索关键字
     tabQuery: {},           // 自定义标签页各自的搜索关键字 { tabId: query }
     pendingTabId: '',       // 从某个自定义标签页进入收藏夹视图时的目标标签页
-    dragTabId: '',          // 正在拖动的自定义标签页 id（拖动排序用）
     folderQuery: '',        // 收藏夹视图内搜索关键字
     sourceQuery: '',        // 内容源弹窗搜索关键字
     sourceSearchTimer: null, // 内容源搜索防抖定时器
@@ -245,6 +244,118 @@
     return 'continue';
   }
 
+  /** 排序下拉的选项（视频库 / 展开全部页共用同一套语义） */
+  function sortOptionsHtml() {
+    var cur = store.get('sort') || 'add';
+    return [['add', '添加时间'], ['pub', '发布时间'], ['star', '星级'], ['play', '播放量']]
+      .map(function (o) {
+        return '<option value="' + o[0] + '"' + (cur === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
+      })
+      .join('');
+  }
+
+  /** 当前页的搜索关键字（视频库用全局的，自定义标签页各记各的） */
+  function dashQueryOf(tab, custom) {
+    return (custom ? state.tabQuery[custom.id] : state.dashQuery) || '';
+  }
+
+  /** 搜索命中数；没有关键字时返回 -1（调用方据此显示"共 N 个"还是"N / 总数"） */
+  function dashSearchMatched(tab, custom) {
+    var q = dashQueryOf(tab, custom).trim().toLowerCase();
+    if (!q) return -1;
+    var hit = function (text) { return String(text || '').toLowerCase().indexOf(q) >= 0; };
+    if (custom) {
+      var m = tabMembers(custom);
+      return m.videos.filter(function (v) { return hit(v.title || v.name) || hit((v.upper && v.upper.name) || v.upper); }).length +
+        m.folders.filter(function (f) { return hit(f.title || f.name); }).length +
+        m.ups.filter(function (u) { return hit(u.name) || hit(u.sign); }).length;
+    }
+    return (store.get('customVideos') || []).filter(function (v) {
+      return hit(v.title || v.name) || hit((v.upper && v.upper.name) || v.upper);
+    }).length;
+  }
+
+  /** 大标题下面那句说明：搜索时变成"N / 总数"，让结果数就在标题下面 */
+  function dashHeadSubText(tab, custom) {
+    var matched = dashSearchMatched(tab, custom);
+    if (custom) {
+      var m = tabMembers(custom);
+      var total = m.videos.length + m.folders.length + m.ups.length;
+      if (matched >= 0) return matched + ' / ' + total + ' 项';
+      return total ? '共 ' + total + ' 项内容' : '还没有内容';
+    }
+    if (tab === 'continue') return '自动从上次进度续播';
+    if (tab === 'added') {
+      var n = (store.get('customVideos') || []).length;
+      if (matched >= 0) return matched + ' / ' + n + ' 个视频';
+      return n ? '共 ' + n + ' 个视频' : '还没有添加视频';
+    }
+    if (tab === 'folders') {
+      var f = (store.get('studyFolders') || []).length;
+      return f ? '共 ' + f + ' 个收藏夹' : '把收藏夹加进来单独管理';
+    }
+    if (tab === 'ups') {
+      var u = (store.get('studyUps') || []).length;
+      return u ? '共 ' + u + ' 位 UP主' : '输入 UID 添加要跟的 UP主';
+    }
+    return '';
+  }
+
+  /**
+   * 主页的"大标题"区（Apple 的 large title）：标题 + 一句说明 + 这一页的工具。
+   * 以前这些分散在各栏目的 section-head 里——标题只有 21px、说明挤在右边、搜索框还独占一行，
+   * 一屏上没有任何一处告诉用户"我在哪一页"。现在收成一处；栏目内部只留真正的分组标题
+   * （自定义标签页里的 视频 / 收藏夹库 / UP主）。
+   * 标题在滚动时走掉、标签栏留在顶部，和 iOS 的大标题行为一致。
+   */
+  function renderDashHead(tab, custom) {
+    var title = '';
+    if (custom) {
+      title = custom.name;
+    } else {
+      for (var i = 0; i < SYSTEM_TABS.length; i++) {
+        if (SYSTEM_TABS[i].key === tab) title = SYSTEM_TABS[i].label;
+      }
+    }
+    var sub = '';
+    var tools = '';
+    var searchPlaceholder = '';
+    var searchValue = '';
+
+    if (custom) {
+      searchPlaceholder = '在本标签页内搜索…';
+      searchValue = state.tabQuery[custom.id] || '';
+    } else if (tab === 'added') {
+      searchPlaceholder = '在视频库中搜索…';
+      searchValue = state.dashQuery;
+      tools +=
+        '<label class="sort-wrap"><span class="muted small">排序</span>' +
+          '<select id="dashSort" class="select">' + sortOptionsHtml() + '</select></label>';
+    }
+    sub = dashHeadSubText(tab, custom);
+
+    var searchHtml = searchPlaceholder
+      ? '<div class="dash-search-wrap">' +
+          '<span class="search-icon" aria-hidden="true">' +
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.6-3.6"></path></svg>' +
+          '</span>' +
+          '<input id="dashSearch" class="search-input" type="search" placeholder="' + searchPlaceholder +
+          '" autocomplete="off" value="' + esc(searchValue) + '">' +
+        '</div>'
+      : '';
+
+    var toolsHtml = (searchHtml || tools) ? '<div class="dash-page-tools">' + searchHtml + tools + '</div>' : '';
+    return (
+      '<div class="dash-page-head">' +
+        '<div class="dash-page-title">' +
+          '<h1 class="page-title">' + esc(title) + '</h1>' +
+          (sub ? '<p class="dash-page-sub">' + esc(sub) + '</p>' : '') +
+        '</div>' +
+        toolsHtml +
+      '</div>'
+    );
+  }
+
   function renderDashboard() {
     var tab = normalizeDashTab(state.activeDashTab);
     state.activeDashTab = tab;
@@ -281,9 +392,9 @@
         '<button type="button" class="dash-tab' + (tab === t.key ? ' active' : '') + (t.custom ? ' custom' : '') + '"' +
           ' data-dash-tab="' + esc(t.key) + '"' +
           (t.custom
-            ? ' data-tab-custom="' + esc(t.key) + '" draggable="true" title="双击重命名，按住可拖动排序"'
+            ? ' data-tab-custom="' + esc(t.key) + '" title="双击重命名，按住可拖动排序"'
             : '') + '>' +
-          '<span class="dash-tab-label"' + (t.custom ? ' draggable="true"' : '') + '>' + esc(t.label) + '</span>' +
+          '<span class="dash-tab-label">' + esc(t.label) + '</span>' +
           (t.custom ? '<span class="dash-tab-more" data-tab-menu="' + esc(t.key) + '" title="标签页操作">⋯</span>' : '') +
         '</button>';
       if (t.custom) custHtml += btnHtml;
@@ -302,18 +413,9 @@
         '<span class="dash-tab-ind" aria-hidden="true"></span>' +
       '</div>';
 
-    // 搜索框：「视频库」与自定义标签页可用（自定义标签页各自记关键字）
-    var searchable = tab === 'added' || !!custom;
-    var searchValue = custom ? (state.tabQuery[tab] || '') : state.dashQuery;
-    var searchHtml = searchable
-      ? '<div class="dash-search-wrap">' +
-          '<span class="search-icon" aria-hidden="true">' +
-            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.6-3.6"></path></svg>' +
-          '</span>' +
-          '<input id="dashSearch" class="search-input" type="search" placeholder="' +
-          (custom ? '在本标签页内搜索…' : '在视频库中搜索…') + '" autocomplete="off" value="' + esc(searchValue) + '">' +
-        '</div>'
-      : '';
+    // 页面头部（Apple 的"大标题"）：一个大标题 + 一句说明，右侧放这一页的工具
+    // （搜索 / 排序 / 展开全部）。标题在滚动时会走掉、标签栏留在顶部 —— 和 iOS 一样。
+    var headHtml = renderDashHead(tab, custom);
 
     // 当前标签内容
     var contentHtml = '<div id="dashContent">';
@@ -340,7 +442,7 @@
       }, { once: true });
     }
 
-    els.dashboard.innerHTML = tabsHtml + searchHtml + contentHtml;
+    els.dashboard.innerHTML = headHtml + tabsHtml + contentHtml;
 
     // 封面加载失败时隐藏图片
     var imgs = els.dashboard.querySelectorAll('img');
@@ -468,44 +570,289 @@
     lastIndTone = tone;
   }
 
-  /* 拖动排序时靠近边缘自动滚动（否则拖不到看不见的标签） */
-  var tabAutoScrollRaf = 0;
-  var tabAutoScrollEl = null;
-  var tabAutoScrollDir = 0;
+  /* ---------------- 自定义标签页：按住拖动排序 ----------------
+   *
+   * 这里刻意不用 HTML5 原生拖放（draggable + dragstart/dragover/drop）：
+   * 原生拖放的"拖影"由浏览器生成，被拖的标签本身全程不动，用户在拖的过程中
+   * 看不到任何反馈（标签栏又是 sticky 玻璃层，拖影还可能把整层重新栅格化），
+   * 表现出来就是"拖了但像卡死"。
+   *
+   * 改成指针事件 + transform：
+   *   · 被拖的标签跟着指针走，并"抬起来"（白底 + 投影）；
+   *   · 其余标签实时让位 —— 直接改 transform，由 CSS 过渡补间，所以是滑过去而不是跳过去；
+   *   · 松手交给 moveCustomTab()：它以"当前 DOM 位置（含拖动位移）"为 FLIP 起点，
+   *     重排后再补间到最终位置，于是落位也是一次连续运动。
+   * 拖动过程中不改动任何数据、不重排 DOM，所以重排成本与拖动时长无关。
+   */
+  var TAB_DRAG_THRESHOLD = 5;      // 超过这个横向位移才认定是拖动；否则仍是一次点击
+  var TAB_DRAG_EDGE = 44;          // 指针进入滚动区边缘这么多像素内 → 自动滚动
+  var TAB_DRAG_SCROLL_STEP = 12;   // 自动滚动速度（px/帧）
+  var TAB_LONG_PRESS = 320;        // 触摸端：长按多久开始拖动（否则留给横向滚动）
 
-  function startTabAutoScroll(sc, dir) {
-    // 只有"确实溢出"才需要自动滚动。分段控件的容器是 fit-content，
-    // 标签不多时根本不溢出；此时若还起 rAF 循环，就会以 60fps 空转，
-    // 表现得像整页卡死（这正是改成分段控件后拖拽"卡住"的原因）。
-    if (!dir || sc.scrollWidth <= sc.clientWidth) {
-      stopTabAutoScroll();
-      return;
-    }
-    if (tabAutoScrollEl === sc && tabAutoScrollDir === dir) return;
-    stopTabAutoScroll();
-    tabAutoScrollEl = sc;
-    tabAutoScrollDir = dir;
-    var step = function () {
-      if (!tabAutoScrollEl) return;
-      var before = tabAutoScrollEl.scrollLeft;
-      tabAutoScrollEl.scrollLeft += tabAutoScrollDir * 8;
-      // 已经滚到边界就不再空转
-      if (tabAutoScrollEl.scrollLeft === before) {
-        stopTabAutoScroll();
-        return;
-      }
-      tabAutoScrollRaf = requestAnimationFrame(step);
+  var tabPending = null;           // 已按下、还没越过拖动阈值
+  var tabDrag = null;              // 正在拖动
+  var tabLongPressTimer = null;
+  var tabAutoScrollRaf = 0;
+  var tabSettleTimer = 0;          // 让位/回位的过渡结束后再对齐指示条（见 finishTabDrag）
+  /**
+   * 拖动刚结束的时间戳（0 表示没有需要吞掉的 click）。
+   * 指针捕获（setPointerCapture）会把 pointerup 的 target 变成被拖的标签，于是浏览器
+   * 补发的那次 click 也落在它身上 —— 结果"拖到别处松手"会顺手把被拖的标签选中。
+   * 只吞"真的挪过"的这次 click：只抖了几像素仍然算点击（跟 Apple 的 ~10px 迟滞一致）。
+   */
+  var tabDragEndedAt = 0;
+
+  function onTabPointerDown(e) {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    var btn = e.target.closest('.dash-tab.custom[data-tab-custom]');
+    if (!btn || e.target.closest('.dash-tab-more') || e.target.closest('.dash-tab-input')) return;
+    tabPending = {
+      id: btn.dataset.tabCustom,
+      el: btn,
+      x: e.clientX,
+      y: e.clientY,
+      pointerId: e.pointerId,
+      pointerType: e.pointerType,
+      sc: btn.closest('.dash-tabs-scroll')
     };
-    tabAutoScrollRaf = requestAnimationFrame(step);
+    if (e.pointerType === 'touch') {
+      // 触摸：先让位给"横向滚动标签栏"，长按不动才进入拖动排序
+      clearTimeout(tabLongPressTimer);
+      tabLongPressTimer = setTimeout(function () {
+        if (!tabPending || tabPending.pointerId !== e.pointerId) return;
+        beginTabDrag(null);
+      }, TAB_LONG_PRESS);
+    }
+  }
+
+  function onTabPointerMove(e) {
+    if (tabPending && e.pointerId === tabPending.pointerId) {
+      var mdx = e.clientX - tabPending.x;
+      var mdy = e.clientY - tabPending.y;
+      if (tabPending.pointerType === 'touch') {
+        // 触摸一移动就是"滚标签栏"，取消长按判定
+        if (Math.abs(mdx) > 8 || Math.abs(mdy) > 8) {
+          clearTimeout(tabLongPressTimer);
+          tabPending = null;
+        }
+      } else if (Math.abs(mdx) >= TAB_DRAG_THRESHOLD && Math.abs(mdx) > Math.abs(mdy)) {
+        beginTabDrag(e);
+      }
+    }
+    if (!tabDrag || e.pointerId !== tabDrag.pointerId) return;
+    tabDrag.pointerX = e.clientX;
+    tabDrag.pointerY = e.clientY;
+    applyTabDragLayout();
+    tickTabAutoScroll();
+  }
+
+  function onTabPointerUp(e) {
+    if (tabPending && e.pointerId === tabPending.pointerId) {
+      clearTimeout(tabLongPressTimer);
+      tabPending = null;
+    }
+    if (!tabDrag || e.pointerId !== tabDrag.pointerId) return;
+    finishTabDrag(true);
+  }
+
+  function onTabDragKey(e) {
+    if (e.key !== 'Escape' || !tabDrag) return;
+    e.preventDefault();
+    finishTabDrag(false);
+  }
+
+  /** 开始拖动：把每个自定义标签的初始位置量下来（后面全靠这几个数，不再读布局） */
+  function beginTabDrag(ev) {
+    var pending = tabPending;
+    if (!pending || tabDrag) return;
+    clearTimeout(tabSettleTimer);
+    var nodes = els.dashboard.querySelectorAll('.dash-tab.custom');
+    if (nodes.length < 2) { tabPending = null; return; }
+    var items = [];
+    var self = null;
+    for (var i = 0; i < nodes.length; i++) {
+      var r = nodes[i].getBoundingClientRect();
+      var it = { id: String(nodes[i].dataset.tabCustom), el: nodes[i], left: r.left, width: r.width, applied: 0 };
+      items.push(it);
+      if (it.id === String(pending.id)) self = it;
+    }
+    if (!self) { tabPending = null; return; }
+    tabPending = null;
+    tabDrag = {
+      id: self.id,
+      el: self.el,
+      selfWidth: self.width,
+      selfLeft: self.left,
+      appliedSelf: 0,
+      pointerId: pending.pointerId,
+      startX: pending.x,
+      startY: pending.y,
+      pointerX: ev ? ev.clientX : pending.x,
+      pointerY: ev ? ev.clientY : pending.y,
+      items: items,
+      sc: pending.sc,
+      scrollStart: pending.sc ? pending.sc.scrollLeft : 0,
+      prevScrollBehavior: pending.sc ? pending.sc.style.scrollBehavior : '',
+      // 拖动用的 translateX 会算进滚动容器的可滚动宽度（浏览器的规则），
+      // 于是"能滚多远"在拖动中被撑大，自动滚动会一路跑到不存在的位置上。
+      // 记下按下那一刻的最大滚动量，拖动期间都以它为准。
+      maxScroll: pending.sc ? Math.max(0, pending.sc.scrollWidth - pending.sc.clientWidth) : 0,
+      target: -1
+    };
+    if (pending.pointerType === 'touch') self.el.style.touchAction = 'none';
+    self.el.classList.add('dragging');
+    var bar = els.dashboard.querySelector('.dash-tabs');
+    if (bar) bar.classList.add('tabs-sorting');
+    document.body.classList.add('tab-sorting');
+    // 拖动期间自己按帧滚动，smooth 会把 scrollLeft 变成"目标值"，自己算的量就失效了
+    if (pending.sc) pending.sc.style.scrollBehavior = 'auto';
+    try { self.el.setPointerCapture(pending.pointerId); } catch (err) { /* 忽略 */ }
+    applyTabDragLayout();
+  }
+
+  /**
+   * 按当前指针位置摆放所有标签。
+   * 全部是纯计算 + 两次 style 写入，不读取布局、不改 DOM，所以每帧成本恒定。
+   * 坐标统一换算回"按下的那一刻"：拖动期间自动滚动会让视口坐标整体偏移 scrollDelta。
+   */
+  function applyTabDragLayout() {
+    var d = tabDrag;
+    if (!d) return;
+    var scrollDelta = d.sc ? (d.sc.scrollLeft - d.scrollStart) : 0;
+    var x = d.pointerX + scrollDelta;
+
+    var rest = [];
+    for (var i = 0; i < d.items.length; i++) {
+      if (d.items[i].id !== d.id) rest.push(d.items[i]);
+    }
+    // 插入位：数一数"起点在中点左边"的标签有几个。
+    // 用按下那一刻的位置来比，而不是用让位后的位置 —— 后者依赖各标签的宽度，
+    // 被拖的标签一旦比右邻宽，指针还停在原地就会立刻被判定成"要往右挪一格"。
+    // 用原始位置比则天然稳定：不动就不换位，越过谁的中间才和谁换。
+    var k = 0;
+    for (var a = 0; a < rest.length; a++) {
+      if (x > rest[a].left + rest[a].width / 2) k++;
+    }
+    d.target = k;
+
+    // 插入位之后的标签整体后移一个"被拖标签的宽度"
+    var cursor = d.items[0].left;
+    for (var b = 0; b < rest.length; b++) {
+      var it = rest[b];
+      var dx = Math.round(cursor + (b >= k ? d.selfWidth : 0) - it.left);
+      if (it.applied !== dx) {
+        it.applied = dx;
+        it.el.style.transform = dx ? 'translateX(' + dx + 'px)' : '';
+      }
+      cursor += it.width;
+    }
+
+    var selfDx = Math.round(x - d.startX);
+    if (d.appliedSelf !== selfDx) {
+      d.appliedSelf = selfDx;
+      // 只写平移：必须严格 1:1 跟手。抬起（放大 3%）交给 .dragging 里的 scale 属性，
+      // 它是独立于 transform 的，可以带过渡而不影响跟手。
+      d.el.style.transform = 'translateX(' + selfDx + 'px)';
+    }
+  }
+
+  /**
+   * 靠近滚动区边缘时自动滚动（否则拖不到看不见的标签）。
+   * 只有指针确实停在边缘、且容器确实溢出时才起 rAF；离开边缘或滚到尽头立即停，
+   * 不做无意义的每帧空转。
+   */
+  function tickTabAutoScroll() {
+    var d = tabDrag;
+    if (!d || !d.sc || tabAutoScrollRaf) return;
+    if (!tabDragEdgeDir(d)) { stopTabAutoScroll(); return; }
+    tabAutoScrollRaf = requestAnimationFrame(function step() {
+      tabAutoScrollRaf = 0;
+      var cur = tabDrag;
+      var dir = cur ? tabDragEdgeDir(cur) : 0;
+      if (!dir) return;
+      var before = cur.sc.scrollLeft;
+      var next = Math.max(0, Math.min(cur.maxScroll, before + dir * TAB_DRAG_SCROLL_STEP));
+      if (next === before) return;   // 已经到边界，停止
+      cur.sc.scrollLeft = next;
+      applyTabDragLayout();
+      tabAutoScrollRaf = requestAnimationFrame(step);
+    });
+  }
+
+  function tabDragEdgeDir(d) {
+    if (!d.sc || d.sc.scrollWidth <= d.sc.clientWidth) return 0;
+    var r = d.sc.getBoundingClientRect();
+    if (d.pointerX - r.left < TAB_DRAG_EDGE) return d.sc.scrollLeft > 0 ? -1 : 0;
+    if (r.right - d.pointerX < TAB_DRAG_EDGE) return d.sc.scrollLeft < d.maxScroll ? 1 : 0;
+    return 0;
   }
 
   function stopTabAutoScroll() {
     if (tabAutoScrollRaf) cancelAnimationFrame(tabAutoScrollRaf);
     tabAutoScrollRaf = 0;
-    tabAutoScrollEl = null;
-    tabAutoScrollDir = 0;
   }
 
+  /** 结束拖动。commit=false 表示取消（Esc），标签滑回原位 */
+  function finishTabDrag(commit) {
+    var d = tabDrag;
+    if (!d) return;
+    tabDrag = null;
+    stopTabAutoScroll();
+    try { d.el.releasePointerCapture(d.pointerId); } catch (err) { /* 忽略 */ }
+    d.el.classList.remove('dragging');
+    d.el.style.touchAction = '';
+    document.body.classList.remove('tab-sorting');
+    if (d.sc) d.sc.style.scrollBehavior = d.prevScrollBehavior || '';
+
+    var rest = [];
+    for (var i = 0; i < d.items.length; i++) {
+      if (d.items[i].id !== d.id) rest.push(d.items[i]);
+    }
+    var k = Math.max(0, Math.min(d.target < 0 ? d.items.length - 1 : d.target, rest.length));
+    var oldOrder = d.items.map(function (it) { return it.id; }).join('|');
+    var newOrder = rest.map(function (it) { return it.id; });
+    newOrder.splice(k, 0, d.id);
+    var changed = newOrder.join('|') !== oldOrder;
+
+    // 真的挪过（换位了，或者指针带着标签走了 8px 以上）→ 吞掉接下来的那次 click
+    tabDragEndedAt = (changed || Math.abs(d.appliedSelf) > 8) ? Date.now() : 0;
+
+    if (commit && changed) {
+      // moveCustomTab 会把"当前 DOM 位置（含拖动位移）"记成 FLIP 起点，重排后补间到最终位置
+      moveCustomTab(d.id, k < rest.length ? rest[k].id : '', false);
+      return;
+    }
+
+    // 取消 / 位置没变：让标签平滑回位
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var dur = reduce ? 0 : 220;
+    for (var j = 0; j < d.items.length; j++) {
+      var el = d.items[j].el;
+      if (!el.isConnected) continue;
+      if (dur) {
+        el.style.transition = 'transform ' + dur + 'ms cubic-bezier(0.23, 1, 0.32, 1)';
+        (function (node) {
+          setTimeout(function () { node.style.transition = ''; }, dur + 80);
+        })(el);
+      }
+      el.style.transform = '';
+    }
+    /*
+     * 指示条不能现在就量：标签此时还在"让位"的位置上（回位是一次 220ms 过渡），
+     * getBoundingClientRect 读到的还是偏移后的位置，量出来指示条就会整体歪掉、
+     * 而且此后没有任何时机再纠正它 —— 表现就是"拖到分割线松手，滑块停错地方"。
+     * 所以保持 .tabs-sorting（指示条先藏着），等过渡结束再对齐 + 显示。
+     */
+    var settle = function () {
+      if (tabDrag) return;   // 已经开始下一轮拖动了，别插手
+      var bar = els.dashboard.querySelector('.dash-tabs');
+      if (bar) bar.classList.remove('tabs-sorting');
+      syncTabIndicator();
+    };
+    clearTimeout(tabSettleTimer);
+    if (dur) tabSettleTimer = setTimeout(settle, dur + 40);
+    else settle();
+  }
   /* ---------------- 自定义标签页：成员解析与渲染 ---------------- */
 
   /**
@@ -558,10 +905,6 @@
     var ctx = { tab: tab.id };
     var html =
       '<div class="dash-section">' +
-        '<div class="section-head tab-head">' +
-          '<h2 class="section-title">' + esc(tab.name) + '</h2>' +
-          '<span class="tab-count">' + (q ? matched + ' / ' + total : total) + ' 项</span>' +
-        '</div>' +
         '<button type="button" class="tab-add-card" data-tab-add="' + esc(tab.id) + '">' +
           '<span class="tab-add-icon">＋</span>' +
           '<span class="tab-add-text">添加内容</span>' +
@@ -592,17 +935,21 @@
   /** 栏一：继续学习（有观看记录时出现，大封面 + 进度条强调） */
   function renderContinueSection() {
     var list = mergedHistoryList();
-    if (!list.length) return '';
+    if (!list.length) {
+      return (
+        '<section class="dash-section">' +
+          '<div class="empty-inline">还没有观看记录 —— 播放任意视频后会出现在这里，并从上次的位置继续。</div>' +
+        '</section>'
+      );
+    }
     var LIMIT = 12;
     var visible = list.slice(0, LIMIT);
     return (
       '<section class="dash-section">' +
-        '<div class="section-head">' +
-          '<h2 class="section-title">继续学习</h2>' +
-          '<span class="muted small">自动从上次进度续播</span>' +
-          (list.length > LIMIT ? barMoreBtn('continue', list.length) : '') +
-        '</div>' +
         '<div class="bar-grid">' + visible.map(historyCard).join('') + '</div>' +
+        // "展开全部"统一放在网格下方（和视频库 / 收藏夹库一致），
+        // 标题行只留搜索与排序这类真正的"页级工具"
+        (list.length > LIMIT ? '<div class="bar-more-wrap">' + barMoreBtn('continue', list.length) + '</div>' : '') +
       '</section>'
     );
   }
@@ -729,7 +1076,13 @@
   /** 栏二：视频库（按星级 / 添加时间等排序） */
   function renderAddedVideosSection() {
     var items = (store.get('customVideos') || []).slice();
-    if (!items.length) return '';
+    if (!items.length) {
+      return (
+        '<section class="dash-section">' +
+          '<div class="empty-inline">视频库还是空的 —— 在「内容源」里粘贴视频链接，或把收藏夹里的视频加进来。</div>' +
+        '</section>'
+      );
+    }
     var q = (state.dashQuery || '').trim().toLowerCase();
     if (q) {
       items = items.filter(function (v) {
@@ -739,11 +1092,6 @@
       });
     }
     sortVideosInPlace(items, store.get('sort') || 'add');
-    var opts = [['add', '添加时间'], ['pub', '发布时间'], ['star', '星级'], ['play', '播放量']]
-      .map(function (o) {
-        return '<option value="' + o[0] + '"' + ((store.get('sort') || 'add') === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
-      })
-      .join('');
     var LIMIT = 20;
     var visible = items.slice(0, LIMIT);
     var body;
@@ -756,11 +1104,6 @@
     }
     return (
       '<section class="dash-section">' +
-        '<div class="section-head">' +
-          '<h2 class="section-title">视频库</h2>' +
-          '<label class="sort-wrap"><span class="muted small">排序</span>' +
-            '<select id="dashSort" class="select">' + opts + '</select></label>' +
-        '</div>' +
         body +
       '</section>'
     );
@@ -784,7 +1127,7 @@
         '<div class="grid folder-grid">' + visible.map(folderCard).join('') + '</div>' +
         (folders.length > LIMIT ? '<div class="bar-more-wrap">' + barMoreBtn('folders', folders.length) + '</div>' : '');
     }
-    return '<section class="dash-section"><h2 class="section-title">收藏夹库</h2>' + body + '</section>';
+    return '<section class="dash-section">' + body + '</section>';
   }
 
   function folderCard(f, ctx) {
@@ -977,6 +1320,9 @@
   async function loadFolder(source) {
     state.videos = [];
     showView('folder');
+    // 先把头部刷出来：返回键的文案取决于"是不是从添加内容钻进来的"，
+    // 这一步不该等到接口成功之后（失败时头部就停在上一页的文案上，很误导）。
+    renderHomeHeader();
     renderEmpty('加载中…', '正在读取收藏夹内容', null);
     var login = store.get('login');
     if (!login) {
@@ -1010,6 +1356,7 @@
       renderHomeHeader();
       renderGrid();
     } catch (e) {
+      renderHomeHeader();
       renderEmpty('加载失败', e.message, null);
       if (/登录|无效|权限|失效|过期/.test(e.message)) checkLogin(true);
     }
@@ -1019,16 +1366,21 @@
     var source = store.get('source');
     var title = source ? source.name : '…';
     var meta = '';
+    var ctxTab = state.pendingTabId ? findCustomTab(state.pendingTabId) : null;
     if (state.activeFolder) {
       var total = state.activeFolder.media_count != null
         ? state.activeFolder.media_count
         : state.videos.length;
       meta = '收藏夹 · 共 ' + total + ' 个视频';
-      var ctxTab = state.pendingTabId ? findCustomTab(state.pendingTabId) : null;
-      if (ctxTab) meta += ' · 正在添加到「' + ctxTab.name + '」标签页';
     }
+    // 这条上下文和"收藏夹加载成功与否"无关：只要是走「添加内容」进来的就要显示
+    if (ctxTab) meta += (meta ? ' · ' : '') + '正在添加到「' + ctxTab.name + '」标签页';
     els.sourceTitle.textContent = title;
     els.sourceMeta.textContent = meta;
+    // 返回键的文案要说清"回到哪一级"：从「添加内容」钻进来的收藏夹，上一级是选择器；
+    // 从内容源直接进来的收藏夹，上一级才是主页。
+    var backLabel = els.btnBackHome.querySelector('span');
+    if (backLabel) backLabel.textContent = ctxTab ? '返回添加内容' : '返回主页';
     els.sortSelect.value = store.get('sort') || 'add';
   }
 
@@ -1846,8 +2198,19 @@
     updateEpisodeNav(); // 新视频开始时先隐藏上一集/下一集
     state.seriesInfo = null;
     state.prevView = state.currentView;
+    /*
+     * 记住"从列表的哪个位置进来的"：播放页返回时回到原处，而不是跳回顶部。
+     * showView() 每次都 scrollTo(0)，一集看完回到列表就从第一屏重新开始找 ——
+     * 这是"要不要把播放页开在新标签页"背后真正的痛点，用记住/恢复滚动位置就能解决，
+     * 不必引入第二个标签页和跨标签同步。
+     */
+    if (state.currentView !== 'player') {
+      state.listReturn = { view: state.currentView, y: window.scrollY || 0 };
+    }
     showView('player');
     els.playerTitle.textContent = v.title || v.name || '未命名视频';
+    // 标题最多显示两行（见 .player-title）：完整标题留给悬停查看
+    els.playerTitle.title = els.playerTitle.textContent;
     var upName = (v.upper && v.upper.name) || v.upper || '';
     var upMid = (v.upper && v.upper.mid) || 0;
     renderPlayerUp(upName, upMid);
@@ -2105,6 +2468,7 @@
     state.activeEpisode = { bvid: ep.bvid, cid: ep.cid, page: ep.page || 1 };
     if (ep.bvid !== (state.activeVideo && state.activeVideo.bvid)) {
       els.playerTitle.textContent = ep.title || els.playerTitle.textContent;
+      els.playerTitle.title = els.playerTitle.textContent;
     }
     renderEpisodeList(ep.cid, ep.page || 1);
     updateEpisodeNav();
@@ -2206,6 +2570,18 @@
     }
     if (view !== 'player') stopPlayer();
     window.scrollTo({ top: 0 });
+  }
+
+  /**
+   * 从播放页回到列表时，把滚动位置还原到"进播放页之前"。
+   * 只在回到同一个视图时还原（从收藏夹进播放页、又退回收藏夹），视图换了就当没有。
+   */
+  function restoreListScroll() {
+    var r = state.listReturn;
+    state.listReturn = null;
+    if (!r || r.view !== state.currentView || !r.y) return;
+    // 等这一帧渲染完再滚：showView / renderXxx 刚把内容换掉，高度还没稳定
+    requestAnimationFrame(function () { window.scrollTo({ top: r.y }); });
   }
 
   function stopPlayer() {
@@ -3306,7 +3682,14 @@
         loadDashboard();
       }
     });
-    els.btnBackHome.addEventListener('click', loadDashboard);
+    els.btnBackHome.addEventListener('click', function () {
+      // 从「添加内容 → 源收藏夹」钻进收藏夹时，"上一级"是那个选择器而不是首页：
+      // 回到自定义标签页并**把选择器原样打开**（分区 / 搜索词 / 勾选都还在），
+      // 用户可以接着挑别的收藏夹或切到视频库/UP主，不用从头点一遍。
+      var ctxTabId = state.pendingTabId;
+      loadDashboard();                       // showView('dashboard') 会清掉 pendingTabId
+      if (ctxTabId) openContentPicker(ctxTabId, true);
+    });
     els.btnBack.addEventListener('click', function () {
       if (state.prevView === 'folder') {
         showView('folder');
@@ -3317,6 +3700,8 @@
         showView('dashboard');
         renderDashboard();
       }
+      // 回到列表时停在原来的位置（进播放页之前看到哪儿，回来还是那儿）
+      restoreListScroll();
     });
     els.btnRetryBackend.addEventListener('click', onRetryBackend);
 
@@ -3362,58 +3747,20 @@
       e.preventDefault();
       startTabRename(tabBtn.dataset.tabCustom);
     });
-    // 自定义标签页：按住拖动排序
-    els.dashboard.addEventListener('dragstart', function (e) {
-      var btn = e.target.closest('.dash-tab.custom[data-tab-custom]');
-      if (!btn || e.target.closest('.dash-tab-input')) return;
-      state.dragTabId = btn.dataset.tabCustom;
-      btn.classList.add('dragging');
-      if (e.dataTransfer) {
-        e.dataTransfer.effectAllowed = 'move';
-        try { e.dataTransfer.setData('text/plain', state.dragTabId); } catch (err) { /* 忽略 */ }
-      }
-    });
-    els.dashboard.addEventListener('dragover', function (e) {
-      if (!state.dragTabId) return;
-      var over = e.target.closest('.dash-tab.custom[data-tab-custom]');
-      var atEnd = !!e.target.closest('.dash-tab-new');
-      if (!over && !atEnd) return;
+    // 自定义标签页：按住拖动排序（指针实现，见 beginTabDrag 一带的说明）
+    els.dashboard.addEventListener('pointerdown', onTabPointerDown);
+    window.addEventListener('pointermove', onTabPointerMove);
+    window.addEventListener('pointerup', onTabPointerUp);
+    window.addEventListener('pointercancel', onTabPointerUp);
+    window.addEventListener('keydown', onTabDragKey);
+    // 拖拽后的那次"补发 click"在捕获阶段丢掉，别让它落到标签页的切换逻辑上
+    els.dashboard.addEventListener('click', function (e) {
+      if (!tabDragEndedAt || Date.now() - tabDragEndedAt > 400) return;
+      tabDragEndedAt = 0;
+      if (!e.target || !e.target.closest || !e.target.closest('.dash-tab')) return;
+      e.stopPropagation();
       e.preventDefault();
-      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-      // 靠近滚动区两侧时自动滚动，便于拖到看不见的位置
-      var sc = e.target.closest('.dash-tabs-scroll');
-      if (sc) {
-        var sr = sc.getBoundingClientRect();
-        var dir = 0;
-        if (e.clientX - sr.left < 48) dir = -1;
-        else if (sr.right - e.clientX < 48) dir = 1;
-        startTabAutoScroll(sc, dir);
-      }
-      clearTabDropMarks();
-      if (over && String(over.dataset.tabCustom) !== String(state.dragTabId)) {
-        var r = over.getBoundingClientRect();
-        over.classList.add((e.clientX - r.left) > r.width / 2 ? 'drop-after' : 'drop-before');
-      }
-    });
-    els.dashboard.addEventListener('drop', function (e) {
-      var srcId = state.dragTabId;
-      if (!srcId) return;
-      e.preventDefault();
-      var over = e.target.closest('.dash-tab.custom[data-tab-custom]');
-      var atEnd = !!e.target.closest('.dash-tab-new');
-      var after = false;
-      var targetId = '';
-      if (over && String(over.dataset.tabCustom) !== String(srcId)) {
-        var r = over.getBoundingClientRect();
-        after = (e.clientX - r.left) > r.width / 2;
-        targetId = over.dataset.tabCustom;
-      } else if (atEnd) {
-        targetId = '';
-      }
-      stopTabDrag();
-      if (targetId || atEnd) moveCustomTab(srcId, targetId, after);
-    });
-    els.dashboard.addEventListener('dragend', stopTabDrag);
+    }, true);
     window.addEventListener('resize', syncTabsScroll);
     // 标签栏：滚轮上下滚 → 横向滚动（标签多了才需要）
     els.dashboard.addEventListener('wheel', function (e) {
@@ -3435,6 +3782,9 @@
           state.dashQuery = e.target.value;
           if (wrap) wrap.innerHTML = renderAddedVideosSection();
         }
+        // 结果数写在大标题下面 —— 输入时它也该跟着动
+        var subEl = els.dashboard.querySelector('.dash-page-sub');
+        if (subEl) subEl.textContent = dashHeadSubText(state.activeDashTab, custom);
       }
     });
     els.dashboard.addEventListener('change', function (e) {
@@ -3641,7 +3991,7 @@
       openFolder(fcard.dataset.folder);
       return;
     }
-    // 视频库卡片
+   // 视频库卡片
     var vcard = e.target.closest('.grid .card[data-id]');
     if (vcard) {
       var v = (store.get('customVideos') || []).find(function (x) {
@@ -3812,11 +4162,15 @@
   }
 
   function studyUpCard(up, ctx) {
-    var meta = '';
-    if (up.fans > 0) meta += fmtCount(up.fans) + ' 粉丝';
-    if (up.videos > 0) meta += (meta ? ' · ' : '') + fmtCount(up.videos) + ' 视频';
+    // 卡片列宽和视频库对齐（274px）之后，"粉丝 · 视频"两个数字并排会被挤成省略号。
+    // 卡面上只留主数字（粉丝数），完整统计进 title —— 想看的悬停一下，不想看的不用被它占位。
+    var stats = '';
+    if (up.fans > 0) stats += fmtCount(up.fans) + ' 粉丝';
+    if (up.videos > 0) stats += (stats ? ' · ' : '') + fmtCount(up.videos) + ' 视频';
+    var meta = up.fans > 0 ? fmtCount(up.fans) + ' 粉丝' : (up.videos > 0 ? fmtCount(up.videos) + ' 视频' : '');
+    var tip = up.name + ' 的 B站主页' + (stats ? ' · ' + stats : '');
     return (
-      '<div class="card up-card" data-up-mid="' + up.mid + '" role="link" tabindex="0" title="' + esc(up.name) + ' 的 B站主页">' +
+      '<div class="card up-card" data-up-mid="' + up.mid + '" role="link" tabindex="0" title="' + esc(tip) + '">' +
         '<div class="up-avatar"><img src="' + esc(fixAvatar(up.face)) + '" alt="' + esc(up.name) + '" loading="lazy" referrerpolicy="no-referrer"></div>' +
         '<div class="up-info">' +
           '<div class="up-name">' + esc(up.name) + '</div>' +
@@ -3838,9 +4192,6 @@
     var cards = list.map(studyUpCard).join('');
     return (
       '<div class="dash-section">' +
-        '<div class="section-head">' +
-          '<h2 class="section-title">学习 UP主</h2>' +
-        '</div>' +
         '<div class="up-grid">' +
           '<div class="card up-card up-add-card" id="btnAddUp">' +
             '<div class="up-avatar up-avatar-add"><span class="up-add-icon">+</span></div>' +
@@ -3961,20 +4312,43 @@
       list.push(moved);
     }
     store.set({ customTabs: list });
+    // 落位动画（FLIP）：先记下每个自定义标签的旧位置，重排渲染后再用 WAAPI
+    // 从旧位置补间回 0 —— 标签是"让位滑过去"，而不是瞬移。
+    var beforeLefts = {};
+    var oldTabs = els.dashboard.querySelectorAll('.dash-tab.custom');
+    for (var k = 0; k < oldTabs.length; k++) {
+      var tid = oldTabs[k].dataset.tabCustom;
+      if (tid) beforeLefts[tid] = oldTabs[k].getBoundingClientRect().left;
+    }
     renderDashboard();
+    animateTabsMove(beforeLefts);
   }
 
-  function clearTabDropMarks() {
-    var marks = els.dashboard.querySelectorAll('.drop-before, .drop-after');
-    for (var i = 0; i < marks.length; i++) marks[i].classList.remove('drop-before', 'drop-after');
-  }
-
-  function stopTabDrag() {
-    stopTabAutoScroll();
-    state.dragTabId = '';
-    clearTabDropMarks();
-    var dragging = els.dashboard.querySelectorAll('.dash-tab.dragging');
-    for (var i = 0; i < dragging.length; i++) dragging[i].classList.remove('dragging');
+  /** 拖拽排序落位：把标签从旧位置补间到新位置（见 moveCustomTab） */
+  function animateTabsMove(beforeLefts) {
+    // 减弱动效：不做补间，直接就位
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    var played = false;
+    var tabs = els.dashboard.querySelectorAll('.dash-tab.custom');
+    for (var i = 0; i < tabs.length; i++) {
+      var id = tabs[i].dataset.tabCustom;
+      if (!id || beforeLefts[id] === undefined) continue;
+      var dx = beforeLefts[id] - tabs[i].getBoundingClientRect().left;
+      if (Math.abs(dx) < 1) continue;
+      try {
+        tabs[i].animate(
+          [{ transform: 'translateX(' + dx + 'px)' }, { transform: 'translateX(0)' }],
+          // 松手落位：用强 ease-out，不带过冲。
+          // 之前用的是带 2% 过冲的弹簧曲线，配合"让位"一起看就是整条标签栏在弹 ——
+          // 短距离的落位（一个标签宽）本来也看不出弹性，只剩下抖动感。
+          { duration: 240, easing: 'cubic-bezier(0.23, 1, 0.32, 1)' }
+        );
+        played = true;
+      } catch (e) { /* 不支持 WAAPI 就让它瞬移 */ }
+    }
+    // 补间期间如果正好发生横向滚动 / 窗口 resize，指示条会被"飞行中"的位置带偏；
+    // 落位结束时再对齐一次，保证最终状态一定是对的。
+    if (played) setTimeout(syncTabIndicator, 260);
   }
 
   /** 标签内联重命名（双击标签 / 新建后立即进入） */
@@ -4234,17 +4608,25 @@
 
   var pickerState = null;
 
-  function openContentPicker(tabId) {
+  /**
+   * 打开「添加内容到『X』」选择器。
+   * reuse=true 表示这是从收藏夹视图"返回上一级"回来的：保留上次的分区 / 搜索词 /
+   * 勾选与排序，用户接着刚才的位置继续挑，而不是被弹回第一步。
+   */
+  function openContentPicker(tabId, reuse) {
     var tab = findCustomTab(tabId);
     if (!tab) return;
-    pickerState = {
-      tabId: tabId,
-      section: 'folder',
-      query: '',
-      sel: {},
-      // 各分区各自的排序方式（源收藏夹沿用内容源的做法：外部列表不排序）
-      sortBy: { video: 'star', folderLib: 'star', up: 'star' }
-    };
+    var keep = reuse && pickerState && String(pickerState.tabId) === String(tabId);
+    if (!keep) {
+      pickerState = {
+        tabId: tabId,
+        section: 'folder',
+        query: '',
+        sel: {},
+        // 各分区各自的排序方式（源收藏夹沿用内容源的做法：外部列表不排序）
+        sortBy: { video: 'star', folderLib: 'star', up: 'star' }
+      };
+    }
     openModal(
       '<div class="modal-head"><h2>添加内容到「' + esc(tab.name) + '」</h2><button type="button" class="icon-btn" data-close aria-label="关闭">×</button></div>' +
       '<div class="modal-body">' +
@@ -4272,6 +4654,9 @@
     bindPickerEvents();
     renderPickerList();
     loadPickerFolders();
+    // 复用上次状态时把搜索框的内容也还原（否则列表按旧关键词过滤、输入框却是空的）
+    var qEl = document.getElementById('pickerSearch');
+    if (qEl) qEl.value = pickerState.query || '';
   }
 
   function bindPickerEvents() {
@@ -4332,7 +4717,8 @@
     var tabId = pickerState ? pickerState.tabId : '';
     var tab = findCustomTab(tabId);
     closeModal();
-    pickerState = null;
+    // 注意：这里**不清空 pickerState**。从收藏夹视图点"返回添加内容"时要回到刚才那一层
+    // （同一个分区、同一个搜索词、同一批勾选），否则用户得从第一步重新点一遍。
     state.pendingTabId = tabId;
     openFolder(folderId);
     if (tab) toast('正在添加到「' + tab.name + '」：点视频右上角的绿色 +', 'info', 5000);
