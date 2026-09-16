@@ -24,6 +24,24 @@
   - 涉及文件：`public/player.js`
   - 验证：无头 Edge 实测（`defaultPrevented === true` 即表示快捷键已接管）——① 按真实时序「点击 → 进播放页」后派发 `ArrowRight`：`true`（无需手动点击）；② 点击**播放页内、播放器之外**的标题区之后再派发：`true`（快捷键没掉线）；③ 点击返回主页后再派发：`false`（不会误触后台播放）。
 
+### Changed（变更）
+
+- **动效与交互规范底座**：把散落的时长/缓动收敛成令牌，补上键盘焦点与减弱动效支持。纯样式 + 少量 JS，功能逻辑不变。
+  - 涉及文件：`public/styles.css`、`public/app.js`
+  - 技术细节：
+    - 新增动效令牌：4 档时长 `--dur-1..4`（100 / 150 / 200 / 250ms，**按"意图"命名而不是按数值**）+ 3 条缓动 `--ease-out`（`cubic-bezier(.23,1,.32,1)`）/ `--ease-in-out` / `--ease-state`。26 处 `transition`/`animation` 声明由 0.1/0.12/0.15/0.18/0.2/0.25s 六种硬编码值改为引用令牌——六种时长混用正是"CSS 默认感"的来源；
+    - 按压反馈：`.btn` / `.icon-btn` 由 `translateY(1px)` 改为 `scale(0.97)` / `scale(0.94)`。缩放会连文字和图标一起缩，读起来才像"按下去"；
+    - **去掉卡片统一上浮**：`.card:hover` / `.hcard:hover` 不再 `translateY(-2px)`，只保留边框与阴影强调——一屏卡片全都在动，动效就不再表达任何具体信息。按下反馈交给 `:active` 的 `scale(0.995)`；
+    - **弹窗进出对称**：遮罩与弹窗改用 `@starting-style` 淡入；`closeModal()` 先打 `data-closing` 让两者一起反向补间，等 `transitionend`（兜底 300ms）再移除节点。此前 `closeModal()` 直接清空 `innerHTML`，弹窗是"啪"地消失、遮罩连进场都没有；
+    - 提示条改用 `ease` + 250ms（比弹窗略慢），与弹窗的干脆形成层次；
+    - **键盘焦点**：补统一的 `:focus-visible` 焦点环（此前整份样式表只有 1 处），覆盖按钮、标签页、卡片、选集行、下拉等。卡片本来就有 `role="button" tabindex="0"`，缺的只是可见焦点；
+    - **减弱动效**：`prefers-reduced-motion: reduce` 下移除位移/缩放，保留透明度、颜色与边框变化（"变温和"而不是"变没有"）；
+    - hover 门控：带位移/缩放的 hover 加 `@media (hover: hover) and (pointer: fine)`，避免触屏点按误触发并"粘住"；
+    - 排版：标题字距改用相对单位令牌 `--track-tight`（字号越大越收紧）；品牌标签去掉边框、背景压淡一档，退到第二层；
+    - 清理：删除两个已无引用的 `@keyframes`（`fade-in` / `pop-in`）。
+  - 验证：无头 Edge **真实时间**实测——弹窗进场 `opacity 0 → 1`（`enter_animated=true`）、退场中途采样 `0.066`、400ms 后节点被移除；令牌均正确解析；CSSOM 中 `.card:hover` 已不含 `transform`。改前改后首屏截图基本一致（658.7KB → 658.2KB），确认没有视觉回归。
+  - ⚠️ 踩坑留档：**不要用 `--virtual-time-budget` 验证过渡动画**。虚拟时间不推进合成器动画，会把正常的进场误判成"卡在 opacity 0"；第一轮据此以为弹窗坏了，换真实时间才看到正确的 `0 → 1`。
+
 ## [1.2.2] - 2026-09-12
 
 ### Fixed（修复）

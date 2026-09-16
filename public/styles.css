@@ -27,6 +27,29 @@
   --radius: 14px;
   --radius-lg: 18px;
   --topbar-h: 58px;
+
+  /* ---------- 动效令牌（按"意图"分层，不按数值） ----------
+     来源：Emil Kowalski / Apple 的动效标准（UI 一律 ≤300ms）+ motion-web 的 motion-tokens。
+     之前 0.1/0.12/0.15/0.18/0.2/0.25s 六种时长混用，那正是"CSS 默认感"的来源；
+     现在改手感只需要动这几行。 */
+  --dur-1: 100ms;   /* 按压反馈：手指/鼠标按下的那一瞬 */
+  --dur-2: 150ms;   /* 状态变化：hover、颜色、边框、图标 */
+  --dur-3: 200ms;   /* 面板与提示进出：卡片、提示条、弹窗 */
+  --dur-4: 250ms;   /* 大位移：主题切换、整页过渡 */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);      /* 进出场：快起慢收，UI 默认 */
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);  /* 屏内位移 / 变形 */
+  --ease-state: ease;                              /* 纯颜色 / 边框变化 */
+
+  /* ---------- 字号与字距 ----------
+     系统字体栈已自带 optical sizing；这里补"按字号调字距"：
+     大字号要收紧字距，否则字越大越显得松散（Apple《The Details of UI Typography》）。 */
+  --fs-xs: 12.5px;
+  --fs-sm: 13.5px;
+  --fs-base: 14.5px;
+  --fs-lg: 16px;
+  --fs-xl: 19px;
+  --fs-2xl: 24px;
+  --track-tight: -0.018em;
 }
 
 /* 深色模式：跟随系统（未显式设置主题时） */
@@ -80,7 +103,7 @@ body {
   background: var(--bg);
   color: var(--text);
   -webkit-font-smoothing: antialiased;
-  transition: background 0.25s ease, color 0.25s ease;
+  transition: background var(--dur-4) var(--ease-state), color var(--dur-4) var(--ease-state);
 }
 
 button {
@@ -112,11 +135,11 @@ code {
   font-weight: 500;
   line-height: 1.2;
   background: transparent;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease,
-    transform 0.1s ease, box-shadow 0.15s ease;
+  transition: background var(--dur-2) var(--ease-state), border-color var(--dur-2) var(--ease-state), color var(--dur-2) var(--ease-state), transform var(--dur-1) var(--ease-out), box-shadow var(--dur-2) var(--ease-state);
 }
 
-.btn:active { transform: translateY(1px); }
+/* 按压反馈用缩放而不是位移：缩放会连字和图标一起缩，读起来才像"按下去"（scale 0.95–0.98） */
+.btn:active { transform: scale(0.97); }
 
 .btn.primary {
   background: var(--accent);
@@ -145,9 +168,10 @@ code {
   border: 1px solid transparent;
   border-radius: 50%;
   background: transparent;
-  transition: background 0.15s ease;
+  transition: background var(--dur-2) var(--ease-state), transform var(--dur-1) var(--ease-out);
 }
 .icon-btn:hover { background: var(--surface-2); }
+.icon-btn:active { transform: scale(0.94); }
 
 .icon { width: 18px; height: 18px; flex: none; }
 
@@ -198,8 +222,9 @@ code {
   color: var(--text-2);
   padding: 3px 8px;
   border-radius: 999px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
+  /* 只是品牌旁的一句定位说明，不该和「内容源」按钮抢注意力：
+     去掉边框、背景再压淡一档，让它退到第二层。 */
+  background: color-mix(in srgb, var(--surface-2) 70%, transparent);
 }
 
 .topbar-actions { display: flex; align-items: center; gap: 6px; }
@@ -236,7 +261,9 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
   margin: 0;
   font-size: 24px;
   font-weight: 700;
-  letter-spacing: -0.2px;
+  line-height: 1.2;
+  /* 字号越大越要收紧字距（否则读起来松散），小字反之；用相对单位而不是写死 px。 */
+  letter-spacing: var(--track-tight);
 }
 
 .muted { color: var(--text-2); }
@@ -277,14 +304,16 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
   overflow: hidden;
   cursor: pointer;
   box-shadow: var(--shadow-sm);
-  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+  transition: transform var(--dur-1) var(--ease-out), box-shadow var(--dur-3) var(--ease-state), border-color var(--dur-2) var(--ease-state);
 }
+/* 悬浮只强调"这张卡可以点"，不再统一上浮 2px——
+   一屏卡片全都在动，动效就不再表达任何具体信息（motion-web《design-slop》B1）。
+   按下反馈留给 :active。 */
 .card:hover {
-  transform: translateY(-2px);
   box-shadow: var(--shadow-md);
   border-color: var(--border-strong);
 }
-.card:active { transform: translateY(0); }
+.card:active { transform: scale(0.995); }
 
 .card-cover {
   position: relative;
@@ -425,7 +454,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
   border: none;
   background: none;
   border-bottom: 2px solid transparent;
-  transition: color 0.15s, border-color 0.15s;
+  transition: color var(--dur-2), border-color var(--dur-2);
   white-space: nowrap;
 }
 .dash-tab:hover { color: var(--text); }
@@ -496,13 +525,13 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
   overflow: hidden;
   cursor: pointer;
   box-shadow: var(--shadow-sm);
-  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+  transition: transform var(--dur-1) var(--ease-out), box-shadow var(--dur-3) var(--ease-state), border-color var(--dur-2) var(--ease-state);
 }
 .hcard:hover {
-  transform: translateY(-2px);
   box-shadow: var(--shadow-md);
   border-color: var(--border-strong);
 }
+.hcard:active { transform: scale(0.995); }
 .hcard-remove {
   position: absolute;
   top: 8px;
@@ -521,11 +550,14 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
   justify-content: center;
   cursor: pointer;
   backdrop-filter: blur(4px);
-  transition: background 0.15s ease, transform 0.15s ease;
+  transition: background var(--dur-2) var(--ease-state), transform var(--dur-2) var(--ease-out);
 }
-.hcard-remove:hover {
-  background: rgba(229, 72, 77, 0.85);
-  transform: scale(1.05);
+/* 触屏上 :hover 会在点按时误触发并"粘住"，动效类的 hover 一律加能力查询门控 */
+@media (hover: hover) and (pointer: fine) {
+  .hcard-remove:hover {
+    background: rgba(229, 72, 77, 0.85);
+    transform: scale(1.05);
+  }
 }
 .hcard-cover {
   position: relative;
@@ -598,9 +630,11 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
   cursor: pointer;
   color: var(--border-strong);
   font-size: 15px;
-  transition: color 0.12s ease, transform 0.12s ease;
+  transition: color var(--dur-2) var(--ease-state), transform var(--dur-2) var(--ease-out);
 }
-.stars .star:hover { transform: scale(1.15); }
+@media (hover: hover) and (pointer: fine) {
+  .stars .star:hover { transform: scale(1.15); }
+}
 .stars .star.on { color: #f5a623; }
 .stars .star-note { font-size: 11.5px; color: var(--text-2); margin-left: 4px; }
 
@@ -625,7 +659,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.15s ease;
+  transition: background var(--dur-2) var(--ease-state);
 }
 .card-add:hover { background: var(--accent); }
 .card-add.added { background: var(--accent); cursor: default; }
@@ -691,7 +725,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background var(--dur-2) var(--ease-state), color var(--dur-2) var(--ease-state);
 }
 .card-remove:hover { background: rgba(229, 72, 77, 0.14); color: #e5484d; }
 
@@ -758,7 +792,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85), 0 0 6px rgba(0, 0, 0, 0.55);
   pointer-events: none;
   z-index: 2;
-  transition: bottom 0.18s ease;
+  transition: bottom var(--dur-3) var(--ease-state);
 }
 /* 暂停 / 悬停时控制条出现，字幕自动抬到控制条上方，避免被遮挡 */
 .art-video-player.art-control-show .subtitle-box {
@@ -797,7 +831,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
   white-space: nowrap;
   user-select: none;
   cursor: pointer;
-  transition: background 0.15s ease, opacity 0.15s ease;
+  transition: background var(--dur-2) var(--ease-state), opacity var(--dur-2) var(--ease-out);
 }
 .bilinest-ctl:hover { background: rgba(255, 255, 255, 0.12); }
 .bilinest-ctl.off { opacity: 0.45; }
@@ -846,11 +880,13 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
   color: #fff;
   cursor: pointer;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
-  transition: background 0.15s ease, transform 0.15s ease;
+  transition: background var(--dur-2) var(--ease-state), transform var(--dur-2) var(--ease-out);
 }
-.end-btn:hover {
-  background: rgba(255, 255, 255, 0.22);
-  transform: translateY(-2px);
+@media (hover: hover) and (pointer: fine) {
+  .end-btn:hover {
+    background: rgba(255, 255, 255, 0.22);
+    transform: translateY(-2px);
+  }
 }
 .end-icon { font-size: 34px; line-height: 1; }
 .end-text { font-size: 14px; font-weight: 600; }
@@ -875,7 +911,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
   color: inherit;
   text-decoration: none;
   cursor: pointer;
-  transition: color 0.15s ease;
+  transition: color var(--dur-2) var(--ease-state);
 }
 .meta-row .up-link:hover { color: var(--accent); }
 
@@ -931,7 +967,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
   border-radius: var(--radius-sm);
   padding: 9px 13px;
   font-size: 13.5px;
-  transition: background 0.12s ease, border-color 0.12s ease;
+  transition: background var(--dur-2) var(--ease-state), border-color var(--dur-2) var(--ease-state);
 }
 .episode-row:hover { background: var(--surface-2); }
 .episode-row.active {
@@ -989,8 +1025,14 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
   align-items: center;
   justify-content: center;
   padding: 20px;
-  animation: fade-in 0.15s ease;
+  /* 遮罩和被托起的弹窗要读成"同一个面"：一起淡入、一起淡出。
+     用 @starting-style 而不是 keyframes——元素是每次动态插进 DOM 的，
+     进场从"当前值"补间即可，退场则靠下面的 [data-closing] 反向补间。 */
+  opacity: 1;
+  transition: opacity var(--dur-3) var(--ease-out);
+  @starting-style { opacity: 0; }
 }
+.overlay[data-closing] { opacity: 0; }
 
 .modal {
   width: 100%;
@@ -1003,8 +1045,13 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-md);
   overflow: hidden;
-  animation: pop-in 0.18s ease;
+  transform: none;
+  transition: opacity var(--dur-3) var(--ease-out), transform var(--dur-3) var(--ease-out);
+  /* 弹窗不锚定在某个触发元素上，所以保持居中缩放（transform-origin 用默认 center）；
+     进场不从 scale(0) 起：现实里没有东西是从"无"里冒出来的。 */
+  @starting-style { opacity: 0; transform: translateY(6px) scale(0.98); }
 }
+.overlay[data-closing] .modal { opacity: 0; transform: translateY(6px) scale(0.98); }
 .modal.wide { max-width: 680px; }
 .modal.modal-settings { max-width: 780px; }
 
@@ -1059,7 +1106,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
   font-size: 13.5px;
   text-align: left;
   cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease;
+  transition: background var(--dur-2) var(--ease-state), color var(--dur-2) var(--ease-state);
 }
 .settings-nav-item:hover { background: var(--surface-2); color: var(--text); }
 .settings-nav-item.active {
@@ -1077,12 +1124,6 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
 .modal-body .settings-panel.active { display: block; }
 .modal-body .settings-panel > h3:first-child { margin-top: 0; }
 
-@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
-@keyframes pop-in {
-  from { opacity: 0; transform: translateY(8px) scale(0.985); }
-  to { opacity: 1; transform: none; }
-}
-
 /* 收藏夹列表 */
 .folder-list { display: flex; flex-direction: column; gap: 6px; }
 .folder-row {
@@ -1094,7 +1135,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
   border-radius: var(--radius-sm);
   padding: 10px 12px;
   background: var(--surface);
-  transition: border-color 0.12s ease, background 0.12s ease;
+  transition: border-color var(--dur-2) var(--ease-state), background var(--dur-2) var(--ease-state);
 }
 .folder-row:hover { border-color: var(--border-strong); background: var(--surface-2); }
 .folder-row .folder-info { flex: 1; min-width: 0; }
@@ -1126,7 +1167,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
   border-radius: var(--radius-sm);
   padding: 8px 10px;
 }
-.mine-row.clickable { cursor: pointer; transition: background 0.12s ease; }
+.mine-row.clickable { cursor: pointer; transition: background var(--dur-2) var(--ease-state); }
 .mine-row.clickable:hover { background: var(--surface-2); }
 .mine-row .mine-info { flex: 1; min-width: 0; }
 .mine-row .mine-thumb {
@@ -1159,7 +1200,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
   background: var(--accent);
   color: #fff;
   cursor: pointer;
-  transition: transform 0.12s ease, opacity 0.12s ease;
+  transition: transform var(--dur-2) var(--ease-out), opacity var(--dur-2) var(--ease-out);
 }
 .fv-play:hover { transform: scale(1.08); opacity: 0.9; }
 .fv-play svg { width: 14px; height: 14px; }
@@ -1215,7 +1256,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
   border-radius: var(--radius-sm);
   padding: 8px 12px;
   outline: none;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color var(--dur-2) var(--ease-state), box-shadow var(--dur-2) var(--ease-state);
 }
 .search-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .dash-search-wrap { display: flex; margin-bottom: 18px; }
@@ -1346,7 +1387,9 @@ details.help .steps { margin-top: 4px; }
   font-size: 13.5px;
   opacity: 0;
   transform: translateY(8px);
-  transition: opacity 0.2s ease, transform 0.2s ease;
+  /* 提示条用 ease（不是 ease-out）、时长略长：这是 Sonner 那种"优雅"性格的来源，
+     与弹窗的干脆形成层次。 */
+  transition: opacity var(--dur-4) var(--ease-state), transform var(--dur-4) var(--ease-state);
 }
 .toast.show { opacity: 1; transform: none; }
 .toast.error { border-color: rgba(221, 51, 51, 0.5); color: var(--danger); }
@@ -1457,7 +1500,7 @@ details.help .steps { margin-top: 4px; }
   font-size: 13px;
   color: var(--text-2);
   opacity: 0;
-  transition: opacity 0.15s;
+  transition: opacity var(--dur-2);
 }
 .dash-tab.custom:hover .dash-tab-more { opacity: 1; }
 .dash-tab-more:hover { background: var(--surface-2); color: var(--text); }
@@ -1519,7 +1562,7 @@ details.help .steps { margin-top: 4px; }
   font-family: inherit;
   font-size: 14px;
   cursor: pointer;
-  transition: border-color 0.15s, color 0.15s;
+  transition: border-color var(--dur-2), color var(--dur-2);
 }
 .tab-add-card:hover { border-color: var(--accent); color: var(--accent); }
 .tab-add-icon { font-size: 18px; line-height: 1; }
@@ -1551,7 +1594,7 @@ details.help .steps { margin-top: 4px; }
   font-family: inherit;
   font-size: 13px;
   cursor: pointer;
-  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  transition: border-color var(--dur-2), color var(--dur-2), background var(--dur-2);
 }
 .picker-tab:hover { border-color: var(--border-strong); color: var(--text); }
 .picker-tab.active { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
@@ -1629,5 +1672,38 @@ details.help .steps { margin-top: 4px; }
   .episode-panel {
     position: static;
     max-height: 300px;
+  }
+}
+
+/* ==================================================================
+   交互规范：键盘焦点 / 减弱动效
+   ================================================================== */
+
+/* 键盘焦点。
+   这是个键盘优先的应用（标签页、卡片、方向键快进、弹窗），卡片也都带了
+   role="button" tabindex="0"，但整个样式表此前只有 1 处 :focus-visible——
+   键盘用户完全看不到焦点落在哪。这里统一补：用 outline + offset，
+   不参与布局、也不受元素自身 transform 影响。 */
+:where(.btn, .icon-btn, .dash-tab, .card, .hcard, .folder-row, .episode-row,
+       .picker-row, .tab-menu-item, .settings-nav-item, .select, .up-card,
+       .fv-play, .star, .brand, .dash-tab-more, .dash-tab-new):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.card:focus-visible, .hcard:focus-visible { border-color: var(--accent); }
+
+/* 减弱动效：去掉位移与缩放（前庭刺激），保留透明度 / 颜色 / 边框变化
+   （它们帮助理解状态改变，且不引起不适）。
+   技能标准是"变温和，而不是变没有"——所以不是一刀切地把所有过渡关掉。 */
+@media (prefers-reduced-motion: reduce) {
+  .btn, .icon-btn, .card, .hcard, .end-btn, .fv-play, .hcard-remove, .stars .star,
+  .overlay, .modal, .toast, .dash-tab, .folder-row, .episode-row, .picker-row,
+  .tab-menu-item, .settings-nav-item, .up-card, .select, .bilinest-ctl, .card-add,
+  .card-add-tab, .card-add-pick, .card-remove {
+    transition-property: opacity, background-color, border-color, color, box-shadow, filter;
+  }
+  .btn:active, .icon-btn:active, .card:active, .hcard:active,
+  .stars .star:hover, .end-btn:hover, .hcard-remove:hover, .fv-play:hover {
+    transform: none;
   }
 }

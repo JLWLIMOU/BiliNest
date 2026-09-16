@@ -3146,7 +3146,20 @@
   function closeModal() {
     clearInterval(qrPollTimer);
     qrPollTimer = null;
-    els.modalRoot.innerHTML = '';
+    // 退场要和进场对称：先打上 data-closing 让遮罩与弹窗一起反向补间，
+    // 等过渡结束（或兜底超时）再真正移除节点。以前直接清空 innerHTML，
+    // 弹窗是"啪"地消失的——这是最刺眼的一处观感问题。
+    var overlay = els.modalRoot.firstElementChild;
+    if (!overlay) return;
+    var done = false;
+    var finish = function () {
+      if (done) return;
+      done = true;
+      els.modalRoot.innerHTML = '';
+    };
+    overlay.setAttribute('data-closing', '');
+    overlay.addEventListener('transitionend', finish, { once: true });
+    setTimeout(finish, 300);   // 兜底：减弱动效模式下可能没有过渡事件
   }
 
   /* ---------------- 事件绑定 ---------------- */
