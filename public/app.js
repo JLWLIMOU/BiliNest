@@ -398,6 +398,12 @@
    * 宽高走 scaleX，所以整条只动 transform（合成器层），切标签时是"滑过去"
    * 而不是两端各自淡出淡入。
    */
+  /* 上一次指示条的位置。标签栏每次重建都会生成一个新的指示条节点（从
+     translateX(0) scaleX(0) 起步），不先把旧位置恢复给它，切标签就会变成
+     "从最左端刷一下拉过来"，而不是从上一个标签滑到选中。 */
+  var lastIndTransform = '';
+  var lastIndTone = '';
+
   function syncTabIndicator() {
     var bar = els.dashboard.querySelector('.dash-tabs');
     var ind = els.dashboard.querySelector('.dash-tab-ind');
@@ -406,12 +412,36 @@
     if (!active) { ind.classList.remove('ready'); return; }
     var br = bar.getBoundingClientRect();
     var ar = active.getBoundingClientRect();
-    ind.dataset.tone = active.classList.contains('custom') ? 'custom' : 'system';
+    var tone = active.classList.contains('custom') ? 'custom' : 'system';
     // 注意 scaleX 只接受无单位数字：写成 scaleX(114px) 会让整条声明失效
     // （元素只剩 CSS 里的 scaleX(0)，看起来就是"指示条没出来"）。
-    ind.style.transform =
+    var target =
       'translateX(' + Math.round(ar.left - br.left) + 'px) scaleX(' + Math.round(ar.width) + ')';
+
+    if (ind.dataset.synced === '1') {
+      // 同一个节点（例如横向滚动中反复调用）：正常补间即可，
+      // 滚动期间由 .scrolling 关掉过渡，让指示条 1:1 跟着标签走。
+      ind.style.transform = target;
+      ind.dataset.tone = tone;
+      lastIndTransform = target;
+      lastIndTone = tone;
+      return;
+    }
+
+    // 新节点：先"无过渡"地放到上一次的位置（首次渲染则直接放到目标位置），
+    // 强制一次样式计算让浏览器采纳这个起点，再恢复过渡并补间到目标。
+    ind.style.transition = 'none';
+    ind.style.transform = lastIndTransform || target;
+    ind.dataset.tone = lastIndTone || tone;
     ind.classList.add('ready');
+    void ind.offsetWidth;
+    ind.style.transition = '';
+    ind.dataset.synced = '1';
+
+    ind.style.transform = target;
+    ind.dataset.tone = tone;
+    lastIndTransform = target;
+    lastIndTone = tone;
   }
 
   /* 拖动排序时靠近边缘自动滚动（否则拖不到看不见的标签） */
