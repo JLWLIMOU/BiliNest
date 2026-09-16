@@ -296,6 +296,9 @@
           custHtml +
           '<button type="button" class="dash-tab dash-tab-new" data-tab-new="1" title="新建标签页">＋</button>' +
         '</div>' +
+        // 活动标签的滑动指示条：把它作为"当前在哪一页"的可见证据，而不是让每个标签
+        // 各画一条下划线、切换时硬切（Apple：状态变化要看得见去向）
+        '<span class="dash-tab-ind" aria-hidden="true"></span>' +
       '</div>';
 
     // 搜索框：「视频库」与自定义标签页可用（自定义标签页各自记关键字）
@@ -333,10 +336,14 @@
     if (!sc) return;
     if (!sc.dataset.syncBound) {
       sc.dataset.syncBound = '1';
-      sc.addEventListener('scroll', function () { sc.classList.toggle('scrolled', sc.scrollLeft > 4); });
+      sc.addEventListener('scroll', function () {
+        sc.classList.toggle('scrolled', sc.scrollLeft > 4);
+        syncTabIndicator();   // 指示条在滚动区里，横向滚动时要跟着走
+      });
     }
     sc.classList.toggle('scrolled', sc.scrollLeft > 4);
     sc.classList.toggle('overflowing', sc.scrollWidth > sc.clientWidth);
+    syncTabIndicator();
     var active = sc.querySelector('.dash-tab.active');
     if (!active) return;
     var newBtn = sc.querySelector('.dash-tab-new');
@@ -347,6 +354,29 @@
     var rightLimit = sr.right - reserve;
     if (ar.left < sr.left) sc.scrollLeft -= (sr.left - ar.left) + 8;
     else if (ar.right > rightLimit) sc.scrollLeft += (ar.right - rightLimit) + 8;
+  }
+
+  /**
+   * 把滑动指示条对齐到当前标签。
+   * 用 getBoundingClientRect 而不是 offsetLeft：rect 是视口坐标，天然包含
+   * 「自定义标签横向滚动」的位移，不用自己再减 scrollLeft。
+   * 宽高走 scaleX，所以整条只动 transform（合成器层），切标签时是"滑过去"
+   * 而不是两端各自淡出淡入。
+   */
+  function syncTabIndicator() {
+    var bar = els.dashboard.querySelector('.dash-tabs');
+    var ind = els.dashboard.querySelector('.dash-tab-ind');
+    if (!bar || !ind) return;
+    var active = bar.querySelector('.dash-tab.active');
+    if (!active) { ind.classList.remove('ready'); return; }
+    var br = bar.getBoundingClientRect();
+    var ar = active.getBoundingClientRect();
+    ind.dataset.tone = active.classList.contains('custom') ? 'custom' : 'system';
+    // 注意 scaleX 只接受无单位数字：写成 scaleX(114px) 会让整条声明失效
+    // （元素只剩 CSS 里的 scaleX(0)，看起来就是"指示条没出来"）。
+    ind.style.transform =
+      'translateX(' + Math.round(ar.left - br.left) + 'px) scaleX(' + Math.round(ar.width) + ')';
+    ind.classList.add('ready');
   }
 
   /* 拖动排序时靠近边缘自动滚动（否则拖不到看不见的标签） */
@@ -3379,6 +3409,20 @@
       renderGrid();
     });
     window.addEventListener('resize', sizeEpisodePanel);
+    // 标签指示条是量出来的，窗口尺寸变化（含 720px 断点）后要重新对齐
+    window.addEventListener('resize', syncTabIndicator);
+
+    // 顶栏：滚动时才浮现分隔线。
+    // 常驻的 1px 硬线会把「浮在内容之上的玻璃」说成"一个固定的条"；
+    // 内容真的滑到玻璃下面了，才需要那条线来分离（Apple §12 滚动边缘效果）。
+    var topbarEl = document.querySelector('.topbar');
+    if (topbarEl) {
+      var syncTopbar = function () {
+        topbarEl.classList.toggle('scrolled', window.scrollY > 4);
+      };
+      syncTopbar();
+      window.addEventListener('scroll', syncTopbar, { passive: true });
+    }
     els.btnLoadMore.addEventListener('click', loadMore);
     els.episodeList.addEventListener('click', onEpisodeClick);
     els.fileInput.addEventListener('change', onFileInputChange);

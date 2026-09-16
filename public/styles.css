@@ -46,10 +46,14 @@
   --fs-xs: 12.5px;
   --fs-sm: 13.5px;
   --fs-base: 14.5px;
+  --fs-md: 15px;
   --fs-lg: 16px;
   --fs-xl: 19px;
   --fs-2xl: 24px;
   --track-tight: -0.018em;
+
+  /* 更"厚"的表面用更重的阴影；弹窗是页面上最厚的一层（Apple §12 材质厚度） */
+  --shadow-modal: 0 24px 64px rgba(0, 0, 0, 0.22), 0 2px 8px rgba(0, 0, 0, 0.08);
 }
 
 /* 深色模式：跟随系统（未显式设置主题时） */
@@ -103,6 +107,8 @@ body {
   background: var(--bg);
   color: var(--text);
   -webkit-font-smoothing: antialiased;
+  /* 系统字体自带 optical sizing：字号变大时字腔自动调整。支持则生效，不支持则忽略。 */
+  font-optical-sizing: auto;
   transition: background var(--dur-4) var(--ease-state), color var(--dur-4) var(--ease-state);
 }
 
@@ -131,7 +137,7 @@ code {
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   padding: 8px 14px;
-  font-size: 14px;
+  font-size: var(--fs-base);
   font-weight: 500;
   line-height: 1.2;
   background: transparent;
@@ -197,8 +203,12 @@ code {
   background: color-mix(in srgb, var(--bg) 82%, transparent);
   backdrop-filter: blur(14px) saturate(1.4);
   -webkit-backdrop-filter: blur(14px) saturate(1.4);
-  border-bottom: 1px solid var(--border);
+  /* 默认不画线：玻璃是浮在内容之上的，常驻的 1px 硬线会把它说成"一个固定的条"。
+     内容真的滑到它下面了，才浮现分隔线（Apple §12：用滚动边缘代替硬分割线）。 */
+  border-bottom: 1px solid transparent;
+  transition: border-color var(--dur-2) var(--ease-state);
 }
+.topbar.scrolled { border-bottom-color: var(--border); }
 
 .brand {
   display: flex;
@@ -215,7 +225,7 @@ code {
   box-shadow: var(--shadow-sm);
 }
 
-.brand-name { font-size: 16px; font-weight: 650; letter-spacing: 0.2px; }
+.brand-name { font-size: var(--fs-lg); font-weight: 650; letter-spacing: 0.2px; }
 
 .brand-tag {
   font-size: 12px;
@@ -259,7 +269,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
 
 .page-title {
   margin: 0;
-  font-size: 24px;
+  font-size: var(--fs-2xl);
   font-weight: 700;
   line-height: 1.2;
   /* 字号越大越要收紧字距（否则读起来松散），小字反之；用相对单位而不是写死 px。 */
@@ -267,7 +277,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
 }
 
 .muted { color: var(--text-2); }
-.small { font-size: 12.5px; }
+.small { font-size: var(--fs-xs); }
 
 .sort-wrap {
   display: flex;
@@ -375,7 +385,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
 
 .card-title {
   margin: 0 0 7px;
-  font-size: 14.5px;
+  font-size: var(--fs-base);
   font-weight: 600;
   line-height: 1.45;
   display: -webkit-box;
@@ -391,7 +401,9 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
   justify-content: space-between;
   gap: 8px;
   color: var(--text-2);
-  font-size: 12.5px;
+  font-size: var(--fs-xs);
+  /* 日期、时长这类数字用等宽字形，行与行之间才对得齐 */
+  font-variant-numeric: tabular-nums;
 }
 .card-meta .up {
   white-space: nowrap;
@@ -418,12 +430,33 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
 
 /* 标签页 */
 .dash-tabs {
+  position: relative;   /* 滑动指示条的定位参照 */
   display: flex;
   align-items: stretch;
   gap: 0;
   border-bottom: 1px solid var(--border);
   margin-bottom: 24px;
 }
+/* 活动标签的滑动指示条。
+   以前是每个标签各画一条 2px 下划线、切换时硬切；现在只有这一条，
+   位移和宽度都由 transform 完成（合成器层），切页时是"滑过去"。 */
+.dash-tab-ind {
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  width: 1px;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 2px 2px 0 0;
+  transform: translateX(0) scaleX(0);
+  transform-origin: 0 50%;
+  opacity: 0;
+  pointer-events: none;
+  transition: transform var(--dur-3) var(--ease-out), opacity var(--dur-2) var(--ease-state),
+    background-color var(--dur-2) var(--ease-state);
+}
+.dash-tab-ind[data-tone="custom"] { background: var(--tab-green); }
+.dash-tab-ind.ready { opacity: 1; }
 /* 自定义标签的滚动区：标签太多时横向滚动（隐藏滚动条，滚轮可直接横向滚） */
 .dash-tabs-scroll {
   display: flex;
@@ -449,8 +482,10 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
   padding: 12px 24px;
   cursor: pointer;
   font-weight: 500;
-  font-size: 15px;
-  color: var(--muted);
+  font-size: var(--fs-md);
+  /* 这里原先写 var(--muted)，但那个变量从来没定义过 —— 无效值会让 color 退回
+     "继承"，于是未选中的标签和选中标签一样深，标签栏失去层级。 */
+  color: var(--text-2);
   border: none;
   background: none;
   border-bottom: 2px solid transparent;
@@ -458,10 +493,8 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
   white-space: nowrap;
 }
 .dash-tab:hover { color: var(--text); }
-.dash-tab.active {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
-}
+/* 活动态只改文字颜色，下划线交给上面会滑动的那一条 */
+.dash-tab.active { color: var(--accent); }
 
 /* 自定义标签页：绿色强调 + 可拖动排序 */
 .dash-tab.custom { cursor: grab; }
@@ -469,7 +502,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
 .dash-tab.custom:hover { color: var(--tab-green); }
 .dash-tab.custom.active {
   color: var(--tab-green);
-  border-bottom-color: var(--tab-green);
+  /* 下划线统一交给会滑动的 .dash-tab-ind（它切到自定义标签时会自动变绿） */
 }
 .dash-tab.custom.dragging { opacity: 0.45; }
 .dash-tab.custom.drop-before { box-shadow: inset 3px 0 0 var(--tab-green); }
@@ -1020,7 +1053,10 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
   inset: 0;
   z-index: 50;
   background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(3px);
+  /* 「材质化」而不是只淡入：模糊半径与透明度一起推出来，玻璃才像"到场"，
+     而不是一层单纯变深的颜色。 */
+  backdrop-filter: blur(3px) saturate(1.15);
+  -webkit-backdrop-filter: blur(3px) saturate(1.15);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1029,10 +1065,10 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
      用 @starting-style 而不是 keyframes——元素是每次动态插进 DOM 的，
      进场从"当前值"补间即可，退场则靠下面的 [data-closing] 反向补间。 */
   opacity: 1;
-  transition: opacity var(--dur-3) var(--ease-out);
-  @starting-style { opacity: 0; }
+  transition: opacity var(--dur-3) var(--ease-out), backdrop-filter var(--dur-3) var(--ease-out);
+  @starting-style { opacity: 0; backdrop-filter: blur(0px); }
 }
-.overlay[data-closing] { opacity: 0; }
+.overlay[data-closing] { opacity: 0; backdrop-filter: blur(0px); }
 
 .modal {
   width: 100%;
@@ -1043,7 +1079,8 @@ main { max-width: 1200px; margin: 0 auto; padding: 26px 22px 64px; }
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-md);
+  /* 更大的面读作更厚：阴影更深，上沿留一道极淡的高光（光打在材质上） */
+  box-shadow: var(--shadow-modal), inset 0 1px 0 rgba(255, 255, 255, 0.06);
   overflow: hidden;
   transform: none;
   transition: opacity var(--dur-3) var(--ease-out), transform var(--dur-3) var(--ease-out);
@@ -1706,4 +1743,35 @@ details.help .steps { margin-top: 4px; }
   .stars .star:hover, .end-btn:hover, .hcard-remove:hover, .fv-play:hover {
     transform: none;
   }
+  /* 指示条不滑行，直接就位 */
+  .dash-tab-ind { transition-property: opacity, background-color, border-color, color; }
+}
+
+/* ---------- 另外两条无障碍信号 ----------
+   Apple §14 要求对三条独立信号都有响应，之前只处理了 prefers-reduced-motion。 */
+
+/* 用户要求「降低透明度」：玻璃改实心、去掉模糊，保证文字可读 */
+@media (prefers-reduced-transparency: reduce) {
+  .topbar {
+    background: var(--bg);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .overlay {
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .modal { box-shadow: var(--shadow-md); }
+}
+
+/* 用户要求「更高对比度」：边框与次级文字都加实 */
+@media (prefers-contrast: more) {
+  :root {
+    --border: color-mix(in srgb, var(--text) 30%, transparent);
+    --border-strong: color-mix(in srgb, var(--text) 48%, transparent);
+    --text-2: color-mix(in srgb, var(--text) 80%, transparent);
+  }
+  .topbar { border-bottom-color: var(--border); }
+  .card, .hcard, .modal, .select, .episode-row, .folder-row { border-color: var(--border-strong); }
 }
