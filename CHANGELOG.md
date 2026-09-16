@@ -21,8 +21,10 @@
 - **新增维护者小工具 `tools/traffic.mjs`（`npm run traffic`）**：一行命令给出仓库的流量周报 —— 近 7 天浏览 / 独立访客（与上一周对比）、克隆、新增 star（谁点的、什么时候）、来源渠道、热门页面。
   - 数据取自 GitHub 的 traffic / stargazers 接口，需要仓库写权限，所以这是**维护者本机用的工具**；它不在 npm 包的 `files` 白名单里，不会随包分发。
   - 常用法：`npm run traffic` 直接看；`--out 文件.md` 写一份 markdown；`--json` 输出原始数据；`--install-task` 注册 Windows 计划任务（每周一 10:00 把报告写到 `%APPDATA%\BiliNest\traffic-report.md`），`--remove-task` 卸掉。
+  - 另有 `--html [文件]` + `--open`：生成一份自包含的 HTML 报告（深浅色自适应、数字带涨跌色、底部带仓库 / Releases / 流量页链接）并打开；`tools/traffic-report.vbs` 是它的静默启动器（不弹控制台窗口），桌面快捷方式指向它。
+  - 计划任务改成写 **HTML** 报告（`%APPDATA%\BiliNest\traffic-report.html`），和快捷方式看到的格式一致。
   - 为什么做成脚本：traffic 接口只有 14 天窗口、网页还得一层层点，这个脚本一次调用就能给出"本周 vs 上周 + 新增 star + 来源"，也让"周报"不再依赖任何 GUI。
-  - 验证：`npm run traffic` 实测输出当前数据（2 star；来源 `github.com` / `link.zhihu.com`）；`--out` 正常写出 markdown；`--install-task` 后 `schtasks /Query` 显示「2026/9/21 10:00 / Ready」，手动 `schtasks /Run` 一次后 `%APPDATA%\BiliNest\traffic-report.md` 正常生成。
+  - 验证：`npm run traffic` 实测输出当前数据（2 star；来源 `github.com` / `link.zhihu.com`）；`--out` / `--html` 均正常写出；HTML 报告在浏览器里渲染确认（浅色卡片、涨跌色、链接可点）；`--install-task` 后 `schtasks /Query` 显示「2026/9/21 10:00 / Ready」；桌面快捷方式 `BiliNest 流量报告.lnk` 指向 `tools/traffic-report.vbs`，实测双击链路会在 `%APPDATA%\BiliNest\traffic-report.html` 生成最新报告并打开。
 
 ## [1.3.1] - 2026-09-16
 
