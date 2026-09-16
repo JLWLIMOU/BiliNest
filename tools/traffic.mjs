@@ -143,8 +143,9 @@ function reportMarkdown(data) {
 function dailySeries(data) {
   const map = new Map();
   const put = (list, key) => (list || []).forEach((d) => {
-    const day = new Date(d.timestamp).toISOString().slice(5, 10);   // MM-DD
-    const cur = map.get(day) || { day, views: 0, uniques: 0, clones: 0, cloneUniques: 0 };
+    const full = new Date(d.timestamp).toISOString().slice(0, 10);  // YYYY-MM-DD
+    const day = full.slice(5);                                        // MM-DD（图上显示用）
+    const cur = map.get(day) || { day, full, views: 0, uniques: 0, clones: 0, cloneUniques: 0 };
     cur[key] = d.count;
     if (key === 'views') cur.uniques = d.uniques;
     if (key === 'clones') cur.cloneUniques = d.uniques;
@@ -277,20 +278,39 @@ function reportHtml(data) {
     [{ label: '克隆', color: 'var(--c-clones)', values: daily.map((d) => d.clones), dashed: true }],
     daily, { label: '克隆趋势', window: n }
   );
-  // 累计 star：GitHub 没有"每日新增"接口，但 stargazers 带时间戳，
-  // 用「总数 − 窗口内新增」当起点往上累加，就能画出同一条时间轴上的累计曲线
-  const starsByDay = {};
-  starList.forEach((s) => {
-    if (!s.at) return;
-    const day = new Date(s.at).toISOString().slice(5, 10);
-    starsByDay[day] = (starsByDay[day] || 0) + 1;
-  });
-  const starsInWindow = daily.reduce((a, d) => a + (starsByDay[d.day] || 0), 0);
-  let starAcc = (data.meta.stargazers_count || 0) - starsInWindow;
-  const starSeries = daily.map((d) => { starAcc += starsByDay[d.day] || 0; return starAcc; });
+  /*
+   * Star 累计：逐日算"这一天结束时已经有多少颗星"。
+   *
+   * 不能用「总数 − 窗口内新增」倒推起点 —— 那样会把**今天才点的星**画在窗口开头，
+   * 看起来像早就有了（上一版就是这么错的）。
+   * 另外轴要一直画到**今天**：traffic 接口有约一天延迟（最后一个点是昨天），
+   * 但 star 是实时拿的，今天新增的那颗必须出现在图上。
+   */
+  const isoDay = (v) => new Date(v).toISOString().slice(0, 10);
+  const starDayList = [];
+  {
+    const firstStar = starList.reduce((a, s) => (!a || (s.at && s.at < a) ? s.at : a), null);
+    // 注意：这里必须用**带年份**的完整日期做起点，再据此逐日迭代 ——
+    // `new Date('08-27T00:00:00Z')` 这种缺年份的字符串在 JS 里是 Invalid Date，
+    // 循环一次都不会跑，图就整条没了（上一版正是这么错的）。
+    const start = [
+      daily.length ? daily[0].full : null,
+      firstStar ? isoDay(firstStar) : null,
+      data.meta.created_at ? isoDay(data.meta.created_at) : null
+    ].filter(Boolean).sort()[0];
+    const today = new Date();
+    today.setHours(23, 59, 59, 999);
+    if (start) {
+      for (let d = new Date(start + 'T00:00:00Z'); d.getTime() <= today.getTime(); d.setUTCDate(d.getUTCDate() + 1)) {
+        const full = new Date(d).toISOString().slice(0, 10);   // traffic 的日戳也是 UTC 零点，同一套口径
+        starDayList.push({ day: full.slice(5), full });
+      }
+    }
+  }
+  const starSeries = starDayList.map((d) => starList.filter((s) => s.at && isoDay(s.at) <= d.full).length);
   const chartStars = svgChart(
     [{ label: '累计 star', color: 'var(--c-stars)', values: starSeries, fill: true }],
-    daily, { label: 'Star 累计趋势', window: n }
+    starDayList, { label: 'Star 累计趋势', window: n }
   );
   const refBars = svgBars(
     (data.referrers || []).map((r) => ({ label: r.referrer, value: r.count })),
@@ -380,7 +400,7 @@ function reportHtml(data) {
     <div class="legend"><span><i class="dash" style="background:var(--c-clones)"></i>克隆次数</span></div>
   </div>
   <div class="chart-wrap">
-    <div class="chart-title">Star 累计 <span class="k">近 ${daily.length} 天</span></div>
+    <div class="chart-title">Star 累计 <span class="k">${starDayList.length ? starDayList[0].day + ' 起（含今天）' : ''}</span></div>
     ${chartStars}
     <div class="legend"><span><i style="background:var(--c-stars)"></i>累计 star</span></div>
   </div>
