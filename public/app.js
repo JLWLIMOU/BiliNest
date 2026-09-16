@@ -311,6 +311,10 @@
   function studyEntryHtml() {
     var sum = studySummary();
     var mins = Math.round(sum.totalSec / 60);
+    // 一点记录都还没有时整个入口都不出现 —— 标题行保持和学习统计上线前一模一样，
+    // 不显示"0 分钟"（读起来像被扣分，也平白多出一块东西）。
+    // 累计不足 1 分钟时同样按住不表，等真的学了再露面。
+    if (!mins) return '';
     return '<button type="button" class="study-entry" data-study-open title="查看学习记录">' +
       '<span class="study-entry-label">一共学了</span>' +
       '<span class="study-entry-num">' + mins + '</span>' +
