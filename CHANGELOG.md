@@ -14,6 +14,24 @@
 
 ---
 
+## [Unreleased]
+
+### Added（新增）
+
+- **设置 →「关于」里可以直接检查更新，并一键拉取**（不必再去 Releases 页面翻）。
+  - 检查：本地服务代理 GitHub 的 release 接口（`GET /api/update/check`，结果缓存 10 分钟）——前端不碰跨域、也不需要 token。界面显示"已是最新 vX.Y.Z"或"有新版本：v当前 → v最新（发布于 …）"，有新版本时还能展开看这次更新了什么（release 正文）。
+  - 一键更新按你这台机器的装法自动选：
+    - **安装包版**：给「下载安装包（x MB）」按钮，直接下 `BiliNest-x.y.z-Setup.exe`；覆盖安装即可，数据不动。
+    - **源码版（git 检出）**：给「拉取源码更新」按钮 → 服务端执行 `git pull --ff-only`（本地有改动会直接失败、不动你的工作区），成功后再提示重启服务。
+  - 涉及文件：`server.mjs`、`public/app.js`、`public/styles.css`
+  - 验证（无头 Edge + 真实 GitHub API）：① 本地 1.3.0（= 最新）→ 打开设置即显示"已是最新版本 v1.3.0（最新版发布于 2026-09-16）"，下载 / 拉取按钮隐藏，只留「打开 Releases」；② 把 `package.json` 临时改成 1.2.0 重启 → "有新版本：v1.2.0 → v1.3.0"，出现「下载安装包（2.3 MB）」（指向真实附件）与「拉取源码更新」，并展开 release 正文；③ `POST /api/update/pull` 实测返回 `{ok:true, output:"Already up to date."}`（仅同源可写，门槛与备份接口一致）。
+
+- **支持 `npx bilinest` 直接跑**（给 npm 分发用）。
+  - 新增 `bin/bilinest.mjs`：定位端口（`--port` 可指定，被占用时服务端自动顺延）→ 载入 `server.mjs` → 轮询 `/api/health` 确认起来了 → 打开默认浏览器（`--no-open` 可关掉）。
+  - `package.json` 补 `bin` / `files` / `repository` / `homepage` / `bugs`，并去掉 `private`（带着它 npm 拒绝发布）。数据目录不变（`%APPDATA%\BiliNest`），与安装包版可以混用。
+  - 验证：本机 `node bin/bilinest.mjs --no-open` 实测启动并打印访问地址；`npm pack --dry-run` 显示 25 个文件、440 KB。
+  - ⚠️ 踩坑留档：Windows 上 `import(path.join(root, 'server.mjs'))` 会报 `ERR_UNSUPPORTED_ESM_URL_SCHEME` —— ESM 不接受 `D:\...` 这样的裸路径，必须用 `pathToFileURL()` 转成 `file://`。
+
 ## [1.3.0] - 2026-09-16
 
 ### Fixed（修复）

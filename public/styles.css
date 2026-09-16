@@ -1413,6 +1413,22 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
 .modal-body .settings-panel.active { display: block; }
 .modal-body .settings-panel > h3:first-child { margin-top: 0; }
 
+/* 设置 →「关于」里的更新区：状态行 + 可展开的更新说明 */
+.update-row { flex-wrap: wrap; gap: 8px; }
+.update-notes {
+  margin-top: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--fill);
+  color: var(--text-2);
+  font-size: 12.5px;
+  line-height: 1.65;
+  white-space: pre-wrap;   /* release 正文是 markdown 纯文本，保留换行即可 */
+  word-break: break-word;
+}
+
 /* 收藏夹列表 */
 .folder-list { display: flex; flex-direction: column; gap: 6px; }
 .folder-row {

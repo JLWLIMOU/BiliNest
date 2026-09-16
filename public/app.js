@@ -3287,6 +3287,20 @@
             '第三方客户端通常不符合平台的用户协议与 API 使用规范，账号风险由使用者自行承担。<br>播放器内核版本：' +
             (window.BiliNestPlayer && window.BiliNestPlayer.VERSION ? 'v' + window.BiliNestPlayer.VERSION : '未知') +
             '（若低于 v3，请强制刷新页面 Ctrl+F5 后重试）</p>' +
+          /*
+           * 版本更新：检查走本地服务代理 GitHub 的 release 接口（见 server.mjs 的
+           * /api/update/check），所以前端不用碰跨域、也不需要 token。
+           * 是 git 检出的话还能直接"拉取源码更新"；否则给安装包下载。
+           */
+          '<h3>更新</h3>' +
+          '<div class="row update-row">' +
+            '<button id="btnCheckUpdate" type="button" class="btn ghost">检查更新</button>' +
+            '<a id="btnDownloadUpdate" class="btn primary" target="_blank" rel="noopener noreferrer" hidden>下载安装包</a>' +
+            '<button id="btnPullUpdate" type="button" class="btn ghost" hidden>拉取源码更新</button>' +
+            '<a id="btnUpdatePage" class="btn ghost" target="_blank" rel="noopener noreferrer" hidden>打开 Releases</a>' +
+          '</div>' +
+          '<p id="updateStatus" class="muted small">点「检查更新」看看有没有新版本。</p>' +
+          '<details id="updateNotesWrap" class="help" hidden><summary>这次更新了什么</summary><div id="updateNotes" class="update-notes"></div></details>' +
           '<div class="row">' + guideBtn + '</div>' +
         '</section>' +
         '</div>' +
@@ -3295,6 +3309,98 @@
     );
     bindClose();
     bindSettingsEvents();
+  }
+
+  /* ---------------- 版本更新（设置 → 关于） ---------------- */
+
+  function fmtMB(bytes) {
+    return bytes ? (bytes / 1024 / 1024).toFixed(1) + ' MB' : '';
+  }
+
+  function fmtDay(iso) {
+    if (!iso) return '';
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+
+  var updateCheckedOnce = false;
+
+  /** 检查更新。manual=false 时是打开设置时的静默检查（服务端有 10 分钟缓存，代价很低） */
+  async function checkForUpdate(manual) {
+    var status = document.getElementById('updateStatus');
+    if (!status) return;
+    var btn = document.getElementById('btnCheckUpdate');
+    if (btn) btn.disabled = true;
+    status.textContent = '正在检查更新…';
+    try {
+      var res = await fetch('/api/update/check' + (manual ? '?force=1' : ''), { cache: 'no-store' });
+      renderUpdateResult(await res.json());
+    } catch (e) {
+      status.textContent = '检查更新失败：' + (e.message || '网络错误') + '。可以点「打开 Releases」手动看看。';
+      var page = document.getElementById('btnUpdatePage');
+      if (page) { page.href = 'https://github.com/JLWLIMOU/BiliNest/releases'; page.hidden = false; }
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  function renderUpdateResult(d) {
+    var status = document.getElementById('updateStatus');
+    if (!status) return;
+    var dl = document.getElementById('btnDownloadUpdate');
+    var pull = document.getElementById('btnPullUpdate');
+    var page = document.getElementById('btnUpdatePage');
+    var notesWrap = document.getElementById('updateNotesWrap');
+    var notes = document.getElementById('updateNotes');
+    [dl, pull, page].forEach(function (el) { if (el) el.hidden = true; });
+    if (notesWrap) notesWrap.hidden = true;
+
+    if (!d || !d.ok) {
+      status.textContent = '检查失败：' + ((d && d.message) || '未知错误') + '。可以点「打开 Releases」手动看看。';
+      if (page && d && d.htmlUrl) { page.href = d.htmlUrl; page.hidden = false; }
+      return;
+    }
+    if (!d.hasUpdate) {
+      status.textContent = '已是最新版本 v' + d.current +
+        (d.publishedAt ? '（最新版发布于 ' + fmtDay(d.publishedAt) + '）' : '') + '。';
+      if (page) { page.href = d.htmlUrl; page.hidden = false; }
+      return;
+    }
+    status.textContent = '有新版本：v' + d.current + ' → v' + d.latest +
+      (d.publishedAt ? '，发布于 ' + fmtDay(d.publishedAt) : '') + '。';
+    var setup = (d.assets || []).find(function (a) { return /Setup\.exe$/i.test(a.name); });
+    if (setup && dl) {
+      dl.href = setup.url;
+      dl.textContent = '下载安装包（' + fmtMB(setup.size) + '）';
+      dl.hidden = false;
+    }
+    if (d.canGitPull && pull) pull.hidden = false;
+    if (!setup && page) { page.href = d.htmlUrl; page.hidden = false; }
+    if (d.notes && notes && notesWrap) {
+      notes.textContent = d.notes;
+      notesWrap.hidden = false;
+    }
+  }
+
+  async function pullUpdate() {
+    var status = document.getElementById('updateStatus');
+    var pull = document.getElementById('btnPullUpdate');
+    if (pull) pull.disabled = true;
+    if (status) status.textContent = '正在拉取更新…';
+    try {
+      var res = await fetch('/api/update/pull', { method: 'POST' });
+      var d = await res.json();
+      if (status) {
+        status.textContent = d.ok
+          ? (d.changed ? '已拉取新代码。' : '已经是最新代码。') + '接下来：关掉本地服务的窗口，再双击桌面快捷方式重启（然后刷新页面）。'
+          : '拉取失败：' + (d.message || '未知错误');
+      }
+    } catch (e) {
+      if (status) status.textContent = '拉取失败：' + (e.message || '网络错误');
+    } finally {
+      if (pull) pull.disabled = false;
+    }
   }
 
   function bindSettingsEvents() {
@@ -3314,6 +3420,15 @@
     if (guideBtnEl) guideBtnEl.addEventListener('click', openGuideModal);
     var shutdownBtn = document.getElementById('btnShutdown');
     if (shutdownBtn) shutdownBtn.addEventListener('click', onShutdown);
+    var checkUpdateBtn = document.getElementById('btnCheckUpdate');
+    if (checkUpdateBtn) checkUpdateBtn.addEventListener('click', function () { checkForUpdate(true); });
+    var pullUpdateBtn = document.getElementById('btnPullUpdate');
+    if (pullUpdateBtn) pullUpdateBtn.addEventListener('click', pullUpdate);
+    // 打开设置时静默检查一次（服务端有 10 分钟缓存，不会频繁打 GitHub）
+    if (!updateCheckedOnce) {
+      updateCheckedOnce = true;
+      checkForUpdate(false);
+    }
     // 左侧栏位切换
     var navItems = els.modalRoot.querySelectorAll('[data-settings-tab]');
     for (var i = 0; i < navItems.length; i++) {

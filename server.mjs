@@ -25,6 +25,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import os from 'node:os';
+import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -57,6 +58,82 @@ const APP_VERSION = (() => {
     return '';
   }
 })();
+
+/* ------------------------------------------------------------------
+ * 0.2 版本更新检查
+ *     设置 →「关于」里的"检查更新"用。走 GitHub 官方 release 接口：
+ *       - 由本地服务去请求，前端不用碰跨域，也不需要 token（公开仓库）；
+ *       - 结果缓存 10 分钟，避免频繁刷新把匿名配额（60 次/小时）用完。
+ *     另外判断这份代码是不是 git 检出：是的话，界面上除了"下载安装包"，
+ *     还能直接"拉取更新"（git pull --ff-only），省掉手动开终端。
+ * ------------------------------------------------------------------ */
+const UPDATE_REPO = 'JLWLIMOU/BiliNest';
+const UPDATE_RELEASE_API = `https://api.github.com/repos/${UPDATE_REPO}/releases/latest`;
+const UPDATE_CACHE_MS = 10 * 60 * 1000;
+const IS_GIT_CHECKOUT = fs.existsSync(path.join(__dirname, '.git'));
+let updateCache = { at: 0, data: null };
+
+/** 比较 x.y.z；a > b 返回 1，相等 0，小于 -1（缺位按 0 处理） */
+function compareVersion(a, b) {
+  const pa = String(a || '').split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = String(b || '').split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] || 0;
+    const y = pb[i] || 0;
+    if (x > y) return 1;
+    if (x < y) return -1;
+  }
+  return 0;
+}
+
+async function checkUpdate(force) {
+  if (!force && updateCache.data && Date.now() - updateCache.at < UPDATE_CACHE_MS) {
+    return updateCache.data;
+  }
+  const res = await fetch(UPDATE_RELEASE_API, {
+    headers: { 'User-Agent': 'BiliNest/' + APP_VERSION, Accept: 'application/vnd.github+json' }
+  });
+  if (!res.ok) throw new Error('GitHub 返回 ' + res.status);
+  const rel = await res.json();
+  const latest = String(rel.tag_name || '').replace(/^v/i, '');
+  const assets = (rel.assets || []).map((a) => ({
+    name: a.name,
+    size: a.size,
+    url: a.browser_download_url
+  }));
+  const data = {
+    ok: true,
+    current: APP_VERSION,
+    latest,
+    hasUpdate: compareVersion(latest, APP_VERSION) > 0,
+    publishedAt: rel.published_at || rel.created_at || '',
+    notes: rel.body || '',
+    htmlUrl: rel.html_url || `https://github.com/${UPDATE_REPO}/releases`,
+    assets,
+    canGitPull: IS_GIT_CHECKOUT
+  };
+  updateCache = { at: Date.now(), data };
+  return data;
+}
+
+/** 拉取源码更新（只对 git 检出有意义）：--ff-only，本地有改动就直接失败，不动你的工作区 */
+function gitPull() {
+  return new Promise((resolve) => {
+    if (!IS_GIT_CHECKOUT) {
+      resolve({ ok: false, message: '这份代码不是 git 检出，请用安装包更新' });
+      return;
+    }
+    execFile('git', ['pull', '--ff-only'], { cwd: __dirname, timeout: 60000, windowsHide: true }, (err, stdout, stderr) => {
+      const output = [stdout, stderr].filter(Boolean).join('\n').trim();
+      if (err) {
+        resolve({ ok: false, message: (err.message || 'git pull 失败') + (output ? '\n' + output : ''), output });
+        return;
+      }
+      updateCache = { at: 0, data: null };   // 更新完让下次检查重新拉
+      resolve({ ok: true, output, changed: !/Already up[ -]to[ -]date/i.test(output) });
+    });
+  });
+}
 
 /** 读取请求体（限长，避免被塞大文件） */
 function readJsonBody(req, limit = 4096) {
@@ -1341,12 +1418,34 @@ const server = http.createServer((req, res) => {
         return res.end();
       }
       // 只读接口之外，仅放行白名单里的本机写接口
-      const POST_PATHS = new Set(['/api/state/backup']);
+      const POST_PATHS = new Set(['/api/state/backup', '/api/update/pull']);
       if (req.method !== 'GET' && req.method !== 'HEAD' && !(req.method === 'POST' && POST_PATHS.has(url.pathname))) {
         return sendJson(res, 405, { code: -405, message: '仅支持 GET 请求' });
       }
       if (url.pathname === '/api/health') {
         return sendJson(res, 200, { ok: true, app: 'bilinest', oauthEnabled: oauth.enabled, version: 1, appVersion: APP_VERSION });
+      }
+      // 版本更新：查询 GitHub 最新 release（服务端代理，前端不碰跨域；结果缓存 10 分钟）
+      if (url.pathname === '/api/update/check') {
+        try {
+          const data = await checkUpdate(url.searchParams.get('force') === '1');
+          return sendJson(res, 200, data);
+        } catch (e) {
+          return sendJson(res, 200, {
+            ok: false,
+            message: e.message || '检查更新失败',
+            current: APP_VERSION,
+            canGitPull: IS_GIT_CHECKOUT,
+            htmlUrl: `https://github.com/${UPDATE_REPO}/releases`
+          });
+        }
+      }
+      // 拉取源码更新：只有 git 检出可用；仅同源可写（和备份接口同一道门槛）
+      if (url.pathname === '/api/update/pull') {
+        if (!isSameOriginRequest(req)) {
+          return sendJson(res, 403, { ok: false, message: '仅允许本机同源请求' });
+        }
+        return sendJson(res, 200, await gitPull());
       }
       // 客户端状态备份（仅供换环境时无感迁移）：仅同源可读写
       if (url.pathname === '/api/state/backup') {
