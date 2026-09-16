@@ -303,12 +303,18 @@
     return h + ' 小时 ' + m + ' 分';
   }
 
-  /** 继续学习大标题旁的入口：累计时长 + 「学习记录 ›」 */
+  /**
+   * 继续学习大标题旁的入口。
+   * 这里**一律显示分钟**（不折算成小时）——「240 分钟」比「4 小时」更有成就感；
+   * 小时只在面板内部规规矩矩地显示。数字放大但用次级色，不与「继续学习」抢视线。
+   */
   function studyEntryHtml() {
     var sum = studySummary();
-    var label = sum.totalSec >= 60 ? '一共学了 ' + fmtWatch(sum.totalSec) : '开始记录学习时长';
+    var mins = Math.round(sum.totalSec / 60);
     return '<button type="button" class="study-entry" data-study-open title="查看学习记录">' +
-      '<span class="study-entry-total">' + esc(label) + '</span>' +
+      '<span class="study-entry-label">一共学了</span>' +
+      '<span class="study-entry-num">' + mins + '</span>' +
+      '<span class="study-entry-label">分钟</span>' +
       '<span class="study-entry-go">学习记录 ›</span>' +
     '</button>';
   }

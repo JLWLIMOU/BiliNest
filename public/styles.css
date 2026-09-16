@@ -704,19 +704,28 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
 .study-entry {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  padding: 7px 12px 7px 14px;
+  gap: 5px;
+  padding: 5px 12px 5px 14px;
   border: 0;
   border-radius: 999px;
   background: var(--fill);
   color: var(--text-2);
   font: inherit;
-  font-size: 13px;
+  font-size: 12.5px;
   cursor: pointer;
   transition: background var(--dur-2) var(--ease-state), transform var(--dur-3) var(--ease-spring-soft);
 }
-.study-entry-total { font-variant-numeric: tabular-nums; }
-.study-entry-go { color: var(--accent); font-weight: 600; }
+.study-entry-label { color: var(--text-2); }
+/* 分钟数是这里的重点：放大 + 次级色（有分量但不跟 28px 的「继续学习」抢视线） */
+.study-entry-num {
+  font-size: 19px;
+  font-weight: 600;
+  color: var(--text-2);
+  line-height: 1.1;
+  letter-spacing: -0.3px;
+  font-variant-numeric: tabular-nums;
+}
+.study-entry-go { color: var(--accent); font-weight: 600; margin-left: 5px; }
 @media (hover: hover) and (pointer: fine) {
   .study-entry:hover { background: color-mix(in srgb, var(--fill) 60%, var(--text) 8%); }
 }
