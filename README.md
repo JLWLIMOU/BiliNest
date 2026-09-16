@@ -46,6 +46,8 @@ BiliNest 的思路很简单：**只把你指定的内容留下来，其它的全
 - **Built-in updates**: `Settings → About → Update` checks the latest release and, with one confirmation, either pulls the source and restarts the local server (git checkout) or downloads the Windows installer — no terminal needed.
 - **Unofficial**: a third-party hobby project — not affiliated with, endorsed by, or sponsored by Bilibili. For personal study use only; please respect Bilibili's terms of service.
 
+**How it's built**: AI-assisted development — requirements, review, testing and releases are done by the maintainer; most code is generated with OpenAI Codex under his direction and then verified by hand (every change ships with a reproduction/verification note in [CHANGELOG.md](./CHANGELOG.md)). Codex is a tool, not a contributor or maintainer of this project.
+
 ### Why BiliNest?
 
 Bilibili is great for studying, but its home feed, comments and recommendations are engineered to keep you scrolling. BiliNest strips all of that away: you pick exactly what to watch (a folder, a few videos, or local files), and the app remembers your progress across multi-part series — so you actually finish what you start.
@@ -371,4 +373,6 @@ Windows 安装包用 Inno Setup 6 编译，其中文语言文件来自 Inno Setu
 
 ## 关于本项目
 
-> 本项目以 **vibe coding**（AI 辅助编程）方式完成：主体代码由 AI 协作生成，作者负责需求、评审与发布。仅供个人学习交流使用。
+> 本项目以 **AI 辅助开发**（vibe coding）方式完成：**需求、评审、逐条实测与发布由作者负责**；代码主要由 **OpenAI Codex** 在作者指导下生成，并经过人工核对 —— 每处改动都跑过浏览器实测或自动化验证（见 [CHANGELOG.md](./CHANGELOG.md) 里各条的「验证」）。
+>
+> Codex 是开发工具，**不是本项目的贡献者、维护者或责任人**；项目的问题与后续维护由作者承担。仅供个人学习交流使用。
