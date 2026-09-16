@@ -21,6 +21,7 @@ window.BiliNestPlayer = (function () {
 
   var els = {
     player: document.getElementById('customPlayer'),
+    playerView: document.getElementById('playerView'),   // 整个播放页（画面 + 选集面板 + 标题区）
     canvas: null,   // ArtPlayer 初始化后指向弹幕画布
     endOverlay: null // ArtPlayer 初始化后指向播放结束浮层
   };
@@ -572,10 +573,29 @@ window.BiliNestPlayer = (function () {
   function armHotkeys() {
     setTimeout(function () {
       if (!state.art) return;
+      if (els.playerView && els.playerView.hidden) return;   // 已经离开播放页，别抢快捷键
       state.art.isFocus = true;
       state.art.isInput = false;
     }, 0);
   }
+
+  /**
+   * 播放页范围内的任何点击，都重新让快捷键生效。
+   *
+   * 背景：ArtPlayer 只把「点击落在播放器元素内」当作 focus，落在外面就判为 blur
+   * 并让快捷键失效——所以看课时点一下右侧选集面板、再按空格就没反应了。这里把
+   * 判定范围放宽到整个播放页（#playerView：画面、上下集、选集面板、标题区）：
+   * 只要还在播放页，快捷键就一直可用。离开播放页时 stop() 会把它关掉，避免回到
+   * 主页后按空格误触发后台播放。
+   *
+   * 同样必须延到下一个事件循环（armHotkeys 里做了）：ArtPlayer 自己的
+   * document:click 处理器会把 isFocus 覆写为 false，同步设置会被它盖掉。
+   */
+  document.addEventListener('click', function (e) {
+    if (!state.art) return;
+    if (!els.playerView || !els.playerView.contains(e.target)) return;
+    armHotkeys();
+  });
 
   async function load(bvid, cid, resumeSeconds, opts) {
     opts = opts || {};
@@ -947,6 +967,8 @@ window.BiliNestPlayer = (function () {
 
   function stop() {
     reset();
+    // 离开播放页后不要让快捷键继续作用于后台播放器
+    if (state.art) state.art.isFocus = false;
   }
 
   // 视频画面区域的手势（单击播放/暂停、双击全屏）由我们自己接管
