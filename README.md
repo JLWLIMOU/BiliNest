@@ -8,12 +8,17 @@
 [![License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](#)
 [![Zero Deps](https://img.shields.io/badge/dependencies-zero-success)](#)
+[![Release](https://img.shields.io/github/v/release/JLWLIMOU/BiliNest?label=latest)](https://github.com/JLWLIMOU/BiliNest/releases/latest)
 
 > 📝 更新历史见 [CHANGELOG.md](./CHANGELOG.md)。
 
 > 只看你指定的收藏夹 / 手动添加的视频 / 本地文件，**没有推荐、首页、评论、点赞、动态**。画质切换、弹幕、字幕全部在页面内完成，永不跳转 B 站官网。
 
 ![BiliNest 主页：视频库与自定义标签页](docs/img/dashboard.png)
+
+![BiliNest 播放页：选集与内置播放器](docs/img/player.png)
+
+> 上面两张都是**演示数据**（讲义画面与课程标题都是占位内容），不是任何人的真实学习列表。
 
 > ⚠️ **非官方声明**：BiliNest 是第三方个人开源项目，**与哔哩哔哩（Bilibili）没有任何隶属、合作或授权关系**，也不使用其商标与品牌标识。仅供**个人学习自用**：请遵守 B 站用户协议，勿用于商业用途，勿再分发通过本工具获取的任何内容。
 
@@ -38,6 +43,7 @@ BiliNest 的思路很简单：**只把你指定的内容留下来，其它的全
 - **Local-first & private**: a tiny zero-dependency Node proxy on `127.0.0.1` forwards only whitelisted read-only Bilibili APIs. Your credentials stay in your own browser; requests never touch any third party.
 - **Zero install of dependencies**: pure Node 18+ built-ins + static frontend, no `npm install` needed.
 - **Cross-platform**: works on Windows, macOS and Linux.
+- **Built-in updates**: `Settings → About → Update` checks the latest release and, with one confirmation, either pulls the source and restarts the local server (git checkout) or downloads the Windows installer — no terminal needed.
 - **Unofficial**: a third-party hobby project — not affiliated with, endorsed by, or sponsored by Bilibili. For personal study use only; please respect Bilibili's terms of service.
 
 ### Why BiliNest?
@@ -68,16 +74,17 @@ See the Chinese section below for login methods, usage and the full feature list
 - **观看记录与续播**：自动记录每个视频（含分 P / 合集选集）的观看进度，下次播放自动从上次位置继续；有记录时首页第一栏显示「继续学习」（大封面 + 进度条）。
 - **列表（剧集）归类**：添加视频时自动识别「多 P / 合集」，标记为列表而非单视频；整季在「继续学习」中合并为**一张卡片**（指向最近看的集），点「视频库」也会自动继续最近看的集，手动点回某集则按该集自己的进度续播。
 - **视频列表**：封面、标题、UP 主、时长；支持按“添加时间 / 发布时间”排序；分页加载。
-- **搜索**：首页搜索框实时筛选「视频库」；内容源弹窗可同时搜索收藏夹与「我的视频」；收藏夹视图内可搜索当前收藏夹的视频。
+- **搜索**：搜索框就在大标题行里，实时筛选当前栏目（视频库 / 自定义标签页），并显示命中数（如 `3 / 24 个视频`）；内容源弹窗可同时搜索收藏夹与「我的视频」；收藏夹视图内可搜索当前收藏夹的视频。
 - **栏位与二级页**：各标签默认只显示前几个，超出后点「展开全部」进入二级浏览页，支持翻页、排序与搜索（不再横向滚动）。
-- **纯净播放**：应用内置自研播放器——用应用内的登录态获取 B 站 DASH 自适应码率流，**画质切换由 dash.js 自动完成，永不跳转 B 站官网**；弹幕显示（**无弹幕输入框，不能发送弹幕**）、CC 字幕、播放/暂停/进度/音量/全屏均支持。播放地址服务暂不可用时自动降级为官方嵌入播放器。
+- **纯净播放**：应用内置自研播放器——用应用内的登录态获取 B 站 DASH 自适应码率流，**画质切换由 dash.js 自动完成，永不跳转 B 站官网**；弹幕显示（**无弹幕输入框，不能发送弹幕**）、CC 字幕、播放/暂停/进度/音量/全屏均支持。**快捷键**：空格播放/暂停、←→ 快退快进、↑↓ 音量、F 全屏 —— 进播放页即可用，不必先点一下播放器。播放地址服务暂不可用时自动降级为官方嵌入播放器。
 - **选集**：支持多 P 视频与 UP 主合集（视频系列）的选集切换。
 - **单个视频**：粘贴视频链接 / BV 号 / av 号即可添加。
 - **本地视频**：通过系统文件选择器添加本地视频文件（Chromium 内核浏览器可跨会话保留文件权限，其余浏览器本次会话可播放）。
-- **自定义标签页**：标签栏末尾的「＋」直接新建标签页（建完可内联改名；双击标签改名；按住标签拖动排序；标签过多时横向滚动，系统标签固定在左侧）。空标签页里的「＋ 添加内容」可从 **源收藏夹 / 视频库 / 收藏夹库 / 学习 UP主** 四处挑选（库侧条目带封面 / 头像），卡片右下角 ✕ 移除时可选是否连库内一并删除。标签页只存引用，**删标签页不会删内容**。
+- **自定义标签页**：标签栏末尾的「＋」直接新建标签页（建完可内联改名；双击标签改名；按住标签拖动排序，拖动时其余标签实时让位；标签过多时横向滚动，系统标签固定在左侧）。空标签页里的「＋ 添加内容」可从 **源收藏夹 / 视频库 / 收藏夹库 / 学习 UP主** 四处挑选（库侧条目带封面 / 头像）；从里面进收藏夹挑视频时，返回键会回到**上一级的选择器**（分区、搜索词、勾选都还在），不用从头点一遍。卡片右下角 ✕ 移除时可选是否连库内一并删除。标签页只存引用，**删标签页不会删内容**。
 - **学习 UP主**：在「学习 UP主」标签输入 UID 即可收藏 UP主（头像 / 昵称 / 简介 / 粉丝数 / 星级），点卡片跳转其 B 站主页。
 - **数据不丢**：状态存在浏览器本地，同时自动备份到 `%APPDATA%\BiliNest\state-backup.json`；换浏览器、换端口或清过浏览器数据后打开会自动取回，两边都有数据时以较新的一份为准。
-- **极简界面**：克制的排版与留白，深色 / 浅色 / 跟随系统三档主题。
+- **版本更新**：`设置 → 关于 → 更新` 一个按钮搞定——源码版自动 `git pull` + 重启服务 + 刷新页面，安装包版自动下载安装包（运行它即可，数据不动）；检查方式可切「自动（打开时，只在设置图标点一个小圆点）/ 仅手动」。详见[更新方法](#更新方法)。
+- **极简界面**：大标题 + 卡片网格的布局，滚动时标签栏吸顶；深色 / 浅色 / 跟随系统三档主题。
 - **隐私友好**：凭据只保存在你自己的浏览器里，请求只发给本机代理，不经过任何第三方服务器。
 
 ---
@@ -223,7 +230,7 @@ node --env-file=.env server.mjs
 0. **首次启动引导**：第一次打开自动弹出「使用引导」（含 SESSDATA 获取步骤、内容源选择、常见问题）；之后可在「设置 → 查看使用引导」再看。
 1. **主页**：默认进入仪表盘，标签页为「继续学习 / 视频库 / 收藏夹库 / 学习 UP主」；标签栏末尾的「＋」可新建自定义标签页（双击改名、拖动排序）；点品牌名（BiliNest）返回主页。
 2. **添加学习内容**：点右上角「内容源」→ 收藏夹列表点「加入学习」（可打星）；收藏夹内某视频点封面右上角「+」加入学习列表；也可粘贴单个视频链接或选择本地视频。
-3. **观看**：点击视频卡片播放；多 P / 合集右侧有选集；进度自动记录，下次续播。
+3. **观看**：点击视频卡片播放；多 P / 合集右侧有选集；进度自动记录，下次续播；从播放页返回列表会**停在原来的位置**，不用重新找。
 4. **排序**：「视频库」与收藏夹列表支持按「添加时间 / 发布时间 / 星级 / 播放量」排序。
 
 ---
@@ -233,13 +240,15 @@ node --env-file=.env server.mjs
 ```
 bilinest/
 ├── package.json          # 零依赖，Node 18+
-├── server.mjs            # 本地代理 + 静态托管 + 可选 OAuth
+├── server.mjs            # 本地代理 + 静态托管 + 状态备份 + 更新检查 + 可选 OAuth
+├── bin/bilinest.mjs      # npx 入口（启动服务并打开浏览器）
 ├── .env.example          # 环境变量模板（含敏感项，勿提交真实值）
 ├── LICENSE               # MIT 许可证
 ├── start.sh              # macOS / Linux 一键启动脚本
 ├── launcher.vbs          # Windows 一键启动（起服务 + 打开浏览器；缺 Node 时给安装指引）
 ├── create-shortcut.ps1   # Windows 桌面快捷方式
 ├── installer/            # Windows 安装包脚本（Inno Setup，产物在 dist/）
+├── docs/img/             # README 用的截图（演示数据）
 ├── public/
 │   ├── index.html        # 页面骨架（含 CSP）
 │   ├── styles.css        # 深/浅色主题与全部样式
@@ -312,6 +321,9 @@ Chromium 内核浏览器自动恢复文件权限；被拒则删除重加。其�
 
 **Q：提示没装 Node.js / 双击快捷方式后页面打不开？**
 说明系统里找不到可用的 Node.js 18+。双击快捷方式时会自动打开一份图文安装指引（也可以直接看 `public/setup-help.html`）：按 `Win` 输入 `cmd` 后执行 `winget install OpenJS.NodeJS.LTS`，或者到 [nodejs.org](https://nodejs.org/zh-cn/download) 下载 LTS 版本安装，装好后重新双击快捷方式即可。安装时请保持勾选 **Add to PATH**。
+
+**Q：怎么知道有没有新版本？怎么更新？**
+打开 `设置 → 关于 → 更新`：按钮会显示「检查更新」或「更新到 vX.Y.Z」，点一下按提示确认即可（源码版会自动 `git pull` + 重启服务 + 刷新页面；安装包版会下载安装包，运行它即可，数据不受影响）。默认**每次打开页面自动检查**，发现新版本只在设置图标右上角点一个小圆点，不打扰；也可以在同一个位置把检查方式改成「仅手动」。手动更新的话见上面「[更新方法](#更新方法)」。
 
 **Q：如何打包成桌面应用？**
 本应用即“静态页面 + 本地服务”，可用任意壳包装，例如 Electron：

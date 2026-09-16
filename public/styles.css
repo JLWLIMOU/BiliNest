@@ -1227,7 +1227,14 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
   padding: 16px 12px 12px;
   box-shadow: var(--shadow-sm), var(--card-inner);
   overflow-y: auto;
-  max-height: calc(100vh - var(--topbar-h) - 40px);
+  /*
+   * 兜底高度（正常由 sizeEpisodePanel() 覆盖成"与画面等高"）。
+   * 这里必须保守：选集面板的**自然顶部**在返回键那一行的下面
+   * （顶栏 58 + 内边距 24 + 返回行约 46 ≈ 128），用 `100vh - 顶栏 - 40`
+   * 会算出比剩余空间更大的高度 —— 面板底部就被视口切掉，看起来"没闭合"。
+   */
+  max-height: calc(100vh - var(--topbar-h) - 104px);
+  max-height: calc(100dvh - var(--topbar-h) - 104px);
 }
 .episode-title {
   margin: 0 0 12px;
