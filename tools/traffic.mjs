@@ -139,6 +139,113 @@ function reportMarkdown(data) {
   return '```\n' + reportText(data) + '\n```\n';
 }
 
+/** 把 traffic 的两个日数组按日期合起来（缺的补 0），得到逐日序列 */
+function dailySeries(data) {
+  const map = new Map();
+  const put = (list, key) => (list || []).forEach((d) => {
+    const day = new Date(d.timestamp).toISOString().slice(5, 10);   // MM-DD
+    const cur = map.get(day) || { day, views: 0, uniques: 0, clones: 0, cloneUniques: 0 };
+    cur[key] = d.count;
+    if (key === 'views') cur.uniques = d.uniques;
+    if (key === 'clones') cur.cloneUniques = d.uniques;
+    map.set(day, cur);
+  });
+  put(data.views.views, 'views');
+  put(data.clones.clones, 'clones');
+  return [...map.values()].sort((a, b) => (a.day < b.day ? -1 : 1));
+}
+
+function niceMax(v) {
+  if (v <= 2) return 2;
+  if (v <= 5) return 5;
+  if (v <= 10) return 10;
+  return Math.ceil(v / 10) * 10;
+}
+
+/**
+ * 手写一个折线图（内联 SVG）。
+ * 不引图表库：报告要能离线从 file:// 打开，而且这个项目是零依赖。
+ * 每个数据点带 <title>，鼠标悬停有原生提示，不需要一行 JS。
+ */
+function svgChart(series, days, opts = {}) {
+  const W = 620, H = 170, padL = 30, padR = 12, padT = 12, padB = 26;
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+  const n = days.length;
+  const maxRaw = Math.max(1, ...series.flatMap((s) => s.values));
+  const maxY = niceMax(maxRaw);
+  const x = (i) => padL + (n <= 1 ? plotW / 2 : (i * plotW) / (n - 1));
+  const y = (v) => padT + plotH - (v / maxY) * plotH;
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  const grid = [0, maxY / 2, maxY].map((v) =>
+    `<line x1="${padL}" y1="${y(v).toFixed(1)}" x2="${W - padR}" y2="${y(v).toFixed(1)}" class="grid"/>` +
+    `<text x="${padL - 6}" y="${(y(v) + 3.5).toFixed(1)}" class="axis" text-anchor="end">${v}</text>`
+  ).join('');
+
+  // 每个标签最多显示 7 个：14 天时每 2 天标一个
+  const step = n > 8 ? 2 : 1;
+  const xLabels = days.map((d, i) =>
+    i % step === 0 || i === n - 1
+      ? `<text x="${x(i).toFixed(1)}" y="${H - 8}" class="axis" text-anchor="middle">${esc(d.day)}</text>`
+      : ''
+  ).join('');
+
+  // 人 / 机器人 的分界线：左边是上一周，右边是最近一周
+  const win = opts.window || 7;
+  const cut = n - win;
+  const divider = (cut > 0 && cut < n)
+    ? `<line x1="${x(cut - 0.5).toFixed(1)}" y1="${padT}" x2="${x(cut - 0.5).toFixed(1)}" y2="${padT + plotH}" class="divider"/>` +
+      `<text x="${x(cut - 0.5).toFixed(1)}" y="${padT + 10}" class="axis" text-anchor="middle">最近 7 天</text>`
+    : '';
+
+  const lines = series.map((s) => {
+    const pts = s.values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+    const area = s.fill && !s.band
+      ? `<polygon points="${padL},${(padT + plotH).toFixed(1)} ${pts} ${(W - padR).toFixed(1)},${(padT + plotH).toFixed(1)}" fill="${s.color}" opacity="0.10"/>`
+      : '';
+    const dots = s.values.map((v, i) =>
+      `<circle cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="${s.band ? 2.1 : 2.6}" fill="${s.color}">` +
+      `<title>${esc(days[i].day)}　${esc(s.label)} ${v}</title></circle>`
+    ).join('');
+    // band：画成半透明宽带。用于"浏览"——它和"独立访客"经常同值，
+    // 两条同宽实线叠在一起会只剩最后画的那条，看着像数据缺失。
+    return area +
+      `<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="${s.band ? 9 : 2}" ` +
+      (s.band ? 'opacity="0.28" ' : '') +
+      `stroke-linejoin="round" stroke-linecap="round"${s.dashed ? ' stroke-dasharray="4 4"' : ''}/>` + dots;
+  }).join('');
+
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(opts.label || '趋势图')}">` +
+    grid + divider + lines + xLabels + '</svg>';
+}
+
+/**
+ * 横向条形图：给"分类数据"用（来源渠道、热门页面）。
+ * 这类数据没有时间轴，画成折线会假装存在趋势，条形才是对的读法。
+ */
+function svgBars(items, opts = {}) {
+  const list = (items || []).slice(0, opts.limit || 5);
+  if (!list.length) return '<div class="empty">暂无数据（traffic 接口只覆盖最近 14 天）</div>';
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const max = Math.max(...list.map((it) => it.value)) || 1;
+  const labelW = opts.labelWidth || 210;
+  const barMax = 320;
+  const rowH = 22;
+  const H = list.length * rowH + 6;
+  const rows = list.map((it, i) => {
+    const y = i * rowH + 3;
+    const w = Math.max(2, (it.value / max) * barMax);
+    const label = it.label.length > 30 ? it.label.slice(0, 29) + '…' : it.label;
+    return `<g><title>${esc(it.label)}　${it.value}</title>` +
+      `<text x="0" y="${y + 11}" class="axis">${esc(label)}</text>` +
+      `<rect x="${labelW}" y="${y + 1}" width="${barMax}" height="12" rx="3" class="bar-bg"/>` +
+      `<rect x="${labelW}" y="${y + 1}" width="${w.toFixed(1)}" height="12" rx="3" fill="${opts.color || 'var(--c-views)'}"/>` +
+      `<text x="${labelW + barMax + 8}" y="${y + 11}" class="axis">${it.value}</text></g>`;
+  }).join('');
+  return `<svg viewBox="0 0 ${labelW + barMax + 42} ${H}" role="img" aria-label="${esc(opts.label || '条形图')}">${rows}</svg>`;
+}
+
 /** 一个自包含的 HTML 报告（深浅色自适应），双击快捷方式看到的就是它 */
 function reportHtml(data) {
   const n = data.days;
@@ -156,6 +263,44 @@ function reportHtml(data) {
   };
   const row = (k, val) => `<div class="row"><span class="k">${esc(k)}</span><span class="v">${val}</span></div>`;
 
+  // 两张图分开画：人的数字（0–2）和机器人的数字（30+）量级差 20 倍，
+  // 画在一张图里，人那条会被压在底线上，看着像"没人来"。
+  const daily = dailySeries(data);
+  const chartPeople = svgChart(
+    [
+      { label: '浏览', color: 'var(--c-views)', values: daily.map((d) => d.views), band: true },
+      { label: '独立访客', color: 'var(--c-uniques)', values: daily.map((d) => d.uniques) }
+    ],
+    daily, { label: '浏览与独立访客趋势', window: n }
+  );
+  const chartBots = svgChart(
+    [{ label: '克隆', color: 'var(--c-clones)', values: daily.map((d) => d.clones), dashed: true }],
+    daily, { label: '克隆趋势', window: n }
+  );
+  // 累计 star：GitHub 没有"每日新增"接口，但 stargazers 带时间戳，
+  // 用「总数 − 窗口内新增」当起点往上累加，就能画出同一条时间轴上的累计曲线
+  const starsByDay = {};
+  starList.forEach((s) => {
+    if (!s.at) return;
+    const day = new Date(s.at).toISOString().slice(5, 10);
+    starsByDay[day] = (starsByDay[day] || 0) + 1;
+  });
+  const starsInWindow = daily.reduce((a, d) => a + (starsByDay[d.day] || 0), 0);
+  let starAcc = (data.meta.stargazers_count || 0) - starsInWindow;
+  const starSeries = daily.map((d) => { starAcc += starsByDay[d.day] || 0; return starAcc; });
+  const chartStars = svgChart(
+    [{ label: '累计 star', color: 'var(--c-stars)', values: starSeries, fill: true }],
+    daily, { label: 'Star 累计趋势', window: n }
+  );
+  const refBars = svgBars(
+    (data.referrers || []).map((r) => ({ label: r.referrer, value: r.count })),
+    { label: '来源渠道', color: 'var(--c-views)', labelWidth: 210 }
+  );
+  const pathBars = svgBars(
+    (data.paths || []).map((p) => ({ label: p.path, value: p.count })),
+    { label: '热门页面', color: 'var(--c-uniques)', labelWidth: 300 }
+  );
+
   const rows = [
     row(`浏览（近 ${n} 天）`, `${v.recent.count} 次 ${delta(v.recent.uniques, v.previous.uniques)}`),
     row('独立访客', `${v.recent.uniques} 人 <span class="k">（上一周 ${v.previous.uniques}）</span>`),
@@ -165,8 +310,6 @@ function reportHtml(data) {
     row(`新增 star（近 ${n} 天）`, newStars.length
       ? newStars.map((s) => `<b>${esc(s.login)}</b> <span class="k">${fmtTime(s.at)}</span>`).join(' · ')
       : '<span class="k">无</span>'),
-    row('来源渠道', (data.referrers || []).slice(0, 4).map((r) => `${esc(r.referrer)} <span class="k">${r.count}</span>`).join(' · ') || '<span class="k">暂无</span>'),
-    row('热门页面', (data.paths || []).slice(0, 4).map((p) => `${esc(p.path)} <span class="k">${p.count}</span>`).join(' · ') || '<span class="k">暂无</span>'),
     row('点星时间线', starList.slice(-6).reverse().map((s) => `${esc(s.login)} <span class="k">${fmtTime(s.at)}</span>`).join(' · ') || '<span class="k">暂无</span>')
   ].join('');
 
@@ -176,6 +319,12 @@ function reportHtml(data) {
 <title>BiliNest 流量报告 · ${fmtTime(data.at)}</title>
 <style>
   :root { color-scheme: light dark; }
+  :root { --c-views: #0071e3; --c-uniques: #ff9f0a; --c-clones: #8e8e93; --c-stars: #30a46c;
+          --grid: rgba(60,60,67,.14); }
+  @media (prefers-color-scheme: dark) {
+    :root { --c-views: #0a84ff; --c-uniques: #ffb340; --c-clones: #98989d; --c-stars: #3ddc84;
+            --grid: rgba(255,255,255,.16); }
+  }
   body { font: 14px/1.65 system-ui, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
          background: #f2f2f7; color: #1c1c1e; margin: 0; padding: 40px 20px; }
   .card { max-width: 660px; margin: 0 auto; background: #fff; border-radius: 16px;
@@ -189,6 +338,19 @@ function reportHtml(data) {
   .row > .k { white-space: nowrap; }        /* 标签不换行（"热门页面"这种四字标签会被挤成两行） */
   .v { text-align: right; font-variant-numeric: tabular-nums; word-break: break-word; }
   .up { color: #1a7f37; } .down { color: #c2410c; }
+  .chart-wrap { margin: 14px 0 18px; }
+  .chart-title { font-weight: 600; margin-bottom: 2px; }
+  .chart-wrap svg { display: block; width: 100%; height: auto; overflow: visible; }
+  .grid { stroke: var(--grid); stroke-width: 1; }
+  .bar-bg { fill: var(--grid); }
+  .empty { color: #8e8e93; font-size: 12.5px; padding: 6px 0; }
+  .divider { stroke: var(--grid); stroke-width: 1; stroke-dasharray: 3 3; }
+  .axis { fill: #8e8e93; font-size: 9.5px; font-variant-numeric: tabular-nums; }
+  .legend { display: flex; gap: 14px; color: #8e8e93; font-size: 12px; margin-top: 4px; }
+  .legend i { display: inline-block; width: 10px; height: 3px; border-radius: 2px;
+              margin-right: 5px; vertical-align: middle; }
+  .legend i.band { height: 7px; opacity: .45; }
+  .legend i.dash { background-image: linear-gradient(90deg, currentColor 40%, transparent 0); }
   footer { margin-top: 18px; color: #8e8e93; font-size: 12px; }
   a { color: #0071e3; text-decoration: none; }
   a:hover { text-decoration: underline; }
@@ -197,13 +359,40 @@ function reportHtml(data) {
     .card { background: #1c1c1e; box-shadow: none; }
     .row { border-color: rgba(255,255,255,.12); }
     .k, .sub, footer { color: rgba(235,235,245,.6); }
+    .axis, .legend { fill: rgba(235,235,245,.6); color: rgba(235,235,245,.6); }
     a { color: #0a84ff; }
   }
 </style></head>
 <body><div class="card">
   <h1>BiliNest 流量报告</h1>
   <div class="sub">${esc(data.repo)} · 生成于 ${fmtTime(data.at)}</div>
+  <div class="chart-wrap">
+    <div class="chart-title">浏览 / 独立访客 <span class="k">近 ${daily.length} 天</span></div>
+    ${chartPeople}
+    <div class="legend">
+      <span><i class="band" style="background:var(--c-views)"></i>浏览</span>
+      <span><i style="background:var(--c-uniques)"></i>独立访客</span>
+    </div>
+  </div>
+  <div class="chart-wrap">
+    <div class="chart-title">克隆 <span class="k">含机器人 / IDE fetch，不是人气指标</span></div>
+    ${chartBots}
+    <div class="legend"><span><i class="dash" style="background:var(--c-clones)"></i>克隆次数</span></div>
+  </div>
+  <div class="chart-wrap">
+    <div class="chart-title">Star 累计 <span class="k">近 ${daily.length} 天</span></div>
+    ${chartStars}
+    <div class="legend"><span><i style="background:var(--c-stars)"></i>累计 star</span></div>
+  </div>
   ${rows}
+  <div class="chart-wrap">
+    <div class="chart-title">来源渠道 <span class="k">最近 14 天内从哪跳过来的</span></div>
+    ${refBars}
+  </div>
+  <div class="chart-wrap">
+    <div class="chart-title">热门页面 <span class="k">最近 14 天被看最多的路径</span></div>
+    ${pathBars}
+  </div>
   <footer>
     数据来自 GitHub traffic / stargazers 接口（只有最近 14 天、约一天延迟）。
     「克隆」把 git fetch 与自动抓取（代码索引、release 聚合、依赖扫描）也算进去，不是人气指标 —— 看浏览、来源渠道和 star 更准。
