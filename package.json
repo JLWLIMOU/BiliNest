@@ -26,7 +26,8 @@
   },
   "scripts": {
     "start": "node server.mjs",
-    "dev": "node server.mjs"
+    "dev": "node server.mjs",
+    "traffic": "node tools/traffic.mjs"
   },
   "engines": {
     "node": ">=18"
