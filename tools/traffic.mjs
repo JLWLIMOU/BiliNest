@@ -22,6 +22,8 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 
 const REPO = process.env.BILINEST_REPO || 'JLWLIMOU/BiliNest';
+// HelloGitHub 自荐 issue：周报里要能看到它现在排队到哪一步了
+const SUBMISSION = process.env.BILINEST_SUBMIT_ISSUE || '521xueweihan/HelloGitHub#3714';
 const TASK_NAME = 'BiliNest 流量周报';
 const DATA_DIR = process.env.BILINEST_DATA_DIR
   || (process.platform === 'win32'
@@ -96,15 +98,42 @@ function fmtTime(iso) {
 }
 
 async function collect(days) {
-  const [views, clones, referrers, paths, stars, repo] = await Promise.all([
+  const [views, clones, referrers, paths, stars, repo, submission] = await Promise.all([
     gh(`repos/${REPO}/traffic/views`),
     gh(`repos/${REPO}/traffic/clones`),
     gh(`repos/${REPO}/traffic/popular/referrers`),
     gh(`repos/${REPO}/traffic/popular/paths`),
     gh(`repos/${REPO}/stargazers`, ['-H', 'Accept: application/vnd.github.star+json', '--paginate']),
-    gh(`repos/${REPO}`)
+    gh(`repos/${REPO}`),
+    submissionStatus()
   ]);
-  return { repo: REPO, at: new Date().toISOString(), days, views, clones, referrers, paths, stars, meta: repo };
+  return { repo: REPO, at: new Date().toISOString(), days, views, clones, referrers, paths, stars, meta: repo, submission };
+}
+
+/**
+ * HelloGitHub 自荐的处理状态。
+ * 他们的"审批结果"直接体现在标签上：`已收录（未发布）` = 过了，`已发布` = 上线了；
+ * 什么都没有且还开着 = 还在排队。查失败不影响其它数据。
+ */
+async function submissionStatus() {
+  const [repo, num] = SUBMISSION.split('#');
+  try {
+    const d = await gh(`repos/${repo}/issues/${num}`);
+    const labels = (d.labels || []).map((l) => (typeof l === 'string' ? l : l.name));
+    const createdAt = d.created_at;
+    const days = Math.floor((Date.now() - new Date(createdAt).getTime()) / 86400000);
+    let text = '排队中';
+    let tone = 'wait';
+    if (labels.some((l) => l.indexOf('已发布') >= 0)) { text = '已发布'; tone = 'published'; }
+    else if (labels.some((l) => l.indexOf('已收录') >= 0)) { text = '已收录，待发布'; tone = 'accepted'; }
+    else if (d.state === 'closed') { text = '已关闭（未收录）'; tone = 'rejected'; }
+    return {
+      ok: true, id: SUBMISSION, url: d.html_url, title: d.title, state: d.state,
+      labels, createdAt, days, updatedAt: d.updated_at, comments: d.comments, text, tone
+    };
+  } catch (e) {
+    return { ok: false, id: SUBMISSION, message: e.message };
+  }
 }
 
 function reportText(data) {
@@ -126,6 +155,13 @@ function reportText(data) {
   lines.push(`新增 star ${newStars.length ? newStars.map((s) => `${s.login}（${fmtTime(s.at)}）`).join(' · ') : '无'}`);
   lines.push(`来源渠道 ${refs.length ? refs.join(' · ') : '暂无'}`);
   lines.push(`热门页面 ${topPaths.length ? topPaths.join(' · ') : '暂无'}`);
+  const sub = data.submission;
+  if (sub) {
+    lines.push(sub.ok
+      ? `自荐状态 ${sub.text}（${sub.id}，提交于 ${fmtTime(sub.createdAt)}，已等 ${sub.days} 天` +
+        `${sub.comments ? '，' + sub.comments + ' 条评论' : ''}）`
+      : `自荐状态 查询失败：${sub.message}`);
+  }
   if (starList.length) {
     lines.push(`点星时间线 ${starList.slice(-5).reverse().map((s) => `${s.login} ${fmtTime(s.at)}`).join(' · ')}`);
   }
@@ -322,6 +358,15 @@ function reportHtml(data) {
   );
 
   const rows = [
+    (function () {
+      const s = data.submission;
+      if (!s) return '';
+      if (!s.ok) return row('自荐状态', `<span class="k">查询失败：${esc(s.message)}</span>`);
+      return row('自荐状态',
+        `<span class="badge ${esc(s.tone)}">${esc(s.text)}</span> ` +
+        `<span class="k"><a href="${esc(s.url)}">${esc(s.id)}</a> · 提交 ${fmtTime(s.createdAt)} · 已等 ${s.days} 天` +
+        `${s.comments ? ' · ' + s.comments + ' 条评论' : ' · 暂无评论'}</span>`);
+    })(),
     row(`浏览（近 ${n} 天）`, `${v.recent.count} 次 ${delta(v.recent.uniques, v.previous.uniques)}`),
     row('独立访客', `${v.recent.uniques} 人 <span class="k">（上一周 ${v.previous.uniques}）</span>`),
     row(`克隆（近 ${n} 天）`, `${c.recent.count} 次 / ${c.recent.uniques} 人 ${delta(c.recent.uniques, c.previous.uniques)} ` +
@@ -358,6 +403,13 @@ function reportHtml(data) {
   .row > .k { white-space: nowrap; }        /* 标签不换行（"热门页面"这种四字标签会被挤成两行） */
   .v { text-align: right; font-variant-numeric: tabular-nums; word-break: break-word; }
   .up { color: #1a7f37; } .down { color: #c2410c; }
+  /* 自荐状态徽章：排队中=灰 / 已收录=橙 / 已发布=绿 / 已关闭=红 */
+  .badge { display: inline-block; padding: 2px 9px; border-radius: 999px;
+           font-size: 12px; font-weight: 600; }
+  .badge.wait { background: rgba(120,120,128,.14); color: #6b6b70; }
+  .badge.accepted { background: rgba(255,149,0,.16); color: #b26a00; }
+  .badge.published { background: rgba(48,164,108,.16); color: #1a7f37; }
+  .badge.rejected { background: rgba(229,72,77,.14); color: #c0392b; }
   .chart-wrap { margin: 14px 0 18px; }
   .chart-title { font-weight: 600; margin-bottom: 2px; }
   .chart-wrap svg { display: block; width: 100%; height: auto; overflow: visible; }
@@ -380,6 +432,10 @@ function reportHtml(data) {
     .row { border-color: rgba(255,255,255,.12); }
     .k, .sub, footer { color: rgba(235,235,245,.6); }
     .axis, .legend { fill: rgba(235,235,245,.6); color: rgba(235,235,245,.6); }
+    .badge.wait { background: rgba(255,255,255,.12); color: rgba(235,235,245,.75); }
+    .badge.accepted { background: rgba(255,179,64,.2); color: #ffb340; }
+    .badge.published { background: rgba(61,220,132,.2); color: #3ddc84; }
+    .badge.rejected { background: rgba(255,105,97,.2); color: #ff6961; }
     a { color: #0a84ff; }
   }
 </style></head>
