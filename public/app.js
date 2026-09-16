@@ -206,6 +206,343 @@
   }
 
   /* ---------------- 主页（仪表盘）渲染 ---------------- */
+  /**
+   * 学习时长统计。
+   * 数据存在 store 的 watchStats 里：{ daily: {'YYYY-MM-DD': 秒}, byKey: {'进度键': 秒} }，
+   * 和别的数据一样走 store.set → localStorage + 服务端备份，不额外落盘。
+   *
+   * 记录口径是"**实际观看**"：播放器每次上报进度时，比较「时钟增量」与「播放位置增量」，
+   * 两者接近才计入 —— 拖进度条、暂停、切集都会让两者差很多，直接丢弃。
+   */
+  var watchSample = { t: 0, at: 0 };
+
+  function dayKeyOf(ts) {
+    var d = new Date(ts || Date.now());
+    var p = function (n) { return String(n).padStart(2, '0'); };
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());   // 本地日期
+  }
+
+  function statsData() {
+    var s = store.get('watchStats') || {};
+    return { daily: s.daily || {}, byKey: s.byKey || {} };
+  }
+
+  /** 只保留最近 keep 个键（键按日期 / 加入顺序排），避免数据无限增长 */
+  function capKeys(obj, keep) {
+    var keys = Object.keys(obj);
+    if (keys.length <= keep) return obj;
+    keys.sort();
+    var out = {};
+    for (var i = keys.length - keep; i < keys.length; i++) out[keys[i]] = obj[keys[i]];
+    return out;
+  }
+
+  /** 记一笔"实际观看"秒数 */
+  function trackWatchTime(seconds, key) {
+    if (!(seconds > 0.2)) return;
+    var s = statsData();
+    var day = dayKeyOf();
+    var daily = Object.assign({}, s.daily);
+    var byKey = Object.assign({}, s.byKey);
+    // 保留一位小数：播放事件大约每 250ms 一次，单次增量只有 0.25 秒 ——
+    // 每次写入都四舍五入成整数的话，会**永远累加不起来**（每次都归零）。
+    var round1 = function (n) { return Math.round(n * 10) / 10; };
+    daily[day] = round1((daily[day] || 0) + seconds);
+    if (key) byKey[key] = round1((byKey[key] || 0) + seconds);
+    store.set({ watchStats: { daily: capKeys(daily, 400), byKey: capKeys(byKey, 300) } });
+  }
+
+  /** 播放器上报进度时调用（见 bindEvents 里的 bilinest-timeupdate） */
+  function sampleWatchTime() {
+    var video = window.BiliNestPlayer && BiliNestPlayer.getVideo && BiliNestPlayer.getVideo();
+    if (!video) { watchSample = { t: 0, at: 0 }; return; }
+    var t = video.currentTime || 0;
+    var now = Date.now();
+    var dt = (now - watchSample.at) / 1000;
+    var dv = t - watchSample.t;
+    var inPlayer = state.currentView === 'player' && els.playerView && !els.playerView.hidden;
+    if (watchSample.at && inPlayer && dt > 0 && dt < 12 && dv > 0 && Math.abs(dv - dt) < 1.5) {
+      trackWatchTime(dv, state.progressCtx && state.progressCtx.key);
+    }
+    watchSample = { t: t, at: now };
+  }
+
+  /** 汇总：累计 / 近 7 天 / 连续打卡 / 日均 / 最多的一天 */
+  function studySummary() {
+    var daily = statsData().daily;
+    var activeDays = Object.keys(daily).filter(function (d) { return daily[d] > 0; }).sort();
+    var totalSec = activeDays.reduce(function (a, d) { return a + daily[d]; }, 0);
+    var sumRange = function (n) {
+      var t = 0;
+      for (var i = 0; i < n; i++) t += daily[dayKeyOf(Date.now() - i * 86400000)] || 0;
+      return t;
+    };
+    var streak = 0;
+    var offset = daily[dayKeyOf()] ? 0 : 1;   // 今天还没学就从昨天算起
+    while (streak < 400 && daily[dayKeyOf(Date.now() - (offset + streak) * 86400000)]) streak++;
+    var maxDaySec = activeDays.reduce(function (a, d) { return Math.max(a, daily[d]); }, 0);
+    return {
+      daily: daily,
+      totalSec: totalSec,
+      weekSec: sumRange(7),
+      streak: streak,
+      activeDays: activeDays.length,
+      avgSec: activeDays.length ? Math.round(totalSec / activeDays.length) : 0,
+      maxDaySec: maxDaySec,
+      firstDay: activeDays[0] || ''
+    };
+  }
+
+  function fmtWatch(sec) {
+    sec = Math.round(sec || 0);
+    if (sec < 60) return sec + ' 秒';
+    var h = Math.floor(sec / 3600);
+    var m = Math.round((sec % 3600) / 60);
+    if (!h) return m + ' 分钟';
+    if (!m) return h + ' 小时';
+    return h + ' 小时 ' + m + ' 分';
+  }
+
+  /** 继续学习大标题旁的入口：累计时长 + 「学习记录 ›」 */
+  function studyEntryHtml() {
+    var sum = studySummary();
+    var label = sum.totalSec >= 60 ? '一共学了 ' + fmtWatch(sum.totalSec) : '开始记录学习时长';
+    return '<button type="button" class="study-entry" data-study-open title="查看学习记录">' +
+      '<span class="study-entry-total">' + esc(label) + '</span>' +
+      '<span class="study-entry-go">学习记录 ›</span>' +
+    '</button>';
+  }
+
+  /** 打卡日历：近 N 周，一格一天（周一在最上） */
+  function studyCalendarHtml(daily, weeks) {
+    var today = new Date();
+    today.setHours(0, 0, 0, 0);
+    var dow = (today.getDay() + 6) % 7;                       // 周一 = 0
+    var start = new Date(today.getTime() - (dow + (weeks - 1) * 7) * 86400000);
+    var max = 0;
+    Object.keys(daily).forEach(function (k) { if (daily[k] > max) max = daily[k]; });
+    var cells = '';
+    for (var i = 0; i < weeks * 7; i++) {
+      var ts = start.getTime() + i * 86400000;
+      var key = dayKeyOf(ts);
+      var sec = daily[key] || 0;
+      var lv = 0;
+      if (sec > 0 && max > 0) {
+        var r = sec / max;
+        lv = r < 0.25 ? 1 : r < 0.5 ? 2 : r < 0.75 ? 3 : 4;
+      }
+      var d = new Date(ts);
+      var tip = (d.getMonth() + 1) + '月' + d.getDate() + '日 · ' + (sec > 0 ? fmtWatch(sec) : '没有学习');
+      cells += '<span class="cal-cell' + (ts === today.getTime() ? ' today' : '') +
+        '" data-lv="' + lv + '" title="' + esc(tip) + '"></span>';
+    }
+    return '<div class="study-cal">' + cells + '</div>' +
+      '<div class="cal-legend"><span>少</span>' +
+        '<span class="cal-cell" data-lv="0"></span><span class="cal-cell" data-lv="1"></span>' +
+        '<span class="cal-cell" data-lv="2"></span><span class="cal-cell" data-lv="3"></span>' +
+        '<span class="cal-cell" data-lv="4"></span><span>多</span></div>';
+  }
+
+  /** 看得最多的内容：按累计时长排序 */
+  function studyTopContent(limit) {
+    var byKey = statsData().byKey;
+    var lib = store.get('customVideos') || [];
+    var hist = store.get('watchHistory') || [];
+    var nameOf = function (key) {
+      var head = String(key).split(':')[0];
+      var v = lib.find(function (x) { return String(x.bvid || x.id) === head; }) ||
+              hist.find(function (x) { return String(x.bvid || x.key) === head; });
+      return (v && (v.title || v.name)) || head;
+    };
+    return Object.keys(byKey)
+      .map(function (k) { return { key: k, name: nameOf(k), sec: byKey[k] }; })
+      .sort(function (a, b) { return b.sec - a.sec; })
+      .slice(0, limit || 5);
+  }
+
+  /* ---------------- 学习统计：右侧面板 ---------------- */
+
+  var studyPage = 'brief';    // brief = 简版卡片，detail = 详细数据
+  var studyRange = 14;        // 详细页的统计窗口（天）
+
+  /** 用 uPlot 画一组柱状图（内联数据、canvas，不引图表库之外的依赖） */
+  function drawBars(host, labels, values, opts) {
+    if (!host || !window.uPlot) return;
+    opts = opts || {};
+    var cs = getComputedStyle(document.body);
+    var accent = cs.getPropertyValue('--accent').trim() || '#0071e3';
+    var green = cs.getPropertyValue('--tab-green').trim() || '#30a46c';
+    var text2 = cs.getPropertyValue('--text-2').trim() || '#8e8e93';
+    var grid = 'rgba(120,120,128,.16)';
+    var color = opts.tone === 'green' ? green : accent;
+    var maxV = Math.max(1, Math.max.apply(null, values));
+    var width = host.clientWidth || 360;
+    var data = [labels.map(function (_, i) { return i; }), values];
+    new uPlot({
+      width: width,
+      height: opts.height || 160,
+      padding: [12, 8, 0, 0],
+      legend: { show: false },
+      cursor: { y: false },
+      scales: { x: { time: false }, y: { range: [0, maxV * 1.2] } },
+      series: [
+        { value: function (u, v) { return labels[v] == null ? '' : labels[v]; } },
+        {
+          stroke: color,
+          fill: /^#[0-9a-f]{6}$/i.test(color) ? color + '22' : 'rgba(0,113,227,.12)',
+          paths: uPlot.paths.bars({ size: [0.6, 16] }),
+          points: { show: false },
+          value: function (u, v) { return v == null ? '' : v + ' 分钟'; }
+        }
+      ],
+      axes: [
+        { stroke: text2, font: '11px system-ui, sans-serif', size: 26, grid: { show: false }, ticks: { show: false },
+          values: function (u, ticks) { return ticks.map(function (t) { return labels[t] || ''; }); } },
+        { stroke: text2, font: '11px system-ui, sans-serif', size: 34, grid: { stroke: grid, width: 1 }, ticks: { stroke: grid } }
+      ]
+    }, data, host);
+  }
+
+  function drawStudyCharts(range) {
+    var daily = statsData().daily;
+    var labels = [];
+    var values = [];
+    for (var i = range - 1; i >= 0; i--) {
+      var d = new Date(Date.now() - i * 86400000);
+      labels.push((d.getMonth() + 1) + '/' + d.getDate());
+      values.push(Math.round((daily[dayKeyOf(d.getTime())] || 0) / 60));
+    }
+    drawBars(document.getElementById('studyDaily'), labels, values, { height: 170 });
+
+    // 一周里的规律：按星期几取平均（只算有记录的天）
+    var sum = [0, 0, 0, 0, 0, 0, 0];
+    var cnt = [0, 0, 0, 0, 0, 0, 0];
+    Object.keys(daily).forEach(function (k) {
+      var t = new Date(k + 'T00:00:00');
+      if (isNaN(t.getTime())) return;
+      var idx = (t.getDay() + 6) % 7;
+      sum[idx] += daily[k];
+      cnt[idx] += 1;
+    });
+    drawBars(
+      document.getElementById('studyWeekday'),
+      ['一', '二', '三', '四', '五', '六', '日'],
+      sum.map(function (s, i) { return cnt[i] ? Math.round(s / cnt[i] / 60) : 0; }),
+      { height: 150, tone: 'green' }
+    );
+  }
+
+  function renderStudyTop() {
+    var host = document.getElementById('studyTop');
+    if (!host) return;
+    var list = studyTopContent(5);
+    if (!list.length) {
+      host.innerHTML = '<p class="muted small">还没有足够的数据。</p>';
+      return;
+    }
+    var max = list[0].sec || 1;
+    host.innerHTML = list.map(function (it) {
+      var pct = Math.max(3, Math.round((it.sec / max) * 100));
+      return '<div class="top-row" title="' + esc(it.name) + '">' +
+        '<span class="top-name">' + esc(it.name) + '</span>' +
+        '<span class="top-bar"><i style="width:' + pct + '%"></i></span>' +
+        '<span class="top-val">' + fmtWatch(it.sec) + '</span>' +
+      '</div>';
+    }).join('');
+  }
+
+  function studySheetHtml() {
+    var sum = studySummary();
+    var head = function (title, back) {
+      return '<div class="sheet-head">' +
+        (back ? '<button type="button" class="icon-btn" data-study-back aria-label="返回">‹</button>' : '') +
+        '<h2>' + title + '</h2>' +
+        '<button type="button" class="icon-btn" data-close aria-label="关闭">×</button>' +
+      '</div>';
+    };
+    if (studyPage === 'detail') {
+      var emptyHint = sum.totalSec > 0 ? ''
+        : '<p class="muted small">还没有数据 —— 看几个视频，这里就会出现曲线（只统计真正播放的时间，拖进度条不算）。</p>';
+      return head('学习记录', true) +
+        '<div class="sheet-body">' +
+          emptyHint +
+          '<div class="seg study-range">' + [7, 14, 30].map(function (n) {
+            return '<button type="button" data-study-range="' + n + '"' + (n === studyRange ? ' class="on"' : '') + '>' + n + ' 天</button>';
+          }).join('') + '</div>' +
+          '<h3 class="study-sub">每日学习时长</h3>' +
+          '<div class="study-chart" id="studyDaily"></div>' +
+          '<h3 class="study-sub">一周里的规律 <span class="muted small">按星期几的平均值</span></h3>' +
+          '<div class="study-chart" id="studyWeekday"></div>' +
+          '<h3 class="study-sub">学得最多的内容</h3>' +
+          '<div class="study-top" id="studyTop"></div>' +
+        '</div>';
+    }
+    // 简版：累计大数字 + 三个小数字 + 打卡日历 + 查看更多
+    var big = sum.totalSec >= 3600
+      ? Math.floor(sum.totalSec / 3600) + '<small>小时</small>' + Math.round((sum.totalSec % 3600) / 60) + '<small>分</small>'
+      : (sum.totalSec >= 60 ? Math.round(sum.totalSec / 60) + '<small>分钟</small>' : '0<small>分钟</small>');
+    var sub = sum.activeDays
+      ? '从 ' + sum.firstDay + ' 开始记录 · 共 ' + sum.activeDays + ' 天有学习'
+      : '看一个视频就开始统计（只算真正播放的时间，拖进度条不算）';
+    return head('学习记录', false) +
+      '<div class="sheet-body">' +
+        '<div class="study-hero">' +
+          '<div class="study-hero-num">' + big + '</div>' +
+          '<div class="study-hero-label">累计学习时长</div>' +
+          '<div class="study-hero-sub">' + esc(sub) + '</div>' +
+        '</div>' +
+        '<div class="study-mini">' +
+          '<div><b>' + sum.streak + '</b><span>连续打卡（天）</span></div>' +
+          '<div><b>' + Math.round(sum.avgSec / 60) + '</b><span>日均（分钟）</span></div>' +
+          '<div><b>' + Math.round(sum.maxDaySec / 60) + '</b><span>最多一天（分钟）</span></div>' +
+        '</div>' +
+        '<h3 class="study-sub">打卡日历 <span class="muted small">近 12 周</span></h3>' +
+        studyCalendarHtml(sum.daily, 12) +
+        '<button type="button" class="btn primary study-more" data-study-detail>查看更多</button>' +
+      '</div>';
+  }
+
+  /** 面板里的关闭按钮要重新绑定（innerHTML 换过） */
+  function bindSheetButtons() {
+    var modal = els.modalRoot.querySelector('.modal.study-sheet');
+    if (!modal) return;
+    var closes = modal.querySelectorAll('[data-close]');
+    for (var i = 0; i < closes.length; i++) closes[i].addEventListener('click', closeModal);
+    var detail = modal.querySelector('[data-study-detail]');
+    if (detail) detail.addEventListener('click', function () { studyPage = 'detail'; renderStudySheet(); });
+    var back = modal.querySelector('[data-study-back]');
+    if (back) back.addEventListener('click', function () { studyPage = 'brief'; renderStudySheet(); });
+    var ranges = modal.querySelectorAll('[data-study-range]');
+    for (var j = 0; j < ranges.length; j++) {
+      ranges[j].addEventListener('click', function () {
+        studyRange = Number(this.dataset.studyRange) || 14;
+        var all = modal.querySelectorAll('[data-study-range]');
+        for (var k = 0; k < all.length; k++) all[k].classList.toggle('on', all[k] === this);
+        drawStudyCharts(studyRange);
+      });
+    }
+    if (studyPage === 'detail') {
+      drawStudyCharts(studyRange);
+      renderStudyTop();
+    }
+  }
+
+  function renderStudySheet() {
+    var modal = els.modalRoot.querySelector('.modal.study-sheet');
+    if (!modal) return;
+    modal.innerHTML = studySheetHtml();
+    bindSheetButtons();
+  }
+
+  function openStudySheet() {
+    studyPage = 'brief';
+    studyRange = 14;
+    // 右侧滑出：复用弹窗的遮罩与退场逻辑（退场沿同一条路径回去，见 §7 空间一致性）
+    openModal(studySheetHtml(), { cls: 'study-sheet' });
+    bindClose();
+    bindSheetButtons();
+  }
+
   async function loadDashboard() {
     showView('dashboard');
     state.episodes = [];
@@ -325,6 +662,10 @@
     if (custom) {
       searchPlaceholder = '在本标签页内搜索…';
       searchValue = state.tabQuery[custom.id] || '';
+    } else if (tab === 'continue') {
+      // 「继续学习」标题行右侧：累计学习时长 + 学习记录入口。
+      // 做成入口而不是独立标签页 —— 它是附属功能，不该和「视频库 / 收藏夹库」抢位置。
+      tools += studyEntryHtml();
     } else if (tab === 'added') {
       searchPlaceholder = '在视频库中搜索…';
       searchValue = state.dashQuery;
@@ -4037,7 +4378,10 @@
 
     // 观看进度记录（节流保存；暂停/结束/离开页面时立即保存）
     // 播放器内核（ArtPlayer）由 player.js 管理，进度事件通过自定义事件转发
-    window.addEventListener('bilinest-timeupdate', function () { saveProgressNow(false); });
+    window.addEventListener('bilinest-timeupdate', function () {
+      sampleWatchTime();          // 先记下"这一小段真的看了多久"，再存进度
+      saveProgressNow(false);
+    });
     window.addEventListener('bilinest-pause', function () { saveProgressNow(true); });
     window.addEventListener('bilinest-ended', markFinished);
     window.addEventListener('beforeunload', function () { saveProgressNow(true); });
@@ -4145,6 +4489,12 @@
     if (tabRm) {
       e.stopPropagation();
       removeFromTab(tabRm.dataset.tabId, tabRm.dataset.tabKind, tabRm.dataset.tabRemove);
+      return;
+    }
+    // 「继续学习」标题行里的学习记录入口
+    var studyOpen = e.target.closest('[data-study-open]');
+    if (studyOpen) {
+      openStudySheet();
       return;
     }
     // 自定义标签页「＋ 添加内容」

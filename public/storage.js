@@ -57,6 +57,9 @@ window.BiliNestStore = (function () {
                                //   { key, kind, bvid, cid, page, title, cover, upper, seriesKey,
                                //     seriesTitle, episodeLabel, episodeCount, danmaku,
                                //     progress, duration, watchedAt, episodes?{key:{progress,...}} }
+    watchStats: null,         // 学习统计（由 app 层维护，见 app.js 的 trackWatchTime）：
+                              //   { daily: { 'YYYY-MM-DD': 秒 }, byKey: { '进度键': 秒 } }
+                              //   和别的数据一样存在 localStorage + 服务端备份里，不额外落盘
     hiddenHistoryKeys: [],    // 用户从“继续学习”栏手动隐藏的卡片（按合并键，历史数据保留）
     guideSeen: null           // 是否已看过首次启动引导（true = 不再显示）
   };
@@ -66,12 +69,31 @@ window.BiliNestStore = (function () {
 
   var state = load();
 
+  /**
+   * 学习统计的结构兜底：老数据没有这个字段时补上空结构。
+   * 注意**不要**让多处共享同一个对象：DEFAULTS 里的对象会被 Object.assign 复制引用，
+   * 所以每次加载都新建一份，避免 A 处把 B 处也改了。
+   */
+  function normalizeStats(s) {
+    var st = (s && typeof s === 'object') ? s : {};
+    return {
+      daily: (st.daily && typeof st.daily === 'object') ? st.daily : {},
+      byKey: (st.byKey && typeof st.byKey === 'object') ? st.byKey : {}
+    };
+  }
+
+  function withDefaults(raw) {
+    var merged = Object.assign({}, DEFAULTS, raw || {});
+    merged.watchStats = normalizeStats(merged.watchStats);
+    return merged;
+  }
+
   function load() {
     try {
       var raw = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
       if (raw && raw.v === 1) {
         loadedFromLocal = true;
-        return Object.assign({}, DEFAULTS, raw);
+        return withDefaults(raw);
       }
     } catch (e) {
       /* 数据损坏时回退默认值 */
@@ -83,12 +105,12 @@ window.BiliNestStore = (function () {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(legacy));
         localStorage.removeItem(LEGACY_STORAGE_KEY);
         loadedFromLocal = true;
-        return Object.assign({}, DEFAULTS, legacy);
+        return withDefaults(legacy);
       }
     } catch (e) {
       /* 旧数据损坏则忽略 */
     }
-    return Object.assign({}, DEFAULTS);
+    return withDefaults(null);
   }
 
   function save() {

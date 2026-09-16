@@ -349,6 +349,7 @@ npx electron .
 | [dash.js](https://github.com/Dash-Industry-Forum/dash.js) | v4.5.2 | Dash Industry Forum | BSD-3-Clause（见 `vendor/DASH_LICENSE`） | DASH 自适应码率流播放引擎 |
 | [artplayer-plugin-dash-control](https://github.com/zhw2590582/ArtPlayer) | v1.1.0 | Harvey Zhao | MIT（版权声明见文件头，全文见 `vendor/ARTPLAYER_LICENSE`） | ArtPlayer 清晰度下拉控件（配合 dash.js） |
 | [qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator) | — | Kazuhiko Arase | MIT（见 `public/vendor/qrcode.js` 文件头） | 登录二维码渲染 |
+| [uPlot](https://github.com/leeoniya/uPlot) | v1.6.32 | Leon Sorokin | MIT（见 `vendor/UPLOT_LICENSE`） | 学习统计的柱状图（每日时长 / 星期规律） |
 
 本项目本身以 MIT 许可证发布（见仓库根目录 `LICENSE`）。
 
