@@ -121,7 +121,7 @@ function reportText(data) {
   lines.push(`BiliNest 流量报告 · ${fmtTime(data.at)} · 仓库 ${data.repo}`);
   lines.push('');
   lines.push(`浏览    近 ${n} 天 ${v.recent.count} 次 / ${v.recent.uniques} 人 ${fmtDelta(v.recent.uniques, v.previous.uniques)}`);
-  lines.push(`克隆    近 ${n} 天 ${c.recent.count} 次 / ${c.recent.uniques} 人 ${fmtDelta(c.recent.uniques, c.previous.uniques)}`);
+  lines.push(`克隆    近 ${n} 天 ${c.recent.count} 次 / ${c.recent.uniques} 人（含机器人 / IDE 定时 fetch，别当人气指标）`);
   lines.push(`Star    ${data.meta.stargazers_count} 个（fork ${data.meta.forks_count} · watcher ${data.meta.subscribers_count}）`);
   lines.push(`新增 star ${newStars.length ? newStars.map((s) => `${s.login}（${fmtTime(s.at)}）`).join(' · ') : '无'}`);
   lines.push(`来源渠道 ${refs.length ? refs.join(' · ') : '暂无'}`);
@@ -130,7 +130,8 @@ function reportText(data) {
     lines.push(`点星时间线 ${starList.slice(-5).reverse().map((s) => `${s.login} ${fmtTime(s.at)}`).join(' · ')}`);
   }
   lines.push('');
-  lines.push('（traffic 接口只有最近 14 天、约一天延迟；数字与上次一致属正常）');
+  lines.push('（traffic 接口只有最近 14 天、约一天延迟；「克隆」把 git fetch 与自动抓取也算进去 ——');
+  lines.push('  代码索引 / release 聚合服务 / 依赖扫描都会克隆，看「浏览」「来源渠道」「star」才有意义）');
   return lines.join('\n');
 }
 
@@ -158,7 +159,8 @@ function reportHtml(data) {
   const rows = [
     row(`浏览（近 ${n} 天）`, `${v.recent.count} 次 ${delta(v.recent.uniques, v.previous.uniques)}`),
     row('独立访客', `${v.recent.uniques} 人 <span class="k">（上一周 ${v.previous.uniques}）</span>`),
-    row(`克隆（近 ${n} 天）`, `${c.recent.count} 次 / ${c.recent.uniques} 人 ${delta(c.recent.uniques, c.previous.uniques)}`),
+    row(`克隆（近 ${n} 天）`, `${c.recent.count} 次 / ${c.recent.uniques} 人 ${delta(c.recent.uniques, c.previous.uniques)} ` +
+      '<span class="k">含机器人 / IDE fetch</span>'),
     row('Star', `${data.meta.stargazers_count} 个 <span class="k">（fork ${data.meta.forks_count} · watcher ${data.meta.subscribers_count}）</span>`),
     row(`新增 star（近 ${n} 天）`, newStars.length
       ? newStars.map((s) => `<b>${esc(s.login)}</b> <span class="k">${fmtTime(s.at)}</span>`).join(' · ')
@@ -204,6 +206,7 @@ function reportHtml(data) {
   ${rows}
   <footer>
     数据来自 GitHub traffic / stargazers 接口（只有最近 14 天、约一天延迟）。
+    「克隆」把 git fetch 与自动抓取（代码索引、release 聚合、依赖扫描）也算进去，不是人气指标 —— 看浏览、来源渠道和 star 更准。
     <a href="https://github.com/${esc(data.repo)}">仓库</a> ·
     <a href="https://github.com/${esc(data.repo)}/releases">Releases</a> ·
     <a href="https://github.com/${esc(data.repo)}/graphs/traffic">GitHub 上的流量页</a>
