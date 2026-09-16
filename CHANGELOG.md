@@ -14,6 +14,16 @@
 
 ---
 
+## [Unreleased]
+
+### Fixed（修复）
+
+- **进播放页后必须先点一下，键盘快捷键才生效**：以前空格暂停、方向键调进度、↑↓ 音量都要先点一下播放区或进度条才起作用，否则完全没反应。
+  - 原因：ArtPlayer 的快捷键有个隐藏前置条件——只在其内部状态 `art.isFocus` 为 `true` 时处理按键，而 `isFocus` 仅在「document click 的目标落在播放器内部」时被置位。刚进播放页时它必然是 `false`，所以按键全被忽略。
+  - 修法：新增 `armHotkeys()`，在 `load()` / `loadLocal()` 载入视频后主动置位。**必须延到下一个事件循环**（`setTimeout(…, 0)`）——打开播放页的那次点击还在冒泡，ArtPlayer 的 `document:click` 处理器随后会把「目标不在播放器内」的点击判为 blur，同步设置会被它立刻覆盖。
+  - 涉及文件：`public/player.js`
+  - 验证：无头 Edge 实测——按真实时序模拟「点击 → 进播放页」后，向 document 派发 `ArrowRight`，`defaultPrevented === true`（快捷键已接管，无需手动点击）；随后再点一次播放器外部变为 `false`（「点外面即失效」的原有语义保持不变）。
+
 ## [1.2.2] - 2026-09-12
 
 ### Fixed（修复）

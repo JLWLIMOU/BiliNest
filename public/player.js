@@ -557,6 +557,26 @@ window.BiliNestPlayer = (function () {
            '&cid=' + encodeURIComponent(cid) + '&qn=' + (qn || 80);
   }
 
+  /**
+   * 让空格 / 方向键等快捷键在刚进播放页时就能用。
+   *
+   * ArtPlayer 的 hotkey 有个隐藏前置条件：只有 `art.isFocus === true` 时才处理
+   * 空格、方向键等（见其源码 hotkey 模块）。而 isFocus 仅在「document click 的
+   * 目标落在播放器内部」时被置位——所以刚进播放页、还没点过任何地方时，空格暂停、
+   * 方向键调进度全都没反应，必须先点一下播放区/进度条"激活"。
+   *
+   * 这里在载入视频后主动置位。**必须延到下一个事件循环**：打开播放页的那次点击
+   * 还在冒泡，ArtPlayer 的 document:click 处理器随后会把"目标不在播放器内"的
+   * 点击判为 blur；同步设置会被它立刻覆盖掉。
+   */
+  function armHotkeys() {
+    setTimeout(function () {
+      if (!state.art) return;
+      state.art.isFocus = true;
+      state.art.isInput = false;
+    }, 0);
+  }
+
   async function load(bvid, cid, resumeSeconds, opts) {
     opts = opts || {};
     reset();
@@ -580,6 +600,8 @@ window.BiliNestPlayer = (function () {
     state.art.type = 'dash';
     state.art.url = state.mpdUrl;
 
+    armHotkeys();   // 进播放页即可用快捷键，不必先点一下（详见 armHotkeys 注释）
+
     // 弹幕与字幕异步加载，失败不阻塞播放
     loadDanmaku(cid);
     loadSubtitles(bvid, cid);
@@ -600,6 +622,7 @@ window.BiliNestPlayer = (function () {
     showBiliControls(false);
     state.art.type = 'auto';
     state.art.url = url;
+    armHotkeys();
     return true;
   }
 
