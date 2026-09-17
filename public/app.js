@@ -919,6 +919,7 @@
     }
 
     els.dashboard.innerHTML = headHtml + tabsHtml + contentHtml;
+    fitPosterTitles(els.dashboard);   // 没封面图的卡片：量一遍标题能不能当海报放
 
     // 封面加载失败时隐藏图片
     var imgs = els.dashboard.querySelectorAll('img');
@@ -1616,9 +1617,13 @@
       : '<button type="button" class="card-remove" data-card-remove="' + esc(f.id) + '" title="从收藏夹库移除" aria-label="移除">✕</button>';
     return (
       '<article class="card folder-card" data-folder="' + esc(f.id) + '" title="' + esc(f.title) + '">' +
-        (cover ? '<div class="card-cover"><img src="' + esc(cover) + '" alt="" loading="lazy" referrerpolicy="no-referrer"></div>' : '') +
+        (cover
+          ? '<div class="card-cover"><img src="' + esc(cover) + '" alt="" loading="lazy" referrerpolicy="no-referrer"></div>'
+          : '<div class="card-cover ph ph--poster" style="--h:' + coverHue(f.title) + '">' + posterTitleHtml(f.title) + '</div>') +
         '<div class="card-body">' +
-          '<h3 class="card-title">' + esc(f.title) + '</h3>' +
+          (cover
+            ? '<h3 class="card-title">' + esc(f.title) + '</h3>'
+            : '<h3 class="card-title card-title--data">收藏夹</h3>') +
           '<div class="card-meta">' +
             '<span class="muted">' + (f.mediaCount != null ? f.mediaCount + ' 个视频' : '收藏夹') + '</span>' +
             starControl(f.id, f.stars || 0, 'folder') +
@@ -1730,6 +1735,7 @@
     } else {
       els.browseGrid.innerHTML = slice.map(videoCard).join('');
     }
+    fitPosterTitles(els.browseGrid);
     var imgs = els.browseGrid.querySelectorAll('img');
     for (var i = 0; i < imgs.length; i++) {
       imgs[i].addEventListener('error', function () {
@@ -2565,6 +2571,99 @@
     input.addEventListener('blur', function () { commit(true); });
   }
 
+  /* ---------------- 封面占位（没有封面图时） ---------------- */
+
+  /** 人工挑过的 10 套配色（只存基准色相，CSS 里派生另外两个色斑） */
+  var COVER_HUES = [212, 24, 156, 280, 336, 190, 44, 258, 12, 172];
+
+  /** 名字 → 固定配色下标：同一条内容每次打开颜色都一样 */
+  function coverHue(name) {
+    var s = String(name || '');
+    var h = 5381;
+    for (var i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
+    return COVER_HUES[h % COVER_HUES.length];
+  }
+
+  /** 取首字：跳过空白 / 括号 / 标点 / emoji，拿第一个"有意义的字" */
+  function firstGlyph(name) {
+    var chars = Array.from(String(name || '').trim());
+    var skip = /[\s\u3000【】「」『』（）()\[\]{}<>《》〈〉“”"'‘’·、，,。.！!？?：:；;～~—\-_/\\|]/;
+    var i = 0;
+    while (i < chars.length && (skip.test(chars[i]) || /\p{Extended_Pictographic}/u.test(chars[i]))) i++;
+    return chars[i] || chars[0] || '#';
+  }
+
+  /** 海报模式那行"数据"：本地文件夹 → 几个视频；本地单视频 → 多大；合集 → 共几集 */
+  function coverDataLine(v) {
+    var epCount = (v.episodes && v.episodes.length) || v.episodeCount || 0;
+    if (v.kind === 'local') {
+      if (v.isSeries && epCount) return epCount + ' 个视频';
+      // 单个本地视频：大小那行本来就由卡片下方的元数据行负责（"137.0 KB"），这里只标类型
+      return '本地视频';
+    }
+    if (v.isSeries && epCount) return '共 ' + epCount + ' 集';
+    return (v.upper && v.upper.name) || v.upper || 'B站视频';
+  }
+
+  /** 占位封面里最初渲染的"海报标题"（量完放不下就换掉） */
+  function posterTitleHtml(title) {
+    return '<span class="ph-title" data-title="' + esc(title) + '">' + esc(title) + '</span>';
+  }
+
+  /**
+   * 量一遍所有海报标题：
+   *   · 装得下（≥16px）→ 字号换算成 cqw，跟着卡片宽度等比缩放；
+   *   · 装不下 → 这一张退回"首字大字"，并把完整标题还给卡片下方那行。
+   * 容差 3px：line-height 的小数会被布局取整，scrollHeight 常比 clientHeight 大 1~3px。
+   */
+  var PH_MIN_FONT = 16;
+  var PH_MAX_FONT = 30;      // 海报标题的字号上限：再大就把封面吃掉了
+  function fitPosterTitles(root) {
+    if (!root) return;
+    var list = root.querySelectorAll('.card-cover.ph--poster .ph-title');
+    for (var i = 0; i < list.length; i++) {
+      var el = list[i];
+      var w = el.clientWidth;
+      if (!w) continue;                     // 隐藏视图里量不了，保持默认字号
+      var coverW = (el.closest('.card-cover') || el).clientWidth || w;
+      var lo = PH_MIN_FONT, hi = PH_MAX_FONT, best = 0;
+      for (var k = 0; k < 8; k++) {
+        var mid = (lo + hi) / 2;
+        el.style.fontSize = mid + 'px';
+        var fits = el.scrollHeight <= el.clientHeight + 3 && el.scrollWidth <= w + 1;
+        if (fits) { best = mid; lo = mid; } else { hi = mid; }
+      }
+      if (best >= PH_MIN_FONT) {
+        // cqw 是相对**封面宽度**的（容器查询单位），所以按封面宽换算，卡片变宽变窄自动等比
+        el.style.fontSize = (best / coverW * 100).toFixed(2) + 'cqw';
+        continue;
+      }
+      switchToGlyphCover(el);
+    }
+  }
+
+  /** 名字放不下：封面改成首字大字，卡片下方恢复完整标题 */
+  function switchToGlyphCover(titleEl) {
+    var cover = titleEl.closest('.card-cover');
+    var card = titleEl.closest('.card') || titleEl.closest('.hcard');
+    var title = titleEl.getAttribute('data-title') || titleEl.textContent || '';
+    titleEl.remove();
+    if (cover) {
+      cover.classList.remove('ph--poster');
+      cover.classList.add('ph--glyph');
+      var glyph = document.createElement('span');
+      glyph.className = 'ph-glyph';
+      glyph.setAttribute('aria-hidden', 'true');
+      glyph.textContent = firstGlyph(title);
+      cover.insertBefore(glyph, cover.firstChild);
+    }
+    var h3 = card && card.querySelector('.card-title');
+    if (h3) {
+      h3.textContent = title;
+      h3.classList.remove('card-title--data');
+    }
+  }
+
   /**
    * 视频卡片右上角「⋯」的菜单（右键卡片也走这里）：重命名 / 恢复原名 / 删除。
    * 收藏夹、UP主、继续学习三类卡片不参与改名，仍是原来的 ✕，见各自的渲染函数。
@@ -2626,8 +2725,15 @@
     var isAdded = !!(v.kind || v.addedAt);
     var epCount = (v.episodes && v.episodes.length) || v.episodeCount || 0;
     var localSeries = v.kind === 'local' && v.isSeries && epCount > 0;
-    // 本地文件现在也能读到时长（添加时用 <video> 探过），有就照常显示
-    var durLabel = v.kind === 'local' ? (localSeries ? epCount + ' 个视频' : (dur ? fmtDuration(dur) : '本地')) : fmtDuration(dur);
+    // 本地文件现在也能读到时长（添加时用 <video> 探过），有就照常显示。
+    // 本地文件夹列表：封面角标放"总大小"（"几个视频"那行移到卡片下方，见 coverDataLine）
+    var localBytes = 0;
+    if (localSeries) {
+      (v.episodes || []).forEach(function (ep) { localBytes += ep.size || 0; });
+    }
+    var durLabel = v.kind === 'local'
+      ? (localSeries ? (localBytes ? fmtSize(localBytes) : epCount + ' 个视频') : (dur ? fmtDuration(dur) : '本地'))
+      : fmtDuration(dur);
     var timeLabel = '';
     if (v.kind === 'local') {
       timeLabel = localSeries ? '文件夹' : (v.size ? fmtSize(v.size) : '本地视频');
@@ -2687,10 +2793,14 @@
         (ctx && ctx.tab ? ' data-tab-id="' + esc(ctx.tab) + '" data-tab-kind="video"' : '') +
         ' title="更多操作（重命名 / 删除）" aria-label="更多操作">' + menuDotsIcon() + '</button>';
     }
+    var title = titleOf(v);
+    var ph = !cover;
     return (
       '<article class="card" role="button" tabindex="0" data-id="' + esc(cardId) +
-      '" title="' + esc(titleOf(v)) + '">' +
-        '<div class="card-cover">' +
+      '" title="' + esc(title) + '">' +
+        '<div class="card-cover' + (ph ? ' ph ph--poster' : '') + '"' +
+          (ph ? ' style="--h:' + coverHue(title) + '"' : '') + '>' +
+          (ph ? posterTitleHtml(title) : '') +
           (cover ? '<img src="' + esc(cover) + '" alt="" loading="lazy" referrerpolicy="no-referrer">' : '') +
           '<span class="dur">' + esc(durLabel) + '</span>' +
           badge +
@@ -2700,7 +2810,9 @@
           removeBtn +
         '</div>' +
         '<div class="card-body">' +
-          '<h3 class="card-title">' + esc(titleOf(v)) + '</h3>' +
+          (ph
+            ? '<h3 class="card-title card-title--data">' + esc(coverDataLine(v)) + '</h3>'
+            : '<h3 class="card-title">' + esc(title) + '</h3>') +
           '<div class="card-meta">' +
             '<span class="up">' + esc(upName) + '</span>' +
             '<span>' + esc(timeLabel) + '</span>' +
