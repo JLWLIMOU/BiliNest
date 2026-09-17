@@ -1193,7 +1193,7 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
 .card-add:hover { background: var(--accent); }
 .card-add.added { background: var(--accent); cursor: default; }
 
-/* 卡片右上角状态区：蓝 ✓ = 在学习列表（库）；绿 ✓ = 在自定义标签页 */
+/* 卡片右上角状态区：蓝 ✓ = 在视频库；绿 ✓ = 在自定义标签页 */
 .card-flags {
   position: absolute;
   right: 8px;
@@ -1216,7 +1216,7 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
 }
 .card-flag-lib { background: var(--accent); }
 .card-flag-tab { background: var(--tab-green); }
-/* 淡绿 + ：加入当前自定义标签页（同时写入学习列表） */
+/* 淡绿 + ：加入当前自定义标签页（同时写入视频库） */
 .card-add-tab { background: var(--tab-green-soft); }
 .card-add-tab:hover { background: var(--tab-green); }
 /* 文字按钮：添加到自定义标签页… */

@@ -1596,7 +1596,7 @@
     var body;
     if (!folders.length) {
       body =
-        '<div class="empty-inline"><b>收藏夹库</b>还是空的 —— 在「内容源」的收藏夹列表中点击「加入学习」即可显示在这里。<br>' +
+        '<div class="empty-inline"><b>收藏夹库</b>还是空的 —— 在「内容源」的收藏夹列表中点击「加入收藏夹库」即可显示在这里。<br>' +
         '也可以先在「内容源」里直接观看某个收藏夹的视频。</div>';
     } else {
       var LIMIT = 12;
@@ -1953,7 +1953,7 @@
     if (document.getElementById('folderList')) loadFoldersIntoModal();
   }
 
-  /* ---------------- 学习列表（视频库 / 收藏夹库） ---------------- */
+  /* ---------------- 入库（视频库 / 收藏夹库） ---------------- */
   function isVideoAdded(bvid) {
     return (store.get('customVideos') || []).some(function (x) {
       return x.kind === 'bili' && x.bvid === bvid;
@@ -2019,12 +2019,12 @@
   /** 从收藏夹视频列表把单个视频加入“视频库”（mediaOverride 用于内容源搜索结果） */
   async function addFolderVideoToStudy(bvid, mediaOverride) {
     if (isVideoAdded(bvid)) {
-      toast('该视频已在学习列表');
+      toast('该视频已在视频库');
       return;
     }
     var id = await ensureVideoInLibrary(bvid, mediaOverride);
     if (!id) return;
-    toast('已添加到学习列表', 'success');
+    toast('已添加到视频库', 'success');
     renderGrid();
   }
 
@@ -2747,7 +2747,7 @@
     }
     var addBtn = '';
     if (state.activeFolder && v.bvid && !v.kind) {
-      // 右上角状态区：蓝✓ = 在学习列表（库）；绿✓ = 在某个自定义标签页
+      // 右上角状态区：蓝✓ = 在视频库；绿✓ = 在某个自定义标签页
       //  · 从自定义标签页进来：只出现一个淡绿 +（一次完成入库 + 入页），加完变两个 ✓
       //  · 从右上角内容源进来：原有蓝色 +/✓ 保留，另加一个「添加到」用于选标签页
       var added = isVideoAdded(v.bvid);
@@ -2758,18 +2758,18 @@
       if (ctxTab) {
         var inCtxTab = tabHasItem(ctxTab, 'video', libId);
         var addTabBtn = '<button type="button" class="card-add card-add-tab" data-video-add-tab="' + esc(v.bvid) +
-          '" title="添加到「' + esc(ctxTab.name) + '」标签页（同时加入学习列表）">+</button>';
+          '" title="添加到「' + esc(ctxTab.name) + '」标签页（同时加入视频库）">+</button>';
         if (!added && !inCtxTab) {
           flags += addTabBtn;
         } else {
-          if (added) flags += '<span class="card-flag card-flag-lib" title="已在学习列表">✓</span>';
+          if (added) flags += '<span class="card-flag card-flag-lib" title="已在视频库">✓</span>';
           if (inCtxTab) flags += '<span class="card-flag card-flag-tab" title="已在「' + esc(ctxTab.name) + '」标签页">✓</span>';
           else flags += addTabBtn;
         }
       } else {
         flags += added
-          ? '<span class="card-flag card-flag-lib" title="已在学习列表">✓</span>'
-          : '<button type="button" class="card-add" data-video-add="' + esc(v.bvid) + '" title="添加到学习列表">+</button>';
+          ? '<span class="card-flag card-flag-lib" title="已在视频库">✓</span>'
+          : '<button type="button" class="card-add" data-video-add="' + esc(v.bvid) + '" title="添加到视频库">+</button>';
         if (inTabs.length) {
           flags += '<span class="card-flag card-flag-tab" title="已在「' + esc(inTabs[0].name) + '」标签页">✓</span>';
         }
@@ -3489,7 +3489,7 @@
             '</div>' +
             starControl(f.id, study ? study.stars : 0, 'modal-folder') +
             '<button type="button" class="btn ghost small" data-folder-use="' + esc(f.id) + '">' + (active ? '当前' : '使用') + '</button>' +
-            '<button type="button" class="btn ghost small' + (study ? ' on' : '') + '" data-folder-study="' + esc(f.id) + '" title="' + (study ? '从收藏夹库移除' : '加入收藏夹库') + '">' + (study ? '已加入学习' : '加入学习') + '</button>' +
+            '<button type="button" class="btn ghost small' + (study ? ' on' : '') + '" data-folder-study="' + esc(f.id) + '" title="' + (study ? '从收藏夹库移除' : '加入收藏夹库') + '">' + (study ? '已在收藏夹库' : '加入收藏夹库') + '</button>' +
           '</div>'
         );
       }).join('');
@@ -3588,7 +3588,7 @@
             '<button type="button" class="fv-play" data-fv-play="' + i + '" title="播放" aria-label="播放">' +
               '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.14v13.72a1 1 0 0 0 1.52.85l11-6.86a1 1 0 0 0 0-1.7l-11-6.86A1 1 0 0 0 8 5.14z"/></svg>' +
             '</button>' +
-            '<button type="button" class="btn ghost small' + (added ? ' on' : '') + '" data-fv-add="' + i + '">' + (added ? '已添加' : '加入学习') + '</button>' +
+            '<button type="button" class="btn ghost small' + (added ? ' on' : '') + '" data-fv-add="' + i + '">' + (added ? '已在视频库' : '加入视频库') + '</button>' +
           '</li>'
         );
       }).join('') +
@@ -4517,8 +4517,8 @@
         '</section>' +
         '<section><h3>② 选择学习内容</h3>' +
           '<ol class="steps">' +
-            '<li>点击右上角「内容源」，选择收藏夹：<b>设为内容源</b> 只显示它，<b>加入学习</b> 会显示在收藏夹库；</li>' +
-            '<li>进入收藏夹后，点视频卡片上的 <b>+</b> 可把其中单个视频加入学习列表；内容源搜索到的收藏夹视频也能直接「加入学习」；</li>' +
+            '<li>点击右上角「内容源」，选择收藏夹：<b>设为内容源</b> 只显示它，<b>加入收藏夹库</b> 会显示在收藏夹库；</li>' +
+            '<li>进入收藏夹后，点视频卡片上的 <b>+</b> 可把其中单个视频加入视频库；内容源搜索到的收藏夹视频也能直接「加入视频库」；</li>' +
             '<li>也可以粘贴 B 站视频链接 / BV 号添加单个视频，或点「选择本地视频」；</li>' +
             '<li>给视频和收藏夹点星星打分（5 星最重要，优先显示），排序支持：添加时间 / 发布时间 / 星级 / 播放量。</li>' +
           '</ol>' +
@@ -5264,7 +5264,7 @@
     if (!mid) return;
     var ups = store.get('studyUps') || [];
     if (ups.some(function (u) { return String(u.mid) === String(mid); })) {
-      toast('该 UP主 已在学习列表中');
+      toast('该 UP主 已在「学习 UP主」里');
       return;
     }
     toast('正在获取 UP主 信息…');
@@ -5504,7 +5504,7 @@
 
   /**
    * 把收藏夹里的视频加入指定自定义标签页。
-   * 规则同前：先入库（学习列表）再入页；已在库/已在页都不会重复写。
+   * 规则同前：先入库（视频库）再入页；已在库/已在页都不会重复写。
    */
   async function addVideoToTab(bvid, tabId) {
     var tab = findCustomTab(tabId);
