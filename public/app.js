@@ -5428,6 +5428,12 @@
     });
     input.addEventListener('blur', function () { commit(true); });
     input.addEventListener('click', function (e) { e.stopPropagation(); });
+    /*
+     * 进入改名后标签会变宽（改名框比标签文字宽），但底下那块绿色"胶囊滑块"
+     * 还停在旧宽度上 —— 看起来就是"蓝框越出了绿框"。这里立刻重新对齐一次，
+     * 滑块会平滑地长到新宽度；改名结束后 renderDashboard() 会再同步回去。
+     */
+    syncTabIndicator();
   }
 
   /** 删除标签页（只删容器，库内容不动） */
