@@ -3250,6 +3250,7 @@
   }
 
   function showView(view) {
+    var from = state.currentView;
     state.currentView = view;
     els.dashboardView.hidden = view !== 'dashboard';
     els.homeView.hidden = view !== 'folder';
@@ -3259,7 +3260,17 @@
       state.activeFolder = null;
       state.pendingTabId = '';   // 回主页即结束「往某个标签页加内容」的上下文
     }
-    if (view !== 'player') stopPlayer();
+    if (view !== 'player') {
+      /*
+       * 离开播放页前先把进度写回。
+       * 原来只靠播放器的 pause 事件兜底，但 stopPlayer() 会紧接着把媒体元素拆掉
+       * （dash.js reset + 清 blob 地址），pause 事件是异步派发的，拆掉之后就不一定
+       * 还能到 —— 实测"返回列表"时进度会停在上一次 5 秒节流保存的位置。
+       * 这里趁视频还在、时间还是真的，补一次强制保存。
+       */
+      if (from === 'player') saveProgressNow(true);
+      stopPlayer();
+    }
     window.scrollTo({ top: 0 });
   }
 
