@@ -3060,26 +3060,27 @@
     openModal(
       '<div class="modal-head"><h2>内容源</h2><button type="button" class="icon-btn" data-close aria-label="关闭">×</button></div>' +
       '<div class="modal-body">' +
-        '<input id="sourceSearch" class="search-input" type="search" placeholder="搜索收藏夹 / 我的视频…" autocomplete="off" value="' + esc(state.sourceQuery) + '">' +
+        '<input id="sourceSearch" class="search-input" type="search" placeholder="搜索收藏夹 / 收藏夹内的视频…" autocomplete="off" value="' + esc(state.sourceQuery) + '">' +
         '<section><h3>收藏夹</h3>' +
           (login
             ? '<div id="folderList" class="folder-list"><p class="muted">加载中…</p></div>'
             : '<p class="muted">尚未登录，请先到「设置」完成 B 站登录，才能读取收藏夹。</p>') +
           '<div id="folderVideoResults" class="folder-video-results"></div>' +
         '</section>' +
-        '<section><h3>我的视频（单集 / 本地文件）</h3>' +
-          '<ul id="mineList" class="mine-list"></ul>' +
+        // 这里只负责"往里加"，加进来的东西统一在「视频库」里看 ——
+        // 以前这里还挂一份列表，和视频库重复，已经去掉。
+        '<section><h3>添加视频</h3>' +
           '<form id="addVideoForm" class="add-video">' +
             '<input id="addVideoInput" type="text" placeholder="粘贴 B 站视频链接 / BV 号 / av 号" autocomplete="off">' +
             '<button type="submit" class="btn primary">添加</button>' +
           '</form>' +
+          '<p class="muted small">粘贴单集链接，或选本地视频；加进来的都会出现在「视频库」标签页里。</p>' +
           '<div class="row"><button id="btnPickLocal" type="button" class="btn ghost">选择本地视频…</button></div>' +
         '</section>' +
       '</div>',
       { wide: true }
     );
     bindClose();
-    renderMineList();
     bindSourceModalEvents();
     if (login) loadFoldersIntoModal();
   }
@@ -3242,7 +3243,6 @@
     if (sourceSearch) {
       sourceSearch.addEventListener('input', function () {
         state.sourceQuery = this.value;
-        renderMineList();
         loadFoldersIntoModal();
         clearTimeout(state.sourceSearchTimer);
         var q = state.sourceQuery.trim().toLowerCase();
@@ -3333,64 +3333,8 @@
       });
     }
 
-    var mineList = document.getElementById('mineList');
-    mineList.addEventListener('click', function (e) {
-      var playBtn = e.target.closest('[data-mine-play]');
-      if (playBtn) {
-        var item = findMineItem(playBtn.dataset.minePlay);
-        if (item) {
-          closeModal();
-          playVideo(item, item.kind === 'local' ? 'local' : 'mine');
-        }
-        return;
-      }
-      var rmBtn = e.target.closest('[data-mine-remove]');
-      if (rmBtn) removeMineItem(rmBtn.dataset.mineRemove);
-    });
-
     document.getElementById('addVideoForm').addEventListener('submit', onAddVideo);
     document.getElementById('btnPickLocal').addEventListener('click', onPickLocal);
-  }
-
-  function renderMineList() {
-    var el = document.getElementById('mineList');
-    if (!el) return;
-    var items = store.get('customVideos') || [];
-    var q = (state.sourceQuery || '').trim().toLowerCase();
-    if (q) {
-      items = items.filter(function (it) {
-        var title = (it.title || it.name || '').toLowerCase();
-        var up = ((it.upper && it.upper.name) || it.upper || '').toLowerCase();
-        return title.indexOf(q) >= 0 || up.indexOf(q) >= 0;
-      });
-    }
-    if (!items.length) {
-      el.innerHTML = '<li class="muted">' + ((state.sourceQuery || '').trim() ? '没有匹配的视频。' : '暂无视频。可以粘贴 B 站链接，或选择本地视频。') + '</li>';
-      return;
-    }
-    el.innerHTML = items.map(function (it) {
-      var label = it.kind === 'local' ? (it.size ? fmtSize(it.size) : '本地视频') : 'B站视频';
-      var cover = (it.cover || '').replace(/^http:\/\//i, 'https://');
-      var thumb = it.kind !== 'local' && cover
-        ? '<img class="mine-thumb" src="' + esc(cover) + '" alt="" loading="lazy" referrerpolicy="no-referrer">'
-        : '';
-      return (
-        '<li class="mine-row">' +
-          thumb +
-          '<div class="mine-info">' +
-            '<span class="mine-name">' + esc(it.title || it.name || '未命名') + '</span>' +
-            '<span class="muted">' + esc(label) + '</span>' +
-          '</div>' +
-          '<button type="button" class="btn ghost small" data-mine-play="' + esc(it.id) + '">播放</button>' +
-          '<button type="button" class="btn ghost danger small" data-mine-remove="' + esc(it.id) + '">移除</button>' +
-        '</li>'
-      );
-    }).join('');
-    hideBrokenThumbs(el);
-  }
-
-  function findMineItem(id) {
-    return (store.get('customVideos') || []).find(function (x) { return String(x.id) === String(id); });
   }
 
   async function onAddVideo(e) {
@@ -3476,21 +3420,6 @@
     closeModal();
     loadDashboard();
     toast('已添加 ' + entries.length + ' 个本地视频', 'success');
-  }
-
-  async function removeMineItem(id) {
-    var list = store.get('customVideos') || [];
-    var item = list.find(function (x) { return String(x.id) === String(id); });
-    if (!item) return;
-    if (!window.confirm('移除「' + (item.title || item.name) + '」？')) return;
-    if (item.kind === 'local') await local.removeEntry(item);
-    var next = list.filter(function (x) { return String(x.id) !== String(id); });
-    store.set({ customVideos: next });
-    if (store.get('source') && store.get('source').kind === 'mine' && next.length === 0) {
-      store.set({ source: null });
-    }
-    renderMineList();
-    if (state.currentView === 'dashboard') renderDashboard();
   }
 
   /**

@@ -1665,7 +1665,7 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
   font-weight: 650;
 }
 
-/* 我的视频列表 */
+/* 视频条列表（内容源里的"收藏夹内匹配"结果用这套样式；类名沿用旧的 mine-* ） */
 .mine-list { list-style: none; margin: 0 0 14px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .mine-row {
   display: flex;
