@@ -1169,7 +1169,7 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
   transition: background var(--dur-2) var(--ease-state), color var(--dur-2) var(--ease-state);
 }
 .card-remove:hover { background: rgba(229, 72, 77, 0.14); color: #e5484d; }
-.card-menu { font-size: 15px; letter-spacing: 0.5px; }
+.card-menu-icon { width: 16px; height: 16px; fill: currentColor; display: block; }
 .card-menu:hover { background: rgba(255, 255, 255, 0.28); }
 
 /* ---------- 播放页 ---------- */

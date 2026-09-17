@@ -1613,7 +1613,7 @@
     var removeBtn =
       '<button type="button" class="card-menu" data-card-menu="' + esc(f.id) + '" data-card-menu-kind="folder"' +
       (ctx && ctx.tab ? ' data-tab-id="' + esc(ctx.tab) + '" data-tab-kind="folder"' : '') +
-      ' title="更多操作（重命名 / 移除）" aria-label="更多操作">⋯</button>';
+      ' title="更多操作（重命名 / 移除）" aria-label="更多操作">' + menuDotsIcon() + '</button>';
     return (
       '<article class="card folder-card" data-folder="' + esc(f.id) + '" title="' + esc(f.title) + '">' +
         (cover ? '<div class="card-cover"><img src="' + esc(cover) + '" alt="" loading="lazy" referrerpolicy="no-referrer"></div>' : '') +
@@ -2471,6 +2471,17 @@
     return v.customTitle || v.title || v.name || '未命名';
   }
 
+  /** 卡片右上角「更多操作」的图标：三个实心点（比文字版 ⋯ 稳、也对得齐） */
+  function menuDotsIcon() {
+    return (
+      '<svg class="card-menu-icon" viewBox="0 0 24 24" aria-hidden="true">' +
+        '<circle cx="5.5" cy="12" r="2.1"></circle>' +
+        '<circle cx="12" cy="12" r="2.1"></circle>' +
+        '<circle cx="18.5" cy="12" r="2.1"></circle>' +
+      '</svg>'
+    );
+  }
+
   /** 找到库里那条内容（视频库条目或收藏夹库条目） */
   function findLibraryEntry(kind, id) {
     var list = kind === 'folder' ? (store.get('studyFolders') || []) : (store.get('customVideos') || []);
@@ -2514,6 +2525,8 @@
 
   /** 卡片标题内联改名（右键卡片 → 重命名） */
   function startCardRename(cardEl, kind, id) {
+    // 传进来的可能是「⋯」按钮（菜单就是从它弹出的），先归一到卡片本身
+    if (cardEl && cardEl.closest) cardEl = cardEl.closest('.card') || cardEl;
     var h = cardEl && cardEl.querySelector('.card-title');
     if (!h) return;
     var entry = findLibraryEntry(kind, id);
@@ -2670,7 +2683,7 @@
         '<button type="button" class="card-menu" data-card-menu="' + esc(cardId) +
         '" data-card-menu-kind="video"' +
         (ctx && ctx.tab ? ' data-tab-id="' + esc(ctx.tab) + '" data-tab-kind="video"' : '') +
-        ' title="更多操作（重命名 / 删除）" aria-label="更多操作">⋯</button>';
+        ' title="更多操作（重命名 / 删除）" aria-label="更多操作">' + menuDotsIcon() + '</button>';
     }
     return (
       '<article class="card" role="button" tabindex="0" data-id="' + esc(cardId) +
@@ -5055,7 +5068,7 @@
         '</div>' +
         ('<button type="button" class="card-menu" data-card-menu="' + esc(String(up.mid)) + '" data-card-menu-kind="up"' +
           (ctx && ctx.tab ? ' data-tab-id="' + esc(ctx.tab) + '" data-tab-kind="up"' : '') +
-          ' title="更多操作" aria-label="更多操作">⋯</button>') +
+          ' title="更多操作" aria-label="更多操作">' + menuDotsIcon() + '</button>') +
       '</div>'
     );
   }
