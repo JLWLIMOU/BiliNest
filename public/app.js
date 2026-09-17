@@ -347,25 +347,29 @@
   }
 
   /**
-    * 打卡日历的窗口：**固定 N 周（N×7 格）**，形状永远不变。
-    *  - 开始记录那天放在**第一格**，往后一格一天地填；
-    *  - 填到最后一格（也就是"今天"正好落在第 N×7 格）之后，窗口开始跟着今天滑动，
-    *    此后最后一格恒为今天（近 N 周）。
-    * 所以新用户第一格就是他记下第一笔的那天，老用户看到的是最近 N 周。
+    * 打卡日历的窗口：**固定 N 周 × 7 天（N 列）× 7 行**，形状永远不变。
+    * 按 GitHub 贡献图的读法：一列 = 一周（周一在最上），一天往下走；时间往右推进。
+    *  - 开始记录那天所在的那一周，摆在**第一列**；
+    *  - 等今天走到第 N 列（也就是满 N 周）之后，窗口开始跟着今天滑动，
+    *    此后最后一列恒为本周，周日（未来）那几格留空 —— 和 GitHub 一样。
+    * 所以新用户看到的是"我从哪一周开始"，老用户看到的是最近 N 周。
     */
   function calendarWindow(daily, weeks) {
     var today = new Date();
     today.setHours(0, 0, 0, 0);
     var cap = weeks * 7;
-    var start = new Date(today.getTime() - (cap - 1) * 86400000);
+    var dow = (today.getDay() + 6) % 7;                        // 周一 = 0
+    var thisWeek = today.getTime() - dow * 86400000;           // 本周周一
+    var start = new Date(thisWeek - (weeks - 1) * 7 * 86400000);
     var anchored = false;
     var keys = Object.keys(daily || {}).filter(function (k) { return daily[k] > 0; }).sort();
     if (keys.length) {
       var first = new Date(keys[0] + 'T00:00:00');
       if (!isNaN(first.getTime())) {
-        // 还没填满 N 周：把"开始记录那天"钉在第一格
-        if (Math.round((today.getTime() - first.getTime()) / 86400000) + 1 < cap) {
-          start = first;
+        var firstWeek = first.getTime() - ((first.getDay() + 6) % 7) * 86400000;
+        // 还没满 N 周：把"开始记录那一周"钉在第一列
+        if (thisWeek - firstWeek < (weeks - 1) * 7 * 86400000) {
+          start = new Date(firstWeek);
           anchored = true;
         }
       }
@@ -379,9 +383,9 @@
   }
 
   /**
-    * 打卡日历：一格一天，方块铺满一整块。
-    * 日子**从左往右走**（不是 GitHub 那种一周竖成一列、往下走一天），
-    * 一行放满就换行 —— 所以最后一天（今天）落在右下角。
+    * 打卡日历：一格一天，方格铺满一整块。
+    * 按 GitHub 贡献图的读法：**一列 = 一周（周一在最上），一天往下走**，时间往右推进。
+    * 左边一列小字标出周一 / 周四 / 周日，方便对上"哪一行是周末"。
    */
   function studyCalendarHtml(daily, weeks) {
     var win = calendarWindow(daily, weeks);
@@ -406,7 +410,10 @@
       cells += '<span class="cal-cell' + (ts === today.getTime() ? ' today' : '') +
         '" data-lv="' + lv + '" title="' + esc(tip) + '"></span>';
     }
-    return '<div class="study-cal" style="--cal-cols:' + weeks + '">' + cells + '</div>' +
+    return '<div class="study-cal-wrap">' +
+        '<div class="cal-wd" aria-hidden="true"><span style="grid-row:1">一</span><span style="grid-row:4">四</span><span style="grid-row:7">日</span></div>' +
+        '<div class="study-cal">' + cells + '</div>' +
+      '</div>' +
       '<div class="cal-legend"><span>少</span>' +
         '<span class="cal-cell" data-lv="0"></span><span class="cal-cell" data-lv="1"></span>' +
         '<span class="cal-cell" data-lv="2"></span><span class="cal-cell" data-lv="3"></span>' +

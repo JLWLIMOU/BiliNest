@@ -806,13 +806,19 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
 }
 .study-sub .small { font-weight: 400; }
 
-/* 打卡日历：一格一天，**日子从左往右**、放满一行就换行（CSS grid 排的格子，不是图表库）。
-   保持原来热力图那块的形状与格子大小（12px 方块、4px 缝），只把走向从"往下一天"
-   改成"往右一天" —— 最后一天落在右下角。 */
+/* 打卡日历：一格一天，按 GitHub 贡献图的读法排 ——
+   一列 = 一周（周一在最上、往下走一天），时间往右推进（CSS grid 排的格子，不是图表库）。 */
+.study-cal-wrap { display: flex; align-items: flex-start; gap: 6px; }
+.cal-wd {
+  display: grid; grid-template-rows: repeat(7, 12px); gap: 4px;
+  width: 12px; flex: none;
+  color: var(--text-2); font-size: 9.5px; line-height: 12px; text-align: center;
+}
 .study-cal {
   display: grid;
-  grid-template-columns: repeat(var(--cal-cols, 12), 12px);
-  grid-auto-rows: 12px;
+  grid-template-rows: repeat(7, 12px);
+  grid-auto-columns: 12px;
+  grid-auto-flow: column;
   gap: 4px;
   justify-content: start;
   padding: 0 0 4px;
