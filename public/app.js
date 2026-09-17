@@ -1610,15 +1610,15 @@
   function folderCard(f, ctx) {
     var cover = (f.cover || '').replace(/^http:\/\//i, 'https://');
     // ctx.tab 存在时表示卡片渲染在自定义标签页内：✕ 只把成员移出本页，不动库
-    var removeBtn =
-      '<button type="button" class="card-menu" data-card-menu="' + esc(f.id) + '" data-card-menu-kind="folder"' +
-      (ctx && ctx.tab ? ' data-tab-id="' + esc(ctx.tab) + '" data-tab-kind="folder"' : '') +
-      ' title="更多操作（重命名 / 移除）" aria-label="更多操作">' + menuDotsIcon() + '</button>';
+    // 收藏夹卡片不参与改名，保持原来的 ✕（从收藏夹库移除 / 从本页移除）
+    var removeBtn = ctx && ctx.tab
+      ? '<button type="button" class="card-remove" data-tab-remove="' + esc(f.id) + '" data-tab-id="' + esc(ctx.tab) + '" data-tab-kind="folder" title="从本标签页移除（不会移出收藏夹库）" aria-label="从本标签页移除">✕</button>'
+      : '<button type="button" class="card-remove" data-card-remove="' + esc(f.id) + '" title="从收藏夹库移除" aria-label="移除">✕</button>';
     return (
       '<article class="card folder-card" data-folder="' + esc(f.id) + '" title="' + esc(f.title) + '">' +
         (cover ? '<div class="card-cover"><img src="' + esc(cover) + '" alt="" loading="lazy" referrerpolicy="no-referrer"></div>' : '') +
         '<div class="card-body">' +
-          '<h3 class="card-title">' + esc(titleOf(f)) + '</h3>' +
+          '<h3 class="card-title">' + esc(f.title) + '</h3>' +
           '<div class="card-meta">' +
             '<span class="muted">' + (f.mediaCount != null ? f.mediaCount + ' 个视频' : '收藏夹') + '</span>' +
             starControl(f.id, f.stars || 0, 'folder') +
@@ -1755,6 +1755,13 @@
       e.stopPropagation();
       openCardMenu(menuBtn, menuBtn.dataset.cardMenuKind, menuBtn.dataset.cardMenu,
         menuBtn.dataset.tabId ? { tabId: menuBtn.dataset.tabId, tabKind: menuBtn.dataset.tabKind } : null);
+      return;
+    }
+    var rmBtn = e.target.closest('[data-card-remove]');
+    if (rmBtn) {
+      e.stopPropagation();
+      if (rmBtn.closest('.folder-card')) removeStudyFolder(rmBtn.dataset.cardRemove);
+      else removeCustomVideo(rmBtn.dataset.cardRemove);
       return;
     }
     var more = e.target.closest('[data-browse]');
@@ -2559,38 +2566,33 @@
   }
 
   /**
-   * 卡片右上角「⋯」的菜单（右键卡片也走这里）：重命名 / 恢复原名 / 删除。
-   * ctx.tabId 存在时，最后一项是"从本标签页移除"（不动库）。
+   * 视频卡片右上角「⋯」的菜单（右键卡片也走这里）：重命名 / 恢复原名 / 删除。
+   * 收藏夹、UP主、继续学习三类卡片不参与改名，仍是原来的 ✕，见各自的渲染函数。
+   * ctx.tabId 存在时（自定义标签页内），最后一项是"从本标签页移除"（不动库）。
    */
   function openCardMenu(anchor, kind, id, ctx) {
+    if (kind !== 'video') return;
     ctx = ctx || {};
     var entry = findLibraryEntry(kind, id);
-    var items = [];
-    if (kind === 'video' || kind === 'folder') {
-      if (!entry) return;
-      items.push({ label: '重命名', onClick: function () { startCardRename(anchor, kind, id); } });
-      if (entry.customTitle) {
-        items.push({
-          label: '恢复原名',
-          onClick: function () {
-            renameLibraryEntry(kind, id, '');
-            toast('已恢复原名', 'success');
-            renderDashboard();
-            if (state.currentView === 'browse') renderBrowse();
-          }
-        });
-      }
+    if (!entry) return;
+    var items = [{ label: '重命名', onClick: function () { startCardRename(anchor, kind, id); } }];
+    if (entry.customTitle) {
+      items.push({
+        label: '恢复原名',
+        onClick: function () {
+          renameLibraryEntry(kind, id, '');
+          toast('已恢复原名', 'success');
+          renderDashboard();
+          if (state.currentView === 'browse') renderBrowse();
+        }
+      });
     }
     if (ctx.tabId) {
       items.push({
-        label: kind === 'up' ? '从本标签页移除' : '从本标签页移除',
+        label: '从本标签页移除',
         note: true,
         onClick: function () { removeFromTab(ctx.tabId, ctx.tabKind || kind, id); }
       });
-    } else if (kind === 'folder') {
-      items.push({ label: '从收藏夹库移除', danger: true, onClick: function () { removeStudyFolder(id); } });
-    } else if (kind === 'up') {
-      items.push({ label: '移除 UP主', danger: true, onClick: function () { removeStudyUp(String(id)); } });
     } else {
       items.push({ label: '删除', danger: true, onClick: function () { removeCustomVideo(id); } });
     }
@@ -2603,15 +2605,14 @@
       if (!root || root.dataset.cardMenuBound) return;
       root.dataset.cardMenuBound = '1';
       root.addEventListener('contextmenu', function (e) {
-        var card = e.target.closest('.card[data-id], .card[data-folder], .card[data-up-mid]');
+        // 只有视频卡片能改名；其它卡片的 ✕ 各管各的
+        var card = e.target.closest('.card[data-id]');
         if (!card) return;
         e.preventDefault();
         // 「⋯」按钮上带着 tab 上下文，右键时直接借用它，省得在卡片上再挂一份
         var btn = card.querySelector('[data-card-menu]');
-        var kind = (btn && btn.dataset.cardMenuKind) ||
-          (card.dataset.folder ? 'folder' : (card.dataset.upMid ? 'up' : 'video'));
-        var id = (btn && btn.dataset.cardMenu) || card.dataset.id || card.dataset.folder || card.dataset.upMid;
-        openCardMenu(card, kind, id, btn && btn.dataset.tabId ? { tabId: btn.dataset.tabId, tabKind: btn.dataset.tabKind } : null);
+        var id = (btn && btn.dataset.cardMenu) || card.dataset.id;
+        openCardMenu(card, 'video', id, btn && btn.dataset.tabId ? { tabId: btn.dataset.tabId, tabKind: btn.dataset.tabKind } : null);
       });
     });
   }
@@ -4824,6 +4825,27 @@
         menuBtn.dataset.tabId ? { tabId: menuBtn.dataset.tabId, tabKind: menuBtn.dataset.tabKind } : null);
       return;
     }
+    var rmBtn = e.target.closest('[data-card-remove]');
+    if (rmBtn) {
+      e.stopPropagation();
+      // 收藏夹库卡片 → 移除收藏夹；其余 → 从视频库删除
+      if (rmBtn.closest('.folder-card')) removeStudyFolder(rmBtn.dataset.cardRemove);
+      else removeCustomVideo(rmBtn.dataset.cardRemove);
+      return;
+    }
+    var upRm = e.target.closest('[data-up-remove]');
+    if (upRm) {
+      e.stopPropagation();
+      removeStudyUp(upRm.dataset.upRemove);
+      return;
+    }
+    // 自定义标签页内卡片 → 只从本页移除
+    var tabRm = e.target.closest('[data-tab-remove]');
+    if (tabRm) {
+      e.stopPropagation();
+      removeFromTab(tabRm.dataset.tabId, tabRm.dataset.tabKind, tabRm.dataset.tabRemove);
+      return;
+    }
     // 「继续学习」标题行里的学习记录入口
     var studyOpen = e.target.closest('[data-study-open]');
     if (studyOpen) {
@@ -5066,9 +5088,9 @@
             starControl(up.mid, up.stars, 'studyUp') +
           '</div>' +
         '</div>' +
-        ('<button type="button" class="card-menu" data-card-menu="' + esc(String(up.mid)) + '" data-card-menu-kind="up"' +
-          (ctx && ctx.tab ? ' data-tab-id="' + esc(ctx.tab) + '" data-tab-kind="up"' : '') +
-          ' title="更多操作" aria-label="更多操作">' + menuDotsIcon() + '</button>') +
+        (ctx && ctx.tab
+          ? '<button type="button" class="card-remove" data-tab-remove="' + esc(String(up.mid)) + '" data-tab-id="' + esc(ctx.tab) + '" data-tab-kind="up" title="从本标签页移除（不会移出学习 UP主）" aria-label="从本标签页移除">✕</button>'
+          : '<button type="button" class="card-remove" data-up-remove="' + esc(String(up.mid)) + '" title="移除 UP主" aria-label="移除">✕</button>') +
       '</div>'
     );
   }
