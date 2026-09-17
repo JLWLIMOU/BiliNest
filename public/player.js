@@ -459,6 +459,9 @@ window.BiliNestPlayer = (function () {
       vol = delta < 0 ? Math.min(1, vol + step) : Math.max(0, vol - step);
       art.muted = vol === 0;
       art.volume = vol; // ArtPlayer 自动显示“音量: xx%”
+      // 用我们自己的文案覆盖内置那句（内置是「音量: 50」，没有百分号也不带静音态）；
+      // 位置由 styles.css 统一挪到画面正中。
+      if (art.notice) art.notice.show = vol === 0 ? '静音' : '音量 ' + Math.round(vol * 100) + '%';
     }, { passive: false });
   }
 
@@ -997,6 +1000,9 @@ window.BiliNestPlayer = (function () {
     state.subtitleOn = !state.subtitleOn;
     setNativeSubtitleVisible(state.subtitleOn);
     updateSubtitleControl();
+    if (state.art && state.art.notice) {
+      state.art.notice.show = '字幕 ' + (state.subtitleOn ? '开' : '关');
+    }
   }
 
   function updateSubtitleControl() {
@@ -1045,7 +1051,9 @@ window.BiliNestPlayer = (function () {
         // v5 的签名是 switch(url, options)：第二个参数要传对象，传字符串会被当成选项展开
         if (sub) {
           if (sub.switch) {
-            var r = sub.switch(state.subtitleVttUrl, { type: 'vtt', name: '字幕' });
+            // 不带 name：否则 ArtPlayer 会在加载时弹一句"Switch Subtitle: 字幕"
+            // 那种中英混排的提示；开关状态由 toggleSubtitle 自己提示。
+            var r = sub.switch(state.subtitleVttUrl, { type: 'vtt' });
             if (r && r.catch) r.catch(function () { /* 失败按"没有字幕"处理，见 updateSubtitleControl */ });
           } else if (sub.load) {
             sub.load(state.subtitleVttUrl, 'vtt');

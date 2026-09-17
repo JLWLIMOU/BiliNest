@@ -1174,6 +1174,26 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
 
 /* ---------- 播放页 ---------- */
 /*
+ * 播放器提示（音量 / 字幕开关等）放到**画面正中间**。
+ * ArtPlayer 默认把 .art-notice 贴在左上角（inset: 0 0 auto + 左对齐），
+ * 而且它的样式是运行时注入 <head> 的，比 styles.css 更靠后 ——
+ * 所以这里用 #customPlayer 提高优先级来压过它（不靠 !important）。
+ */
+#customPlayer .art-notice {
+  inset: 0;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+#customPlayer .art-notice .art-notice-inner {
+  padding: 10px 18px;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+/*
  * 播放页跟随应用主题，**只有视频壳是黑的**。
  * 这里曾经做成"深色影院舞台"（整块 #0a0a0c + 令牌换一整套）：理论上像 macOS 的
  * Apple TV 播放器，实际在浅色页面里就是"中间浮着一块黑板"——用户一眼就看出不对。
