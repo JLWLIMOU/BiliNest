@@ -176,22 +176,6 @@ window.BiliNestAPI = (function () {
     return request('/x/web-interface/view', { params: params, creds: creds });
   }
 
-  /** 播放地址（自研播放器用，fnval=0 返回可直接播放的 progressive MP4） */
-  async function playurl(bvid, cid, qn, creds) {
-    return request('/x/player/wbi/playurl', {
-      params: {
-        bvid: bvid,
-        cid: cid,
-        qn: qn || 80,
-        fnval: 0,
-        fourk: 1,
-        platform: 'html5',
-        high_quality: 1
-      },
-      creds: creds
-    });
-  }
-
   /** 分 P 列表（用于缺失 cid 时按页码解析出正确的 cid） */
   async function pagelist(bvid, creds) {
     return request('/x/player/pagelist', { params: { bvid: bvid }, creds: creds });
@@ -315,7 +299,6 @@ window.BiliNestAPI = (function () {
     folders: folders,
     folderVideos: folderVideos,
     videoInfo: videoInfo,
-    playurl: playurl,
     pagelist: pagelist,
     danmakuXml: danmakuXml,
     danmakuSegments: danmakuSegments,

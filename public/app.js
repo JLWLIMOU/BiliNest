@@ -55,6 +55,7 @@
     episodePanel: document.getElementById('episodePanel'),
     episodeList: document.getElementById('episodeList'),
     fileInput: document.getElementById('fileInput'),
+    dirInput: document.getElementById('dirInput'),
     modalRoot: document.getElementById('modalRoot'),
     toastRoot: document.getElementById('toastRoot'),
     backendBanner: document.getElementById('backendBanner'),
@@ -2466,10 +2467,12 @@
     var upName = (v.upper && v.upper.name) || v.upper || '';
     var isFolder = !!state.activeFolder && !v.kind;
     var isAdded = !!(v.kind || v.addedAt);
-    var durLabel = v.kind === 'local' ? '本地' : fmtDuration(dur);
+    var epCount = (v.episodes && v.episodes.length) || v.episodeCount || 0;
+    var localSeries = v.kind === 'local' && v.isSeries && epCount > 0;
+    var durLabel = v.kind === 'local' ? (localSeries ? epCount + ' 个视频' : '本地') : fmtDuration(dur);
     var timeLabel = '';
     if (v.kind === 'local') {
-      timeLabel = v.size ? fmtSize(v.size) : '本地视频';
+      timeLabel = localSeries ? '文件夹' : (v.size ? fmtSize(v.size) : '本地视频');
     } else {
       var sort = store.get('sort') || 'add';
       var ts = sort === 'pub' ? (v.pubtime || v.ctime) : (v.fav_time || v.addedAt);
@@ -2667,6 +2670,40 @@
     }
   }
 
+  /**
+   * 播放一个本地条目（单视频 / 本地列表里的一集）。
+   * @param {object} entry {id, name, kind:'local', ...}
+   * @param {boolean} keepEpisodes 是否保留当前选集面板（本地列表切集时用）
+   */
+  async function playLocalEntry(entry, keepEpisodes) {
+    var url = local.getUrl(entry.id);
+    if (!url) {
+      toast('正在恢复本地文件…');
+      url = await local.restoreEntry(entry);
+    }
+    if (!url) {
+      toast('无法读取本地文件，请重新添加该视频', 'error');
+      loadDashboard();
+      return;
+    }
+    setProgressCtx({
+      key: entry.id, kind: 'local', title: entry.name || '本地视频',
+      cover: '', upper: '', bvid: '', cid: '', page: 1
+    });
+    var rec = findHistory(entry.id);
+    var resumeSec =
+      rec && rec.progress >= 10 && (!rec.duration || rec.progress < rec.duration - 10)
+        ? rec.progress
+        : 0;
+    els.playerTitle.textContent = entry.name || '本地视频';
+    els.playerTitle.title = els.playerTitle.textContent;
+    if (!keepEpisodes) {
+      els.episodePanel.hidden = true;
+      els.playerLayout.classList.remove('has-episodes');
+    }
+    BiliNestPlayer.loadLocal(url, resumeSec);
+  }
+
   async function playVideo(v, sourceKind) {
     state.activeVideo = v;
     state.episodes = [];
@@ -2707,23 +2744,36 @@
       // 本地视频：复用 ArtPlayer 内核（无弹幕/清晰度），支持自动续播
       BiliNestPlayer.stop();
       els.biliFrame.hidden = true;
-      var url = local.getUrl(v.id);
-      if (!url) {
-        toast('正在恢复本地文件…');
-        url = await local.restoreEntry(v);
-      }
-      if (!url) {
-        toast('无法读取本地文件，请重新添加该视频', 'error');
-        loadDashboard();
+      // 本地文件夹列表：把文件当"剧集"，先摆好选集面板，再接着最近看的那一集播
+      if (v.isSeries && v.episodes && v.episodes.length) {
+        state.episodes = v.episodes.map(function (ep) {
+          return {
+            kind: 'local',
+            id: ep.id,
+            cid: ep.id,          // 复用 cid 字段当"当前集标识"，选集面板的高亮逻辑直接可用
+            page: 1,
+            title: ep.name,
+            duration: ep.duration || 0,
+            entry: ep
+          };
+        });
+        var pickIdx = 0;
+        var newestAt = -1;
+        for (var ei = 0; ei < state.episodes.length; ei++) {
+          var h = findHistory(state.episodes[ei].id);
+          if (h && (h.watchedAt || 0) > newestAt) { newestAt = h.watchedAt || 0; pickIdx = ei; }
+        }
+        var target = state.episodes[pickIdx];
+        state.activeEpisode = { id: target.id, cid: target.cid, page: 1 };
+        els.episodePanel.hidden = false;
+        els.playerLayout.classList.add('has-episodes');
+        sizeEpisodePanel();
+        renderEpisodeList(target.cid, 1, true);
+        updateEpisodeNav();
+        await playLocalEntry(target.entry, true);
         return;
       }
-      setProgressCtx({ key: v.id, kind: 'local', title: v.name || '本地视频', cover: '', upper: '', bvid: '', cid: '', page: 1 });
-      var rec = findHistory(v.id);
-      var resumeSec =
-        rec && rec.progress >= 10 && (!rec.duration || rec.progress < rec.duration - 10)
-          ? rec.progress
-          : 0;
-      BiliNestPlayer.loadLocal(url, resumeSec);
+      await playLocalEntry(v, false);
       return;
     }
 
@@ -2940,6 +2990,14 @@
   function playEpisodeAt(idx) {
     var ep = state.episodes[idx];
     if (!ep) return;
+    // 本地列表里的一集：换文件即可，选集面板保持不动
+    if (ep.kind === 'local') {
+      state.activeEpisode = { id: ep.id, cid: ep.cid, page: 1 };
+      renderEpisodeList(ep.cid, 1);
+      updateEpisodeNav();
+      playLocalEntry(ep.entry || { id: ep.id, name: ep.title, kind: 'local' }, true);
+      return;
+    }
     state.activeEpisode = { bvid: ep.bvid, cid: ep.cid, page: ep.page || 1 };
     if (ep.bvid !== (state.activeVideo && state.activeVideo.bvid)) {
       els.playerTitle.textContent = ep.title || els.playerTitle.textContent;
@@ -3104,8 +3162,11 @@
             '<input id="addVideoInput" type="text" placeholder="粘贴 B 站视频链接 / BV 号 / av 号" autocomplete="off">' +
             '<button type="submit" class="btn primary">添加</button>' +
           '</form>' +
-          '<p class="muted small">粘贴单集链接，或选本地视频；加进来的都会出现在「视频库」标签页里。</p>' +
-          '<div class="row"><button id="btnPickLocal" type="button" class="btn ghost">选择本地视频…</button></div>' +
+          '<p class="muted small">粘贴单集链接，或选本地视频 / 文件夹；加进来的都会出现在「视频库」标签页里。</p>' +
+          '<div class="row">' +
+            '<button id="btnPickLocal" type="button" class="btn ghost">选择本地视频…</button>' +
+            '<button id="btnPickFolder" type="button" class="btn ghost">选择文件夹…</button>' +
+          '</div>' +
         '</section>' +
       '</div>',
       { wide: true }
@@ -3365,6 +3426,7 @@
 
     document.getElementById('addVideoForm').addEventListener('submit', onAddVideo);
     document.getElementById('btnPickLocal').addEventListener('click', onPickLocal);
+    document.getElementById('btnPickFolder').addEventListener('click', onPickFolder);
   }
 
   async function onAddVideo(e) {
@@ -3453,6 +3515,60 @@
   }
 
   /**
+   * 添加一个"本地文件夹列表"：文件夹里的视频合成一个卡片（和 B 站合集一样是列表），
+   * 卡片标题用文件夹名，点进播放页后在选集面板里按文件名挑。
+   */
+  function addLocalFolder(res) {
+    if (!res || !res.episodes || !res.episodes.length) {
+      toast('这个文件夹里没有找到视频文件（支持 mp4 / mkv / webm / mov / avi / flv / ts / m4v）', 'error');
+      return;
+    }
+    var seriesId = 'locdir-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    var item = {
+      id: seriesId,
+      kind: 'local',
+      isSeries: true,
+      seriesKey: 'dir:' + seriesId,
+      title: res.name,
+      name: res.name,
+      episodes: res.episodes,
+      episodeCount: res.episodes.length,
+      addedAt: Date.now(),
+      stars: 0
+    };
+    var list = store.get('customVideos') || [];
+    list.unshift(item);
+    store.set({ customVideos: list, source: { kind: 'mine', name: '我的视频' } });
+    closeModal();
+    loadDashboard();
+    toast('已添加文件夹「' + res.name + '」（' + res.episodes.length + ' 个视频）', 'success');
+  }
+
+  async function onPickFolder() {
+    var res = null;
+    try {
+      res = await local.pickDirectory();
+    } catch (e) {
+      if (e && e.name === 'AbortError') return;
+      toast('无法打开文件夹选择器：' + (e.message || e), 'error');
+      return;
+    }
+    if (!res) {
+      // 不支持 showDirectoryPicker：回退到隐藏的 <input webkitdirectory>
+      els.dirInput.click();
+      return;
+    }
+    addLocalFolder(res);
+  }
+
+  function onDirInputChange() {
+    if (!els.dirInput.files || !els.dirInput.files.length) return;
+    var res = local.entriesFromDirFiles(els.dirInput.files);
+    els.dirInput.value = '';
+    addLocalFolder(res);
+  }
+
+  /**
    * 从“视频库”删除：列表/剧集整季删除（含所有分P/合集），并清理对应观看记录。
    * 单视频按 bvid/id 匹配；合集按 seriesKey 匹配。
    */
@@ -3474,7 +3590,16 @@
   function doRemoveCustomVideo(item, scopeKey, silent) {
     var isSeries = !!item.seriesKey;
     var list = store.get('customVideos') || [];
-    if (item.kind === 'local') local.removeEntry(item);
+    if (item.kind === 'local') {
+      // 本地文件夹列表：每个文件都有各自的句柄，要一起清掉
+      if (item.isSeries && item.episodes && item.episodes.length) {
+        item.episodes.forEach(function (ep) {
+          try { local.removeEntry(ep); } catch (e) { /* ignore */ }
+        });
+      } else {
+        local.removeEntry(item);
+      }
+    }
     var remain = list.filter(function (x) {
       var k = x.seriesKey || (x.bvid ? 'b:' + x.bvid : 'id:' + x.id);
       return k !== scopeKey;
@@ -4485,6 +4610,7 @@
     els.btnLoadMore.addEventListener('click', loadMore);
     els.episodeList.addEventListener('click', onEpisodeClick);
     els.fileInput.addEventListener('change', onFileInputChange);
+    els.dirInput.addEventListener('change', onDirInputChange);
 
     document.addEventListener('keydown', function (e) {
       if (e.key === 'Escape' && els.modalRoot.innerHTML) closeModal();

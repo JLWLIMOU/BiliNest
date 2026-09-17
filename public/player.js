@@ -40,6 +40,8 @@ window.BiliNestPlayer = (function () {
   var subtitleSeq = 0;
   // 弹幕请求序号：与字幕同理，防止旧视频的弹幕覆盖新视频
   var danmakuSeq = 0;
+  // MPD 请求序号：清空/切集时让还没回来的 MPD 请求失效
+  var mpdSeq = 0;
 
   var state = {
     art: null,              // ArtPlayer 实例（懒加载，只创建一次）
@@ -183,6 +185,23 @@ window.BiliNestPlayer = (function () {
           html: '<span class="bilinest-ctl">字幕</span>',
           tooltip: '字幕开关',
           click: function () { toggleSubtitle(); }
+        },
+        {
+          name: 'substyle',
+          position: 'right',
+          index: 13,
+          html: '<span class="bilinest-ctl">Aa</span>',
+          tooltip: '字幕字号 / 位置',
+          selector: subStyleItems(),
+          onSelect: function (item) {
+            if (item && item.value) {
+              var p = String(item.value).split(':');
+              var patch = {};
+              patch[p[0]] = p[0] === 'pos' ? Number(p[1]) : p[1];
+              setSubSettings(patch);
+            }
+            return item ? item.html : '';
+          }
         }
       ],
       plugins: [
@@ -222,15 +241,11 @@ window.BiliNestPlayer = (function () {
           if (art.dash && art.dash.reset) {
             try { art.dash.reset(); } catch (e) { /* ignore */ }
           }
-          // 直接用相对路径（同源），避免任何绝对 URL/跨域/Headers 问题
           var player = window.dashjs.MediaPlayer().create();
-          try {
-            var ck = (typeof store !== 'undefined' && store.getCookie && store.getCookie()) || '';
-            if (ck) {
-              player.updateSettings({ streaming: { httpHeaders: { Cookie: ck } } });
-            }
-            player.initialize(art.video, url, false);
-            art.dash = player;
+          art.dash = player;
+          var mySeq = ++mpdSeq;
+          var mpdBlobUrl = '';
+          function bindEvents() {
             var ev = (window.dashjs.MediaPlayer.events && window.dashjs.MediaPlayer.events.STREAM_INITIALIZED) || 'streamInitialized';
             var errEv = (window.dashjs.MediaPlayer.events && window.dashjs.MediaPlayer.events.ERROR) || 'error';
             var mpdEv = (window.dashjs.MediaPlayer.events && window.dashjs.MediaPlayer.events.MANIFEST_LOADED) || 'manifestLoaded';
@@ -247,12 +262,47 @@ window.BiliNestPlayer = (function () {
               var info = e && e.error ? (e.error.code + ':' + (e.error.message || '')) : (e && e.message) || 'unknown';
               console.error('[bilinest][dash] dash.js 错误：', info, e);
             });
-          } catch (e) {
-            console.error('[bilinest][dash] 初始化异常：', e && e.message, e);
           }
+          /*
+           * MPD 由前端自己带凭据取回来，再以 blob 交给 dash.js。原因有三：
+           *   1. 这个版本的 dash.js 不认 streaming.httpHeaders（控制台会报
+           *      "Settings parameter streaming.httpHeaders is not supported"）；
+           *   2. 浏览器的 fetch/XHR 禁止 JS 设置 Cookie 头，只能走自定义头（X-Bili-Cookie）；
+           *   3. 不带凭据拉 MPD = 未登录档位，清晰度会被卡在 480P（实测 1080→480）。
+           * MPD 里的 BaseURL 由服务端写成绝对地址，所以 blob 相对路径解析不会出问题。
+           */
+          var ck = (typeof store !== 'undefined' && store.getCookie && store.getCookie()) || '';
+          fetch(url, { headers: ck ? { 'X-Bili-Cookie': ck } : {} })
+            .then(function (res) {
+              if (!res.ok) throw new Error('MPD HTTP ' + res.status);
+              return res.text();
+            })
+            .then(function (xml) {
+              if (mySeq !== mpdSeq) return;             // 已经切到别的视频
+              mpdBlobUrl = URL.createObjectURL(new Blob([xml], { type: 'application/dash+xml' }));
+              art.mpdBlobUrl = mpdBlobUrl;
+              bindEvents();
+              try {
+                player.initialize(art.video, mpdBlobUrl, false);
+              } catch (e) {
+                console.error('[bilinest][dash] 初始化异常：', e && e.message, e);
+                handleLoadError();
+              }
+            })
+            .catch(function (e) {
+              if (mySeq !== mpdSeq) return;
+              console.error('[bilinest][dash] MPD 获取失败：', e && e.message);
+              handleLoadError();
+            });
           return function () {
             try { if (player) player.reset(); } catch (e) { /* ignore */ }
-            art.dash = null;
+            var last = mpdBlobUrl;
+            mpdBlobUrl = '';
+            if (last) {
+              try { URL.revokeObjectURL(last); } catch (e) { /* ignore */ }
+              if (art.mpdBlobUrl === last) art.mpdBlobUrl = null;
+            }
+            if (art.dash === player) art.dash = null;
           };
         }
       }
@@ -262,10 +312,12 @@ window.BiliNestPlayer = (function () {
     els.endOverlay = els.player.querySelector('#endOverlay');
     applySubSettings(); // 字幕位置 / 字号（可能已持久化，先恢复再显示）
     bindEndOverlay();
-    // ArtPlayer 模板里自带一个空 <track>（src=""），我们不用它的字幕模块，
-    // 移除它可避免浏览器对空 track 发起无意义的请求
-    var emptyTrack = els.player.querySelector('track');
-    if (emptyTrack) emptyTrack.remove();
+    // ArtPlayer 模板里自带 <track default kind="metadata" src="">：
+    //   · src="" 会被解析成当前页面地址，浏览器会白请求一次 —— 所以清掉 src；
+    //   · 但这个 <track> 不能删！字幕组件只认 video.textTracks[0]，
+    //     没有它就 switch() 直接 return null（点了字幕没反应，见下方 loadSubtitles）。
+    var tplTrack = els.player.querySelector('track');
+    if (tplTrack) tplTrack.removeAttribute('src');
     bindArtEvents();
     bindWheel();
     return art;
@@ -685,6 +737,19 @@ window.BiliNestPlayer = (function () {
     showBiliControls(false);
     state.art.type = 'auto';
     state.art.url = url;
+    /*
+     * 本地视频没有 dash 实例，但 ArtPlayer 会照常触发 clearness-control 插件的 ready：
+     * 插件内部直接调 art.dash.getVideoElement()，于是每次播本地视频都抛一个
+     * "Cannot read properties of undefined (reading 'getVideoElement')"。
+     * 给它一个空壳（视频元素对得上、码率列表为空），插件拿到空列表就自己 return 了。
+     */
+    state.art.dash = {
+      getVideoElement: function () { return state.art.template.$video; },
+      getBitrateInfoListFor: function () { return []; },
+      getTracksFor: function () { return []; },
+      getCurrentTrackFor: function () { return null; },
+      reset: function () { /* 本地视频没有 dash 实例可重置 */ }
+    };
     armHotkeys();
     return true;
   }
@@ -820,17 +885,48 @@ window.BiliNestPlayer = (function () {
     if (store && store.set) store.set({ subSettings: state.subSettings });
   }
 
+  /** 改一项字幕设置（字号 / 位置）并立即生效 + 持久化 */
+  function setSubSettings(patch) {
+    state.subSettings = {
+      pos: patch.pos !== undefined ? patch.pos : state.subSettings.pos,
+      size: patch.size !== undefined ? patch.size : state.subSettings.size
+    };
+    saveSubSettings();
+    applySubSettings();
+  }
+
+  /** 「Aa」下拉里的选项：字号四档 + 位置三档（当前值带勾） */
+  function subStyleItems() {
+    var s = state.subSettings || { pos: 100, size: 'md' };
+    return [
+      { html: '字号：小', value: 'size:sm', default: s.size === 'sm' },
+      { html: '字号：中', value: 'size:md', default: s.size === 'md' },
+      { html: '字号：大', value: 'size:lg', default: s.size === 'lg' },
+      { html: '字号：特大', value: 'size:xl', default: s.size === 'xl' },
+      { html: '位置：贴底', value: 'pos:0', default: Number(s.pos) === 0 },
+      { html: '位置：中间', value: 'pos:50', default: Number(s.pos) === 50 },
+      { html: '位置：最高', value: 'pos:100', default: Number(s.pos) === 100 }
+    ];
+  }
+
   /** 字幕位置映射：滑块 0~100 → 距底部 2%~16%，始终位于底部区域做微调 */
   function subPosToBottom(v) {
     var x = Math.min(100, Math.max(0, Number(v) || 0));
     return 2 + (x / 100) * 14;
   }
 
-  /** 取 ArtPlayer 原生字幕 DOM 节点（加载后才有）；初始化阶段 art.player 可能尚未就绪，需容错 */
+  /**
+   * 取 ArtPlayer 原生字幕 DOM 节点。
+   * 注意：v5 里 `art.player` 是播放器 API 对象（不是 DOM），拿它 querySelector 会抛错，
+   * 所以只能走模板引用 `art.template.$subtitle`（就是那个 .art-subtitle 层）。
+   */
   function nativeSubtitleEl() {
     try {
-      if (!state.art || !state.art.player) return null;
-      return state.art.player.querySelector('.art-subtitle');
+      var art = state.art;
+      if (!art) return null;
+      if (art.template && art.template.$subtitle) return art.template.$subtitle;
+      var el = document.querySelector('#customPlayer .art-subtitle');
+      return el || null;
     } catch (e) { return null; }
   }
 
@@ -876,7 +972,8 @@ window.BiliNestPlayer = (function () {
       var h = Math.floor(sec / 3600);
       var m = Math.floor((sec % 3600) / 60);
       var s = Math.floor(sec % 60);
-      var ms = Math.round((sec - Math.floor(sec)) * 1000);
+    // 四舍五入可能得到 1000（如 12.9999）→ 会写出 4 位毫秒的非法时间戳，夹一下
+    var ms = Math.min(999, Math.round((sec - Math.floor(sec)) * 1000));
       return p2(h) + ':' + p2(m) + ':' + p2(s) + '.' + p3(ms);
     }
     var lines = ['WEBVTT', ''];
@@ -923,7 +1020,8 @@ window.BiliNestPlayer = (function () {
       if (mySeq !== subtitleSeq) return; // 已切到其它视频，丢弃过期结果
       var subs = v2 && v2.subtitle && v2.subtitle.subtitles;
       if (subs && subs.length) {
-        var pick = subs.find(function (s) { return /^zh/i.test(s.lan); }) || subs[0];
+        // B 站的语言码：普通 CC 是 zh-CN / zh-Hans，AI 字幕是 ai-zh —— 两种都算中文
+        var pick = subs.find(function (s) { return /^(ai-)?zh/i.test(s.lan); }) || subs[0];
         // 兼容 // 开头与 http:// 的地址，统一转成 https
         var subUrl = String(pick.subtitle_url || '');
         if (/^\/\//.test(subUrl)) subUrl = 'https:' + subUrl;
@@ -944,7 +1042,15 @@ window.BiliNestPlayer = (function () {
       state.subtitleVttUrl = URL.createObjectURL(new Blob([vtt], { type: 'text/vtt' }));
       var sub = state.art && state.art.subtitle;
       try {
-        if (sub) { if (sub.switch) sub.switch(state.subtitleVttUrl, 'vtt'); else if (sub.load) sub.load(state.subtitleVttUrl, 'vtt'); }
+        // v5 的签名是 switch(url, options)：第二个参数要传对象，传字符串会被当成选项展开
+        if (sub) {
+          if (sub.switch) {
+            var r = sub.switch(state.subtitleVttUrl, { type: 'vtt', name: '字幕' });
+            if (r && r.catch) r.catch(function () { /* 失败按"没有字幕"处理，见 updateSubtitleControl */ });
+          } else if (sub.load) {
+            sub.load(state.subtitleVttUrl, 'vtt');
+          }
+        }
       } catch (e) { /* ignore */ }
       applySubSettings();             // 应用字号 / 位置样式
       setNativeSubtitleVisible(false); // 默认关，由用户手动开
@@ -956,7 +1062,7 @@ window.BiliNestPlayer = (function () {
   /** 本地视频没有弹幕/字幕/画质，隐藏对应控件 */
   function showBiliControls(show) {
     if (!state.art) return;
-    ['danmaku', 'subtitle'].forEach(function (name) {
+    ['danmaku', 'subtitle', 'substyle', 'dash-quality'].forEach(function (name) {
       var el = state.art.controls[name];
       if (el) el.style.display = show ? '' : 'none';
     });
@@ -968,6 +1074,7 @@ window.BiliNestPlayer = (function () {
     clearPendingRetry();
     subtitleSeq++; // 使尚未完成的字幕请求失效，避免旧视频字幕覆盖新视频
     danmakuSeq++;  // 同理，使尚未完成的弹幕请求失效
+    mpdSeq++;      // 同理，让还没回来的 MPD 请求失效
     state.kind = '';
     state.bvid = '';
     state.cid = '';
@@ -993,6 +1100,10 @@ window.BiliNestPlayer = (function () {
     state.qualityTries = 0;
     if (state.art) {
       try { state.art.pause(); } catch (e) { /* ignore */ }
+      if (state.art.mpdBlobUrl) {
+        try { URL.revokeObjectURL(state.art.mpdBlobUrl); } catch (e) { /* ignore */ }
+        state.art.mpdBlobUrl = null;
+      }
       // 切换视频前释放 dash.js 实例（ArtPlayer 不会自动清理自定义源）
       if (state.art.dash) {
         try { state.art.dash.reset(); } catch (e) { /* ignore */ }

@@ -17,7 +17,7 @@
     img-src 'self' data: http://*.hdslb.com https://*.hdslb.com http://*.biliimg.com https://*.biliimg.com https://*.bilivideo.com;
     frame-src https://player.bilibili.com https://passport.bilibili.com;
     media-src 'self' blob: https://*.bilivideo.com http://*.bilivideo.com;
-    connect-src 'self' http://127.0.0.1:* https://api.bilibili.com https://app.bilibili.com;
+    connect-src 'self' blob: data: http://127.0.0.1:* https://api.bilibili.com https://app.bilibili.com;
     worker-src 'self' blob:;
     base-uri 'none';
     form-action 'none';
@@ -188,6 +188,8 @@
 
   <!-- 本地视频文件选择的兜底方案（File System Access API 不可用时使用） -->
   <input type="file" id="fileInput" accept="video/*" multiple hidden>
+  <!-- 本地文件夹选择的兜底方案（不支持 showDirectoryPicker 时用 webkitdirectory） -->
+  <input type="file" id="dirInput" webkitdirectory directory multiple hidden>
 
   <!-- 本地化的 MIT 协议二维码生成库（qrcode-generator） -->
   <script src="vendor/qrcode.js"></script>

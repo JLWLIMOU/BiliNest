@@ -156,6 +156,97 @@ window.BiliNestLocal = (function () {
     return entries;
   }
 
+  var VIDEO_RE = /\.(mp4|mkv|webm|mov|avi|flv|ts|m4v)$/i;
+
+  /** 文件名自然排序（"第2集" 排在 "第10集" 前面） */
+  function byName(a, b) {
+    try {
+      return a.name.localeCompare(b.name, 'zh-Hans-CN', { numeric: true, sensitivity: 'base' });
+    } catch (e) {
+      return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+    }
+  }
+
+  function makeEntry(id, name, size, lastModified, handle) {
+    return {
+      id: id,
+      kind: 'local',
+      name: name,
+      size: size,
+      lastModified: lastModified,
+      addedAt: Date.now(),
+      stars: 0,
+      handle: !!handle,
+      url: null
+    };
+  }
+
+  function newId() {
+    return 'local-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+  }
+
+  /**
+   * 通过系统文件夹选择器选一个文件夹，把里面的视频解析成"一个列表"。
+   * 返回 { name, episodes:[条目] }；浏览器不支持该 API 时返回 null（调用方回退 input[webkitdirectory]）。
+   */
+  async function pickDirectory() {
+    if (!window.showDirectoryPicker) return null;
+    var dir = await window.showDirectoryPicker({ id: 'bilinest-folder', mode: 'read' });
+    var files = [];
+    try {
+      for await (var handle of dir.values()) {
+        if (!handle || handle.kind !== 'file') continue;
+        if (!VIDEO_RE.test(handle.name)) continue;
+        files.push(handle);
+      }
+    } catch (e) {
+      /* 遍历中断：用已拿到的部分 */
+    }
+    files.sort(byName);
+    var episodes = [];
+    for (var i = 0; i < files.length; i++) {
+      var file = null;
+      try { file = await files[i].getFile(); } catch (e) { continue; }
+      var id = newId();
+      try { await putHandle(id, files[i]); } catch (e) { /* 句柄存不下也能本次会话播放 */ }
+      urlMap.set(id, URL.createObjectURL(file));
+      var ep = makeEntry(id, files[i].name, file.size, file.lastModified, true);
+      ep.url = urlMap.get(id);
+      episodes.push(ep);
+    }
+    return { name: dir.name, episodes: episodes };
+  }
+
+  /**
+   * 兜底：<input type="file" webkitdirectory> 的 FileList（Firefox / Safari 走这条路）。
+   * 以 webkitRelativePath 的第一段为文件夹名，其余的同级视频作为列表项。
+   */
+  function entriesFromDirFiles(fileList) {
+    var files = [];
+    for (var i = 0; i < fileList.length; i++) {
+      var f = fileList[i];
+      var rel = f.webkitRelativePath || f.name;
+      var parts = rel.split('/');
+      if (parts.length < 2) continue;            // 必须来自子目录
+      if (!VIDEO_RE.test(f.name)) continue;
+      files.push({ file: f, rel: rel, name: parts[parts.length - 1], dir: parts[0] });
+    }
+    if (!files.length) return null;
+    files.sort(byName);
+    var target = files[0].dir;
+    var episodes = [];
+    for (var j = 0; j < files.length; j++) {
+      if (files[j].dir !== target) continue;     // 只收同一个文件夹（多选时取第一层）
+      var id = newId();
+      var url = URL.createObjectURL(files[j].file);
+      urlMap.set(id, url);
+      var ep = makeEntry(id, files[j].name, files[j].file.size, files[j].file.lastModified, false);
+      ep.url = url;
+      episodes.push(ep);
+    }
+    return { name: target, episodes: episodes };
+  }
+
   /** 兜底：由 <input type=file> 的 FileList 生成条目（仅本次会话可播放） */
   function entriesFromFiles(fileList) {
     var entries = [];
@@ -223,6 +314,8 @@ window.BiliNestLocal = (function () {
 
   return {
     pickFiles: pickFiles,
+    pickDirectory: pickDirectory,
+    entriesFromDirFiles: entriesFromDirFiles,
     entriesFromFiles: entriesFromFiles,
     restoreEntry: restoreEntry,
     getUrl: getUrl,

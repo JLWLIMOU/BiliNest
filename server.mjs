@@ -760,7 +760,14 @@ function isPlayableCodec(codecs) {
   return c.startsWith('avc1') || c.startsWith('mp4a');
 }
 
-function buildMpd(dash) {
+/**
+ * 生成 MPD。
+ * @param {object} dash  playurl 返回的 dash 数据
+ * @param {string} origin 本服务的来源（如 http://127.0.0.1:4173）
+ *   BaseURL 写成**绝对地址**：前端会把 MPD 以 blob: 交给 dash.js（为了带凭据拉取），
+ *   blob 里的相对路径没法解析，只能用绝对地址。
+ */
+function buildMpd(dash, origin) {
   const duration = Number(dash.duration) || 0;
   const mediaPresentationDuration = duration > 0 ? ` mediaPresentationDuration="PT${duration}S"` : '';
   let videoReps = (dash.video || []).filter((v) => isPlayableCodec(v.codecs));
@@ -768,7 +775,7 @@ function buildMpd(dash) {
   if (!videoReps.length) videoReps = dash.video || [];
   videoReps = videoReps.map((v) => {
     const alts = [v.baseUrl].concat(v.backup_url || []).filter(Boolean);
-    const base = '/api/video?url=' + encodeURIComponent(alts[0]) +
+    const base = origin + '/api/video?url=' + encodeURIComponent(alts[0]) +
       (alts.length > 1 ? '&alt=' + encodeURIComponent(alts.slice(1).join('|')) : '');
     const sb = segBaseXml(v.SegmentBase || v.segmentBase);
     return (
@@ -785,7 +792,7 @@ function buildMpd(dash) {
   if (!audioReps.length) audioReps = dash.audio || [];
   audioReps = audioReps.map((a) => {
     const alts = [a.baseUrl].concat(a.backup_url || []).filter(Boolean);
-    const base = '/api/video?url=' + encodeURIComponent(alts[0]) +
+    const base = origin + '/api/video?url=' + encodeURIComponent(alts[0]) +
       (alts.length > 1 ? '&alt=' + encodeURIComponent(alts.slice(1).join('|')) : '');
     const sb = segBaseXml(a.SegmentBase || a.segmentBase);
     return (
@@ -826,7 +833,9 @@ async function handleDashMpd(req, res, url) {
     if (!dash || !dash.video || !dash.video.length) {
       return sendJson(res, 502, { code: -502, message: '未获取到 DASH 流' });
     }
-    const mpd = buildMpd(dash);
+    const proto = req.socket && req.socket.encrypted ? 'https' : 'http';
+    const origin = proto + '://' + (req.headers.host || '127.0.0.1');
+    const mpd = buildMpd(dash, origin);
     const vKeep = (dash.video || []).filter((v) => isPlayableCodec(v.codecs)).length || (dash.video || []).length;
     const aKeep = (dash.audio || []).filter((a) => isPlayableCodec(a.codecs)).length || (dash.audio || []).length;
     log(`[dash.mpd] bvid=${bvid} cid=${cid} video=${vKeep}/${dash.video.length} audio=${aKeep}/${(dash.audio || []).length}`);
