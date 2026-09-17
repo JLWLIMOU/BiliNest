@@ -324,15 +324,15 @@
   }
 
   /**
-   * 打卡日历：近 N 周，一格一天。
-   * 排版按"日历"来 —— 一行是一周，**日子从左往右走**（周一在最左），上一行是上一周，
-   * 顶上带一行星期表头；不是 GitHub 那种把一周竖起来、往下走一天的热力图。
+    * 打卡日历：近 N 周，一格一天，方块铺满一整块。
+    * 日子**从左往右走**（不是 GitHub 那种一周竖成一列、往下走一天），
+    * 一行放满就换行 —— 所以最后一天（今天）落在右下角。
    */
   function studyCalendarHtml(daily, weeks) {
     var today = new Date();
     today.setHours(0, 0, 0, 0);
-    var dow = (today.getDay() + 6) % 7;                       // 周一 = 0
-    var start = new Date(today.getTime() - (dow + (weeks - 1) * 7) * 86400000);
+    // 近 N 周 = 从 (N×7-1) 天前一直到今天，最后一格正好是今天（落在右下角）
+    var start = new Date(today.getTime() - (weeks * 7 - 1) * 86400000);
     var max = 0;
     Object.keys(daily).forEach(function (k) { if (daily[k] > max) max = daily[k]; });
     var cells = '';
@@ -350,11 +350,7 @@
       cells += '<span class="cal-cell' + (ts === today.getTime() ? ' today' : '') +
         '" data-lv="' + lv + '" title="' + esc(tip) + '"></span>';
     }
-    var head = '';
-    var WD = ['一', '二', '三', '四', '五', '六', '日'];
-    for (var w = 0; w < 7; w++) head += '<span>' + WD[w] + '</span>';
-    return '<div class="study-cal-head">' + head + '</div>' +
-      '<div class="study-cal">' + cells + '</div>' +
+    return '<div class="study-cal" style="--cal-cols:' + weeks + '">' + cells + '</div>' +
       '<div class="cal-legend"><span>少</span>' +
         '<span class="cal-cell" data-lv="0"></span><span class="cal-cell" data-lv="1"></span>' +
         '<span class="cal-cell" data-lv="2"></span><span class="cal-cell" data-lv="3"></span>' +
@@ -408,7 +404,30 @@
     var color = opts.tone === 'green' ? green : accent;
     var maxV = Math.max(1, Math.max.apply(null, values));
     var width = host.clientWidth || 360;
+    var barPaths = uPlot.paths.bars({ size: [0.6, 16] });
     var data = [labels.map(function (_, i) { return i; }), values];
+    var series = [
+      { value: function (u, v) { return labels[v] == null ? '' : labels[v]; } },
+      {
+        stroke: color,
+        fill: /^#[0-9a-f]{6}$/i.test(color) ? color + '22' : 'rgba(0,113,227,.12)',
+        paths: barPaths,
+        points: { show: false },
+        value: function (u, v) { return v == null ? '' : v + ' 分钟'; }
+      }
+    ];
+    // 最后一根柱子是"今天"：其它柱子是淡填充 + 描边，今天这根填实，一眼能认出来
+    var todayIdx = opts.highlightLast && values.length ? values.length - 1 : -1;
+    if (todayIdx >= 0 && values[todayIdx] != null) {
+      data.push(values.map(function (v, i) { return i === todayIdx ? v : null; }));
+      series.push({
+        stroke: color,
+        fill: color,
+        paths: barPaths,
+        points: { show: false },
+        value: function () { return ''; }
+      });
+    }
     host._uplot = new uPlot({
       width: width,
       height: opts.height || 160,
@@ -423,22 +442,27 @@
           var i = u.cursor.idx;
           if (i == null || values[i] == null) { tip.hidden = true; return; }
           tip.hidden = false;
-          tip.textContent = (labels[i] || '') + ' · ' + values[i] + ' 分钟';
+          tip.textContent = (i === todayIdx ? '今天 ' : '') + (labels[i] || '') + ' · ' + values[i] + ' 分钟';
         }]
       },
-      scales: { x: { time: false }, y: { range: [0, maxV * 1.2] } },
-      series: [
-        { value: function (u, v) { return labels[v] == null ? '' : labels[v]; } },
-        {
-          stroke: color,
-          fill: /^#[0-9a-f]{6}$/i.test(color) ? color + '22' : 'rgba(0,113,227,.12)',
-          paths: uPlot.paths.bars({ size: [0.6, 16] }),
-          points: { show: false },
-          value: function (u, v) { return v == null ? '' : v + ' 分钟'; }
-        }
-      ],
+      // 横轴两端各留半格：不留的话最右边那根柱子（今天）会被画到画布外面，
+      // 连同它下面 "9/17" 的刻度文字一起被切掉一半。
+      scales: {
+        x: { time: false, range: function (u, min, max) { return [min - 0.5, max + 0.5]; } },
+        y: { range: [0, maxV * 1.2] }
+      },
+      series: series,
       axes: [
         { stroke: text2, font: '11px system-ui, sans-serif', size: 26, grid: { show: false }, ticks: { show: false },
+          // 刻度从"今天"往回数：这样最右边那根柱子（今天）永远带日期，
+          // 不用指望 uPlot 自动挑出来的"整数档"刚好落在最后一天上。
+          splits: function () {
+            var n = labels.length;
+            var step = Math.max(1, Math.ceil((n - 1) / 5));
+            var out = [];
+            for (var i = n - 1; i >= 0; i -= step) out.unshift(i);
+            return out;
+          },
           values: function (u, ticks) { return ticks.map(function (t) { return labels[t] || ''; }); } },
         { stroke: text2, font: '11px system-ui, sans-serif', size: 34, grid: { stroke: grid, width: 1 }, ticks: { stroke: grid } }
       ]
@@ -454,7 +478,7 @@
       labels.push((d.getMonth() + 1) + '/' + d.getDate());
       values.push(Math.round((daily[dayKeyOf(d.getTime())] || 0) / 60));
     }
-    drawBars(document.getElementById('studyDaily'), labels, values, { height: 170 });
+    drawBars(document.getElementById('studyDaily'), labels, values, { height: 170, highlightLast: true });
 
     // 一周里的规律：按星期几取平均（只算有记录的天）
     var sum = [0, 0, 0, 0, 0, 0, 0];

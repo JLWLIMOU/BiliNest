@@ -806,36 +806,27 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
 }
 .study-sub .small { font-weight: 400; }
 
-/* 打卡日历：一格一天，**一行一周、日子从左往右**（CSS grid 排的格子，不是图表库）。
-   格子保持原来热力图那种小方块，不拉伸 —— 拉成长条就不好看了。 */
-.study-cal-head {
-  display: grid;
-  grid-template-columns: repeat(7, 22px);
-  gap: 7px;
-  justify-content: center;
-  margin: 0 0 6px;
-  color: var(--text-2);
-  font-size: 11px;
-  text-align: center;
-}
+/* 打卡日历：一格一天，**日子从左往右**、放满一行就换行（CSS grid 排的格子，不是图表库）。
+   保持原来热力图那块的形状与格子大小（12px 方块、4px 缝），只把走向从"往下一天"
+   改成"往右一天" —— 最后一天落在右下角。 */
 .study-cal {
   display: grid;
-  grid-template-columns: repeat(7, 22px);   /* 7 列 = 周一…周日，一行一周 */
-  grid-auto-rows: 22px;
-  gap: 7px;
-  justify-content: center;
+  grid-template-columns: repeat(var(--cal-cols, 12), 12px);
+  grid-auto-rows: 12px;
+  gap: 4px;
+  justify-content: start;
   padding: 0 0 4px;
 }
 /* 格子尺寸交给网格（见 .study-cal .cal-cell），这里只给图例用的小方块兜底 */
 .cal-cell { width: 12px; height: 12px; border-radius: 3px; background: var(--fill); }
-.study-cal .cal-cell { width: 100%; height: 100%; border-radius: 4px; }
+.study-cal .cal-cell { width: 100%; height: 100%; }
 .cal-cell[data-lv="1"] { background: color-mix(in srgb, var(--accent) 22%, transparent); }
 .cal-cell[data-lv="2"] { background: color-mix(in srgb, var(--accent) 42%, transparent); }
 .cal-cell[data-lv="3"] { background: color-mix(in srgb, var(--accent) 68%, transparent); }
 .cal-cell[data-lv="4"] { background: var(--accent); }
 .cal-cell.today { box-shadow: 0 0 0 1.5px var(--text-2); }
 .cal-legend {
-  display: flex; align-items: center; gap: 4px; justify-content: center;
+  display: flex; align-items: center; gap: 4px; justify-content: flex-end;
   margin-top: 6px; color: var(--text-2); font-size: 11.5px;
 }
 .cal-legend .cal-cell { width: 10px; height: 10px; }
