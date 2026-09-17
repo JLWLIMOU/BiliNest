@@ -267,7 +267,28 @@
     watchSample = { t: t, at: now };
   }
 
-  /** 汇总：累计 / 近 7 天 / 连续打卡 / 日均 / 最多的一天 */
+  /** 日期 key → 序号（按天算，雨天/夏令时都不会算错） */
+  function dayOrdinal(key) {
+    var p = String(key).split('-');
+    return Date.UTC(Number(p[0]), Number(p[1]) - 1, Number(p[2])) / 86400000;
+  }
+
+  /** 最长连续打卡：有记录的日子里最长的一段"一天不落" */
+  function bestStreakOf(activeDays) {
+    var best = 0;
+    var run = 0;
+    var prev = null;
+    for (var i = 0; i < activeDays.length; i++) {
+      var ord = dayOrdinal(activeDays[i]);
+      if (!isFinite(ord)) continue;
+      run = (prev !== null && ord - prev === 1) ? run + 1 : 1;
+      if (run > best) best = run;
+      prev = ord;
+    }
+    return best;
+  }
+
+  /** 汇总：累计 / 近 7 天 / 最长连续 / 日均 / 最多的一天 */
   function studySummary() {
     var daily = statsData().daily;
     var activeDays = Object.keys(daily).filter(function (d) { return daily[d] > 0; }).sort();
@@ -277,8 +298,9 @@
       for (var i = 0; i < n; i++) t += daily[dayKeyOf(Date.now() - i * 86400000)] || 0;
       return t;
     };
+    // 当前连续（今天没学就从昨天算起）——留着给以后可能用到的"今日已打卡"提示
     var streak = 0;
-    var offset = daily[dayKeyOf()] ? 0 : 1;   // 今天还没学就从昨天算起
+    var offset = daily[dayKeyOf()] ? 0 : 1;
     while (streak < 400 && daily[dayKeyOf(Date.now() - (offset + streak) * 86400000)]) streak++;
     var maxDaySec = activeDays.reduce(function (a, d) { return Math.max(a, daily[d]); }, 0);
     return {
@@ -286,6 +308,7 @@
       totalSec: totalSec,
       weekSec: sumRange(7),
       streak: streak,
+      bestStreak: bestStreakOf(activeDays),
       activeDays: activeDays.length,
       avgSec: activeDays.length ? Math.round(totalSec / activeDays.length) : 0,
       maxDaySec: maxDaySec,
@@ -592,7 +615,7 @@
           '<div class="study-hero-sub">' + esc(sub) + '</div>' +
         '</div>' +
         '<div class="study-mini">' +
-          '<div><b>' + sum.streak + '</b><span>连续打卡（天）</span></div>' +
+          '<div><b>' + sum.bestStreak + '</b><span>最长连续（天）</span></div>' +
           '<div><b>' + Math.round(sum.avgSec / 60) + '</b><span>日均（分钟）</span></div>' +
           '<div><b>' + Math.round(sum.maxDaySec / 60) + '</b><span>最多一天（分钟）</span></div>' +
         '</div>' +
