@@ -1528,7 +1528,8 @@
     var cover = (h.cover || '').replace(/^http:\/\//i, 'https://');
     var pct = h.duration ? Math.min(100, Math.round((h.progress / h.duration) * 100)) : 0;
     var isSeries = !!h.seriesKey;
-    var title = isSeries ? (h.seriesTitle || h.title) : h.title;
+    // 库里改过名的，观看记录里跟着显示新名字（见 renameLibraryEntry）
+    var title = h.customTitle || (isSeries ? (h.seriesTitle || h.title) : h.title);
     var meta = '';
     if (isSeries && h.episodeCount) meta = '共 ' + h.episodeCount + ' 集 · ';
     if (isSeries && h.episodeLabel) meta += h.episodeLabel + ' · ';
@@ -1616,7 +1617,7 @@
       '<article class="card folder-card" data-folder="' + esc(f.id) + '" title="' + esc(f.title) + '">' +
         (cover ? '<div class="card-cover"><img src="' + esc(cover) + '" alt="" loading="lazy" referrerpolicy="no-referrer"></div>' : '') +
         '<div class="card-body">' +
-          '<h3 class="card-title">' + esc(f.title) + '</h3>' +
+          '<h3 class="card-title">' + esc(titleOf(f)) + '</h3>' +
           '<div class="card-meta">' +
             '<span class="muted">' + (f.mediaCount != null ? f.mediaCount + ' 个视频' : '收藏夹') + '</span>' +
             starControl(f.id, f.stars || 0, 'folder') +
@@ -2460,6 +2461,132 @@
     if (changed) normalizeHistory();
   }
 
+  /**
+   * 卡片的显示名：用户自定义名优先（右键卡片→重命名），否则用源标题。
+   * 本地文件 / 本地文件夹列表的"源标题"就是文件名 / 文件夹名。
+   */
+  function titleOf(v) {
+    if (!v) return '未命名';
+    return v.customTitle || v.title || v.name || '未命名';
+  }
+
+  /** 找到库里那条内容（视频库条目或收藏夹库条目） */
+  function findLibraryEntry(kind, id) {
+    var list = kind === 'folder' ? (store.get('studyFolders') || []) : (store.get('customVideos') || []);
+    return list.find(function (x) {
+      return String(x.id || x.bvid || x.bv_id) === String(id);
+    }) || null;
+  }
+
+  /** 改名（只改本地显示，不动源站）；同时把观看记录里跟着显示的那份标题一起改掉 */
+  function renameLibraryEntry(kind, id, name) {
+    var target = findLibraryEntry(kind, id);
+    if (!target) return;
+    var key = kind === 'folder' ? 'studyFolders' : 'customVideos';
+    var list = (store.get(key) || []).slice();
+    var patch = {};
+    for (var i = 0; i < list.length; i++) {
+      if (String(list[i].id || list[i].bvid || list[i].bv_id) !== String(id)) continue;
+      if (name) list[i].customTitle = name;
+      else delete list[i].customTitle;
+      patch[key] = list;
+      break;
+    }
+    // 「继续学习」里的卡片用的是观看记录里的标题，改名后一起同步，
+    // 否则会出现"库里叫新名字、继续学习里还是旧名字"
+    var hist = (store.get('watchHistory') || []).slice();
+    var touched = false;
+    var targetBvid = target.bvid || (target.kind === 'bili' ? target.bv_id : '') || '';
+    for (var j = 0; j < hist.length; j++) {
+      var hit = false;
+      if (target.seriesKey) hit = hist[j].seriesKey === target.seriesKey;
+      else if (target.kind === 'local' && target.isSeries) hit = false;
+      else if (targetBvid) hit = hist[j].bvid === targetBvid;
+      else hit = hist[j].key === target.id;
+      if (!hit) continue;
+      hist[j].customTitle = name || undefined;
+      touched = true;
+    }
+    if (touched) patch.watchHistory = hist;
+    store.set(patch);
+  }
+
+  /** 卡片标题内联改名（右键卡片 → 重命名） */
+  function startCardRename(cardEl, kind, id) {
+    var h = cardEl && cardEl.querySelector('.card-title');
+    if (!h) return;
+    var entry = findLibraryEntry(kind, id);
+    if (!entry) return;
+    closeActionMenu();
+    var cur = titleOf(entry);
+    h.innerHTML = '<input class="card-title-input" type="text" maxlength="60" value="' + esc(cur) + '">';
+    var input = h.querySelector('input');
+    input.focus();
+    input.select();
+    var done = false;
+    var commit = function (save) {
+      if (done) return;
+      done = true;
+      var name = (input.value || '').trim();
+      if (save && name && name !== cur) {
+        renameLibraryEntry(kind, id, name);
+        toast('已重命名为「' + name + '」', 'success');
+      }
+      renderDashboard();
+      if (state.currentView === 'browse') renderBrowse();
+    };
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); commit(true); }
+      else if (e.key === 'Escape') { e.preventDefault(); commit(false); }
+      e.stopPropagation();
+    });
+    input.addEventListener('click', function (e) { e.stopPropagation(); });
+    input.addEventListener('blur', function () { commit(true); });
+  }
+
+  /** 右键卡片 / 点卡片上的 ⋯：重命名、恢复原名 */
+  function openCardMenu(anchor, kind, id) {
+    var entry = findLibraryEntry(kind, id);
+    if (!entry) return;
+    var items = [
+      { label: '重命名', onClick: function () { startCardRename(anchor, kind, id); } }
+    ];
+    if (entry.customTitle) {
+      items.push({
+        label: '恢复原名',
+        note: true,
+        onClick: function () {
+          renameLibraryEntry(kind, id, '');
+          toast('已恢复原名', 'success');
+          renderDashboard();
+          if (state.currentView === 'browse') renderBrowse();
+        }
+      });
+    }
+    openActionMenu(anchor, items);
+  }
+
+  /** 右键库里的卡片 → 重命名菜单（视频库条目 / 收藏夹库条目） */
+  function bindCardMenus() {
+    [els.dashboard, els.browseGrid].forEach(function (root) {
+      if (!root || root.dataset.cardMenuBound) return;
+      root.dataset.cardMenuBound = '1';
+      root.addEventListener('contextmenu', function (e) {
+        var vcard = e.target.closest('.card[data-id]');
+        if (vcard) {
+          e.preventDefault();
+          openCardMenu(vcard, 'video', vcard.dataset.id);
+          return;
+        }
+        var fcard = e.target.closest('.card[data-folder]');
+        if (fcard) {
+          e.preventDefault();
+          openCardMenu(fcard, 'folder', fcard.dataset.folder);
+        }
+      });
+    });
+  }
+
   function videoCard(v, ctx) {
     var dur = v.duration || (v.data && v.data.duration) || 0;
     // 官方接口可能返回 http:// 的封面，统一转 https 避免被 CSP / 混合内容拦截
@@ -2531,7 +2658,7 @@
     }
     return (
       '<article class="card" role="button" tabindex="0" data-id="' + esc(cardId) +
-      '" title="' + esc(v.title || v.name || '') + '">' +
+      '" title="' + esc(titleOf(v)) + '">' +
         '<div class="card-cover">' +
           (cover ? '<img src="' + esc(cover) + '" alt="" loading="lazy" referrerpolicy="no-referrer">' : '') +
           '<span class="dur">' + esc(durLabel) + '</span>' +
@@ -2542,7 +2669,7 @@
           removeBtn +
         '</div>' +
         '<div class="card-body">' +
-          '<h3 class="card-title">' + esc(v.title || v.name || '未命名视频') + '</h3>' +
+          '<h3 class="card-title">' + esc(titleOf(v)) + '</h3>' +
           '<div class="card-meta">' +
             '<span class="up">' + esc(upName) + '</span>' +
             '<span>' + esc(timeLabel) + '</span>' +
@@ -2720,7 +2847,7 @@
       state.listReturn = { view: state.currentView, y: window.scrollY || 0 };
     }
     showView('player');
-    els.playerTitle.textContent = v.title || v.name || '未命名视频';
+    els.playerTitle.textContent = titleOf(v);
     // 标题最多显示两行（见 .player-title）：完整标题留给悬停查看
     els.playerTitle.title = els.playerTitle.textContent;
     var upName = (v.upper && v.upper.name) || v.upper || '';
@@ -3541,7 +3668,7 @@
     store.set({ customVideos: list, source: { kind: 'mine', name: '我的视频' } });
     closeModal();
     loadDashboard();
-    toast('已添加文件夹「' + res.name + '」（' + res.episodes.length + ' 个视频）', 'success');
+    toast('已添加文件夹「' + res.name + '」（' + res.episodes.length + ' 个视频）· 右键卡片可改名', 'success', 5000);
   }
 
   async function onPickFolder() {
@@ -4611,6 +4738,7 @@
     els.episodeList.addEventListener('click', onEpisodeClick);
     els.fileInput.addEventListener('change', onFileInputChange);
     els.dirInput.addEventListener('change', onDirInputChange);
+    bindCardMenus();
 
     document.addEventListener('keydown', function (e) {
       if (e.key === 'Escape' && els.modalRoot.innerHTML) closeModal();

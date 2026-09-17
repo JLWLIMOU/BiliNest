@@ -504,6 +504,18 @@ main { max-width: 1200px; margin: 0 auto; padding: 24px 22px 64px; }
   min-height: 2.9em;
 }
 
+/* 卡片标题内联改名（右键卡片 → 重命名）：输入框直接长在标题位置 */
+.card-title-input {
+  width: 100%;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 2px 6px;
+  outline: none;
+}
+
 .card-meta {
   display: flex;
   align-items: center;
