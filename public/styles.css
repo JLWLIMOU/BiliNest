@@ -806,33 +806,36 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
 }
 .study-sub .small { font-weight: 400; }
 
-/* 打卡日历：一格一天，**一行一周、日子从左往右**（CSS grid 排的格子，不是图表库） */
+/* 打卡日历：一格一天，**一行一周、日子从左往右**（CSS grid 排的格子，不是图表库）。
+   格子保持原来热力图那种小方块，不拉伸 —— 拉成长条就不好看了。 */
 .study-cal-head {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  gap: 4px;
-  margin: 0 0 5px;
+  grid-template-columns: repeat(7, 22px);
+  gap: 7px;
+  justify-content: center;
+  margin: 0 0 6px;
   color: var(--text-2);
   font-size: 11px;
   text-align: center;
 }
 .study-cal {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);   /* 7 列 = 周一…周日，一行一周 */
+  grid-template-columns: repeat(7, 22px);   /* 7 列 = 周一…周日，一行一周 */
   grid-auto-rows: 22px;
-  gap: 4px;
+  gap: 7px;
+  justify-content: center;
   padding: 0 0 4px;
 }
 /* 格子尺寸交给网格（见 .study-cal .cal-cell），这里只给图例用的小方块兜底 */
 .cal-cell { width: 12px; height: 12px; border-radius: 3px; background: var(--fill); }
-.study-cal .cal-cell { width: 100%; height: 100%; border-radius: 6px; }
+.study-cal .cal-cell { width: 100%; height: 100%; border-radius: 4px; }
 .cal-cell[data-lv="1"] { background: color-mix(in srgb, var(--accent) 22%, transparent); }
 .cal-cell[data-lv="2"] { background: color-mix(in srgb, var(--accent) 42%, transparent); }
 .cal-cell[data-lv="3"] { background: color-mix(in srgb, var(--accent) 68%, transparent); }
 .cal-cell[data-lv="4"] { background: var(--accent); }
 .cal-cell.today { box-shadow: 0 0 0 1.5px var(--text-2); }
 .cal-legend {
-  display: flex; align-items: center; gap: 4px; justify-content: flex-end;
+  display: flex; align-items: center; gap: 4px; justify-content: center;
   margin-top: 6px; color: var(--text-2); font-size: 11.5px;
 }
 .cal-legend .cal-cell { width: 10px; height: 10px; }
@@ -849,6 +852,16 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
 .study-range button.on { background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm); }
 .study-chart { margin: 2px 0 6px; }
 .study-chart .u-legend { display: none; }
+/* 图是"看"的不是"拖"的：悬浮给一行读数，图本身不缩放、不位移 */
+.chart-host { position: relative; }
+.chart-tip {
+  position: absolute; top: 0; right: 4px; z-index: 2;
+  padding: 3px 8px; border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  border: 1px solid var(--separator);
+  color: var(--text-2); font-size: 11.5px; font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
 
 .study-top .top-row { display: flex; align-items: center; gap: 10px; margin: 9px 0; }
 .top-name {

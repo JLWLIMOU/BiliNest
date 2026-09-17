@@ -387,6 +387,19 @@
   function drawBars(host, labels, values, opts) {
     if (!host || !window.uPlot) return;
     opts = opts || {};
+    // 同一个 host 会被重复绘制（切 7 / 14 / 30 天）：先把上一张销毁、清空，
+    // 否则 uPlot 会一层层往上叠，叠起来看着就是"图有点糊 / 图不见了"。
+    if (host._uplot) {
+      try { host._uplot.destroy(); } catch (e) { /* ignore */ }
+      host._uplot = null;
+    }
+    host.innerHTML = '';
+    host.classList.add('chart-host');
+    // 悬浮读数：鼠标在图上走的时候给一行"日期 · 时长"，图上本身一动不动
+    var tip = document.createElement('span');
+    tip.className = 'chart-tip';
+    tip.hidden = true;
+    host.appendChild(tip);
     var cs = getComputedStyle(document.body);
     var accent = cs.getPropertyValue('--accent').trim() || '#0071e3';
     var green = cs.getPropertyValue('--tab-green').trim() || '#30a46c';
@@ -396,12 +409,23 @@
     var maxV = Math.max(1, Math.max.apply(null, values));
     var width = host.clientWidth || 360;
     var data = [labels.map(function (_, i) { return i; }), values];
-    new uPlot({
+    host._uplot = new uPlot({
       width: width,
       height: opts.height || 160,
       padding: [12, 8, 0, 0],
       legend: { show: false },
-      cursor: { y: false },
+      // 只保留一条竖着的悬浮线；把"左键拖动 = 框选缩放"关掉 ——
+      // 这个小面板里的图是给人看的趋势图，拖一下就缩进一小段（甚至缩成空图），
+      // 更像是把图弄坏了，而不是在交互。
+      cursor: { y: false, drag: { setScale: false, x: false, y: false } },
+      hooks: {
+        setCursor: [function (u) {
+          var i = u.cursor.idx;
+          if (i == null || values[i] == null) { tip.hidden = true; return; }
+          tip.hidden = false;
+          tip.textContent = (labels[i] || '') + ' · ' + values[i] + ' 分钟';
+        }]
+      },
       scales: { x: { time: false }, y: { range: [0, maxV * 1.2] } },
       series: [
         { value: function (u, v) { return labels[v] == null ? '' : labels[v]; } },
