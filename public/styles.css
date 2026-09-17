@@ -806,20 +806,26 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
 }
 .study-sub .small { font-weight: 400; }
 
-/* 打卡日历：一格一天，周一在最上（CSS grid 排的格子，不是图表库） */
+/* 打卡日历：一格一天，**一行一周、日子从左往右**（CSS grid 排的格子，不是图表库） */
+.study-cal-head {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  margin: 0 0 5px;
+  color: var(--text-2);
+  font-size: 11px;
+  text-align: center;
+}
 .study-cal {
   display: grid;
-  grid-template-rows: repeat(7, 12px);
-  grid-auto-columns: 12px;      /* 固定格子大小：不然列会被拉到面板宽度，格子之间出现大缝 */
-  grid-auto-flow: column;
+  grid-template-columns: repeat(7, 1fr);   /* 7 列 = 周一…周日，一行一周 */
+  grid-auto-rows: 22px;
   gap: 4px;
-  padding: 2px 0 4px;
-  justify-content: start;
+  padding: 0 0 4px;
 }
-.cal-cell {
-  width: 12px; height: 12px; border-radius: 3px;
-  background: var(--fill);
-}
+/* 格子尺寸交给网格（见 .study-cal .cal-cell），这里只给图例用的小方块兜底 */
+.cal-cell { width: 12px; height: 12px; border-radius: 3px; background: var(--fill); }
+.study-cal .cal-cell { width: 100%; height: 100%; border-radius: 6px; }
 .cal-cell[data-lv="1"] { background: color-mix(in srgb, var(--accent) 22%, transparent); }
 .cal-cell[data-lv="2"] { background: color-mix(in srgb, var(--accent) 42%, transparent); }
 .cal-cell[data-lv="3"] { background: color-mix(in srgb, var(--accent) 68%, transparent); }

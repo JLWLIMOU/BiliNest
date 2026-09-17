@@ -323,7 +323,11 @@
     '</button>';
   }
 
-  /** 打卡日历：近 N 周，一格一天（周一在最上） */
+  /**
+   * 打卡日历：近 N 周，一格一天。
+   * 排版按"日历"来 —— 一行是一周，**日子从左往右走**（周一在最左），上一行是上一周，
+   * 顶上带一行星期表头；不是 GitHub 那种把一周竖起来、往下走一天的热力图。
+   */
   function studyCalendarHtml(daily, weeks) {
     var today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -346,7 +350,11 @@
       cells += '<span class="cal-cell' + (ts === today.getTime() ? ' today' : '') +
         '" data-lv="' + lv + '" title="' + esc(tip) + '"></span>';
     }
-    return '<div class="study-cal">' + cells + '</div>' +
+    var head = '';
+    var WD = ['一', '二', '三', '四', '五', '六', '日'];
+    for (var w = 0; w < 7; w++) head += '<span>' + WD[w] + '</span>';
+    return '<div class="study-cal-head">' + head + '</div>' +
+      '<div class="study-cal">' + cells + '</div>' +
       '<div class="cal-legend"><span>少</span>' +
         '<span class="cal-cell" data-lv="0"></span><span class="cal-cell" data-lv="1"></span>' +
         '<span class="cal-cell" data-lv="2"></span><span class="cal-cell" data-lv="3"></span>' +
