@@ -324,30 +324,34 @@
   }
 
   /**
-    * 打卡日历的窗口：**从"开始记录那一天"起**，最多近 N 周（N×7 天）。
-    * 刚用没几天的用户不该看到一大片空白 —— 所以第一格就是他记下第一笔的那天；
-    * 记录超过 N 周时才退化成"最近 N 周"（否则日历会越长越长）。
-    * 最后一格永远是今天。
+    * 打卡日历的窗口：**固定 N 周（N×7 格）**，形状永远不变。
+    *  - 开始记录那天放在**第一格**，往后一格一天地填；
+    *  - 填到最后一格（也就是"今天"正好落在第 N×7 格）之后，窗口开始跟着今天滑动，
+    *    此后最后一格恒为今天（近 N 周）。
+    * 所以新用户第一格就是他记下第一笔的那天，老用户看到的是最近 N 周。
     */
   function calendarWindow(daily, weeks) {
     var today = new Date();
     today.setHours(0, 0, 0, 0);
     var cap = weeks * 7;
-    var days = cap;
-    var capped = true;
+    var start = new Date(today.getTime() - (cap - 1) * 86400000);
+    var anchored = false;
     var keys = Object.keys(daily || {}).filter(function (k) { return daily[k] > 0; }).sort();
     if (keys.length) {
       var first = new Date(keys[0] + 'T00:00:00');
       if (!isNaN(first.getTime())) {
-        var n = Math.round((today.getTime() - first.getTime()) / 86400000) + 1;
-        if (n < cap) { days = Math.max(1, n); capped = false; }
+        // 还没填满 N 周：把"开始记录那天"钉在第一格
+        if (Math.round((today.getTime() - first.getTime()) / 86400000) + 1 < cap) {
+          start = first;
+          anchored = true;
+        }
       }
     }
     return {
       today: today,
-      days: days,
-      capped: capped,
-      start: new Date(today.getTime() - (days - 1) * 86400000)
+      days: cap,
+      anchored: anchored,
+      start: start
     };
   }
 
@@ -373,11 +377,13 @@
         lv = r < 0.25 ? 1 : r < 0.5 ? 2 : r < 0.75 ? 3 : 4;
       }
       var d = new Date(ts);
-      var tip = (d.getMonth() + 1) + '月' + d.getDate() + '日 · ' + (sec > 0 ? fmtWatch(sec) : '没有学习');
+      var day = (d.getMonth() + 1) + '月' + d.getDate() + '日';
+      // 还没到的日子只报日期，不说"没有学习"
+      var tip = ts > today.getTime() ? day : day + ' · ' + (sec > 0 ? fmtWatch(sec) : '没有学习');
       cells += '<span class="cal-cell' + (ts === today.getTime() ? ' today' : '') +
         '" data-lv="' + lv + '" title="' + esc(tip) + '"></span>';
     }
-    return '<div class="study-cal" style="--cal-cols:' + Math.min(weeks, win.days) + '">' + cells + '</div>' +
+    return '<div class="study-cal" style="--cal-cols:' + weeks + '">' + cells + '</div>' +
       '<div class="cal-legend"><span>少</span>' +
         '<span class="cal-cell" data-lv="0"></span><span class="cal-cell" data-lv="1"></span>' +
         '<span class="cal-cell" data-lv="2"></span><span class="cal-cell" data-lv="3"></span>' +
@@ -591,9 +597,9 @@
           '<div><b>' + Math.round(sum.maxDaySec / 60) + '</b><span>最多一天（分钟）</span></div>' +
         '</div>' +
         '<h3 class="study-sub">打卡日历 <span class="muted small">' +
-          esc(calWin.capped
-            ? '近 12 周'
-            : (calWin.start.getMonth() + 1) + '/' + calWin.start.getDate() + ' 起') +
+          esc(calWin.anchored
+            ? (calWin.start.getMonth() + 1) + '/' + calWin.start.getDate() + ' 起'
+            : '近 12 周') +
         '</span></h3>' +
         studyCalendarHtml(sum.daily, 12) +
         '<button type="button" class="btn primary study-more" data-study-detail>查看更多</button>' +
