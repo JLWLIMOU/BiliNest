@@ -324,19 +324,46 @@
   }
 
   /**
-    * 打卡日历：近 N 周，一格一天，方块铺满一整块。
+    * 打卡日历的窗口：**从"开始记录那一天"起**，最多近 N 周（N×7 天）。
+    * 刚用没几天的用户不该看到一大片空白 —— 所以第一格就是他记下第一笔的那天；
+    * 记录超过 N 周时才退化成"最近 N 周"（否则日历会越长越长）。
+    * 最后一格永远是今天。
+    */
+  function calendarWindow(daily, weeks) {
+    var today = new Date();
+    today.setHours(0, 0, 0, 0);
+    var cap = weeks * 7;
+    var days = cap;
+    var capped = true;
+    var keys = Object.keys(daily || {}).filter(function (k) { return daily[k] > 0; }).sort();
+    if (keys.length) {
+      var first = new Date(keys[0] + 'T00:00:00');
+      if (!isNaN(first.getTime())) {
+        var n = Math.round((today.getTime() - first.getTime()) / 86400000) + 1;
+        if (n < cap) { days = Math.max(1, n); capped = false; }
+      }
+    }
+    return {
+      today: today,
+      days: days,
+      capped: capped,
+      start: new Date(today.getTime() - (days - 1) * 86400000)
+    };
+  }
+
+  /**
+    * 打卡日历：一格一天，方块铺满一整块。
     * 日子**从左往右走**（不是 GitHub 那种一周竖成一列、往下走一天），
     * 一行放满就换行 —— 所以最后一天（今天）落在右下角。
    */
   function studyCalendarHtml(daily, weeks) {
-    var today = new Date();
-    today.setHours(0, 0, 0, 0);
-    // 近 N 周 = 从 (N×7-1) 天前一直到今天，最后一格正好是今天（落在右下角）
-    var start = new Date(today.getTime() - (weeks * 7 - 1) * 86400000);
+    var win = calendarWindow(daily, weeks);
+    var today = win.today;
+    var start = win.start;
     var max = 0;
     Object.keys(daily).forEach(function (k) { if (daily[k] > max) max = daily[k]; });
     var cells = '';
-    for (var i = 0; i < weeks * 7; i++) {
+    for (var i = 0; i < win.days; i++) {
       var ts = start.getTime() + i * 86400000;
       var key = dayKeyOf(ts);
       var sec = daily[key] || 0;
@@ -350,7 +377,7 @@
       cells += '<span class="cal-cell' + (ts === today.getTime() ? ' today' : '') +
         '" data-lv="' + lv + '" title="' + esc(tip) + '"></span>';
     }
-    return '<div class="study-cal" style="--cal-cols:' + weeks + '">' + cells + '</div>' +
+    return '<div class="study-cal" style="--cal-cols:' + Math.min(weeks, win.days) + '">' + cells + '</div>' +
       '<div class="cal-legend"><span>少</span>' +
         '<span class="cal-cell" data-lv="0"></span><span class="cal-cell" data-lv="1"></span>' +
         '<span class="cal-cell" data-lv="2"></span><span class="cal-cell" data-lv="3"></span>' +
@@ -544,6 +571,7 @@
         '</div>';
     }
     // 简版：累计大数字 + 三个小数字 + 打卡日历 + 查看更多
+    var calWin = calendarWindow(sum.daily, 12);
     var big = sum.totalSec >= 3600
       ? Math.floor(sum.totalSec / 3600) + '<small>小时</small>' + Math.round((sum.totalSec % 3600) / 60) + '<small>分</small>'
       : (sum.totalSec >= 60 ? Math.round(sum.totalSec / 60) + '<small>分钟</small>' : '0<small>分钟</small>');
@@ -562,7 +590,11 @@
           '<div><b>' + Math.round(sum.avgSec / 60) + '</b><span>日均（分钟）</span></div>' +
           '<div><b>' + Math.round(sum.maxDaySec / 60) + '</b><span>最多一天（分钟）</span></div>' +
         '</div>' +
-        '<h3 class="study-sub">打卡日历 <span class="muted small">近 12 周</span></h3>' +
+        '<h3 class="study-sub">打卡日历 <span class="muted small">' +
+          esc(calWin.capped
+            ? '近 12 周'
+            : (calWin.start.getMonth() + 1) + '/' + calWin.start.getDate() + ' 起') +
+        '</span></h3>' +
         studyCalendarHtml(sum.daily, 12) +
         '<button type="button" class="btn primary study-more" data-study-detail>查看更多</button>' +
       '</div>';
