@@ -2198,13 +2198,17 @@ details.help .steps { margin-top: 4px; }
 .dash-tab-new:hover { color: var(--accent); }
 .dash-tab-input {
   width: 108px;
-  padding: 3px 6px;
-  font-size: 15px;
-  font-family: inherit;
-  border: 1px solid var(--accent);
-  border-radius: 6px;
-  background: var(--surface);
+  /* 内联改名要"像标签在编辑"，不是一个白框贴在绿色胶囊上：
+     字号跟标签一致、底色用半透明填充、只有一圈很淡的强调色描边。 */
+  padding: 3px 8px;
+  box-sizing: border-box;
+  font: inherit;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, transparent);
+  border-radius: 8px;
+  background: var(--fill);
   color: var(--text);
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 .tab-menu-pop {
@@ -2362,13 +2366,13 @@ body:has(#playerView:not([hidden])) main { max-width: 1360px; }
 /* 圆形小控件（卡片角标、收藏夹播放键、标签页上的 ⋯ / ＋、星星）：目标本身小，
    缩到 0.9 才看得出"被按下"；按下 100ms 到位，松手用弹簧曲线弹回。
    （这里统一覆盖前面各自的 transition —— 都是单类选择器、位置靠后，覆盖是确定的。） */
-.hcard-remove, .card-add, .card-add-tab, .card-add-pick, .card-remove,
+.hcard-remove, .card-add, .card-add-tab, .card-add-pick, .card-remove, .card-menu,
 .fv-play, .dash-tab-more, .dash-tab-new, .stars .star {
   transition: color var(--dur-2) var(--ease-state), background var(--dur-2) var(--ease-state),
     opacity var(--dur-2) var(--ease-state), transform var(--dur-3) var(--ease-spring-soft);
 }
 .hcard-remove:active, .card-add:active, .card-add-tab:active, .card-add-pick:active,
-.card-remove:active, .fv-play:active, .dash-tab-more:active, .dash-tab-new:active,
+.card-remove:active, .card-menu:active, .fv-play:active, .dash-tab-more:active, .dash-tab-new:active,
 .stars .star:active {
   transform: scale(0.9);
   transition: transform var(--dur-1) var(--ease-out);
@@ -2379,13 +2383,13 @@ body:has(#playerView:not([hidden])) main { max-width: 1360px; }
 /* 卡内小控件（星级 / 添加 / 删除角标）自己按下时，卡片本体不要跟着缩。
    :active 是沿祖先链匹配的 —— 按一颗星，整张卡都会收到 :active，
    于是"给视频打分"看起来像"整张卡被按了一下"。这里让宿主持有控件在按时显式还原。 */
-.card:has(:is(.stars, .card-add, .card-add-tab, .card-add-pick, .card-remove):active),
+.card:has(:is(.stars, .card-add, .card-add-tab, .card-add-pick, .card-remove, .card-menu):active),
 .hcard:has(.hcard-remove:active) {
   transform: scale(1);
 }
 @media (hover: hover) and (pointer: fine) {
   /* 鼠标下卡片本来就在悬浮态：保持悬浮，不进入按下态 */
-  .card:has(:is(.stars, .card-add, .card-add-tab, .card-add-pick, .card-remove):active),
+  .card:has(:is(.stars, .card-add, .card-add-tab, .card-add-pick, .card-remove, .card-menu):active),
   .hcard:has(.hcard-remove:active) {
     transform: scale(1.012);
   }
@@ -2402,7 +2406,7 @@ body:has(#playerView:not([hidden])) main { max-width: 1360px; }
    不参与布局、也不受元素自身 transform 影响。 */
 :where(.btn, .icon-btn, .dash-tab, .card, .hcard, .folder-row, .episode-row,
        .picker-row, .tab-menu-item, .settings-nav-item, .select, .up-card,
-       .fv-play, .star, .brand, .dash-tab-more, .dash-tab-new):focus-visible {
+       .fv-play, .star, .brand, .dash-tab-more, .dash-tab-new, .card-menu):focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -2415,7 +2419,7 @@ body:has(#playerView:not([hidden])) main { max-width: 1360px; }
   .btn, .icon-btn, .card, .hcard, .end-btn, .fv-play, .hcard-remove, .stars .star,
   .overlay, .modal, .toast, .dash-tab, .folder-row, .episode-row, .picker-row,
   .tab-menu-item, .settings-nav-item, .up-card, .select, .bilinest-ctl, .card-add,
-  .card-add-tab, .card-add-pick, .card-remove {
+  .card-add-tab, .card-add-pick, .card-remove, .card-menu {
     transition-property: opacity, background-color, border-color, color, box-shadow, filter;
   }
   .btn:active, .icon-btn:active, .card:active, .hcard:active, .dash-tab:active,
