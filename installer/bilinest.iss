@@ -6,8 +6,10 @@
 ;
 ;  设计要点：
 ;   - 本体是「本地 Node 服务 + 纯前端」，安装包只铺文件、建快捷方式；
-;   - Node.js **不自带**（不为一个运行时白胖 87MB）：安装时检测，
-;     缺失就给「winget 安装 / 官网下载 / 跳过」三选一；
+;   - Node.js **不自带**（不为一个运行时白胖 87MB）：安装时**只检测**（读文件
+;     版本资源 + 注册表，不启动任何进程），缺失就给「打开下载页 / 跳过」二选一
+;     —— 安装包自己绝不下载或执行任何东西（旧版会写临时 .bat + winget 安装，
+;     实测被火绒按木马启发式拦下）；
 ;   - 默认装进当前用户目录（%LOCALAPPDATA%\Programs\BiliNest），
 ;     不动注册表的机器级设置、不要管理员权限；安装位置可在向导里改；
 ;   - 卸载时问一句：是否连用户数据（%APPDATA%\BiliNest）一起删。
@@ -51,6 +53,9 @@ Name: "chinese"; MessagesFile: "{#SourcePath}\languages\ChineseSimplified.isl"
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
+; 安装包里不再附带 create-shortcut.ps1（安装向导自己会建快捷方式），
+; 少一个"创建快捷方式的 PowerShell 脚本"躺在安装目录里，也少一点被误报的理由。
+
 [InstallDelete]
 ; 升级时先清掉旧前端文件，避免改名/删掉的资源残留
 Type: filesandordirs; Name: "{app}\public"
@@ -58,7 +63,6 @@ Type: filesandordirs; Name: "{app}\public"
 [Files]
 Source: "{#SrcDir}\server.mjs"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SrcDir}\launcher.vbs"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#SrcDir}\create-shortcut.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SrcDir}\package.json"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SrcDir}\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SrcDir}\CHANGELOG.md"; DestDir: "{app}"; Flags: ignoreversion
@@ -116,86 +120,88 @@ begin
   end;
 end;
 
-{ 探测某个 node 能否跑起来，并抠出版本号。
-  特意先写出一个临时 .bat 再执行，而不是直接 "cmd /C ..."：
-  cmd /C 后面同时出现引号包裹的路径和 ">" 重定向时，cmd 会把最外层
-  引号剥掉，"C:\Program Files\..." 这种带空格的路径就执行失败了
-  （第一版就栽在这里，所有候选路径全军覆没、误报"没装 Node"）。 }
+{ 读 node.exe 里的版本资源，抠出版本号。
+
+  **只读文件，不执行任何进程** —— 这里原来会往临时目录写一个 .bat、再用
+  cmd 执行它去跑 "node -v"。"安装包往 %TEMP% 写脚本并执行" 是最典型的木马
+  启发式特征（实测火绒会把安装包直接报成木马），而且读版本资源本来就能拿到
+  同样的信息，没有任何理由去起进程。 }
 function ProbeNode(const Exe: String; var Version: String): Boolean;
 var
-  BatFile, OutFile, Text: String;
-  Code: Integer;
-  Lines: TArrayOfString;
-  I: Integer;
+  Raw: String;
 begin
   Result := False;
   Version := '';
-  BatFile := ExpandConstant('{tmp}\bilinest-nodecheck.bat');
-  OutFile := ExpandConstant('{tmp}\bilinest-nodever.txt');
-  if FileExists(OutFile) then
-    DeleteFile(OutFile);
-  Text := '@echo off' + #13#10 + '"' + Exe + '" -v > "' + OutFile + '" 2>&1' + #13#10;
-  if not SaveStringToFile(BatFile, Text, False) then
+  if (Exe = '') or (not FileExists(Exe)) then
+    Exit;
+  if GetVersionNumbersString(Exe, Raw) then
   begin
-    Log('Node 探测：无法写出探测脚本 ' + BatFile);
-    Exit;
+    Version := ExtractVersion(Raw);
+    Result := Version <> '';
   end;
-  if not Exec(BatFile, '', '', SW_HIDE, ewWaitUntilTerminated, Code) then
-  begin
-    Log('Node 探测：执行探测脚本失败 ' + BatFile);
-    Exit;
-  end;
-  if not FileExists(OutFile) then
-    Exit;
-  if not LoadStringsFromFile(OutFile, Lines) then
-    Exit;
-  Text := '';
-  for I := 0 to GetArrayLength(Lines) - 1 do
-    if Trim(Lines[I]) <> '' then
-      Text := Text + Trim(Lines[I]) + ' ';
-  Version := ExtractVersion(Trim(Text));
-  Result := Version <> '';
 end;
 
-{ 探测 Node.js：先看 PATH，再看几个常见安装位置（与 launcher.vbs 一致） }
+{ 收集候选路径：PATH 里找到的 + 注册表记的 + 几个常见安装位置 }
+procedure AddNodeCandidate(var List: TArrayOfString; var Count: Integer; const Path: String);
+begin
+  if (Path = '') or (Count >= GetArrayLength(List)) then
+    Exit;
+  List[Count] := Path;
+  Count := Count + 1;
+end;
+
+{ 探测 Node.js：只查文件和注册表，不启动任何进程（见 ProbeNode 的说明） }
 procedure DetectNode();
 var
   Candidates: TArrayOfString;
-  I: Integer;
-  Out1: String;
+  Count, I, Major: Integer;
+  Ver, RegPath: String;
 begin
   NodeFound := False;
   NodeOk := False;
   NodeExe := '';
   NodeVersion := '';
 
-  SetLength(Candidates, 5);
-  Candidates[0] := 'node';                                    { 交给 PATH 解析 }
-  Candidates[1] := GetEnv('ProgramW6432') + '\nodejs\node.exe';
-  Candidates[2] := GetEnv('ProgramFiles') + '\nodejs\node.exe';
-  Candidates[3] := GetEnv('ProgramFiles(x86)') + '\nodejs\node.exe';
-  Candidates[4] := GetEnv('LOCALAPPDATA') + '\Programs\nodejs\node.exe';
+  SetLength(Candidates, 8);
+  Count := 0;
+  { FileSearch 只在 PATH 的各个目录里找文件，不会执行它 }
+  AddNodeCandidate(Candidates, Count, FileSearch('node.exe', GetEnv('PATH')));
+  if RegQueryStringValue(HKLM, 'SOFTWARE\Node.js', 'InstallPath', RegPath) then
+    AddNodeCandidate(Candidates, Count, RegPath + '\node.exe');
+  if RegQueryStringValue(HKLM32, 'SOFTWARE\Node.js', 'InstallPath', RegPath) then
+    AddNodeCandidate(Candidates, Count, RegPath + '\node.exe');
+  if RegQueryStringValue(HKCU, 'SOFTWARE\Node.js', 'InstallPath', RegPath) then
+    AddNodeCandidate(Candidates, Count, RegPath + '\node.exe');
+  AddNodeCandidate(Candidates, Count, GetEnv('ProgramW6432') + '\nodejs\node.exe');
+  AddNodeCandidate(Candidates, Count, GetEnv('ProgramFiles') + '\nodejs\node.exe');
+  AddNodeCandidate(Candidates, Count, GetEnv('ProgramFiles(x86)') + '\nodejs\node.exe');
+  AddNodeCandidate(Candidates, Count, GetEnv('LOCALAPPDATA') + '\Programs\nodejs\node.exe');
 
-  for I := 0 to GetArrayLength(Candidates) - 1 do
+  for I := 0 to Count - 1 do
   begin
-    if (Candidates[I] = 'node') or FileExists(Candidates[I]) then
+    if not ProbeNode(Candidates[I], Ver) then
+      Continue;
+    { 记住第一个找到的（用于提示"版本过低"），但优先挑版本够用的 }
+    if not NodeFound then
     begin
-      if ProbeNode(Candidates[I], Out1) then
-      begin
-        NodeVersion := Out1;
-        if NodeVersion <> '' then
-        begin
-          NodeFound := True;
-          NodeExe := Candidates[I];
-          NodeOk := StrToIntDef(Copy(NodeVersion, 1, Pos('.', NodeVersion) - 1), 0) >= NodeMinMajor;
-          { 注意：这一行不能拆成以 "[" 开头的续行——Inno 会把行首的 [ 当成新段标签 }
-          Log(Format('Node 探测：found ok=%d version=%s exe=%s', [Ord(NodeOk), NodeVersion, NodeExe]));
-          Exit;
-        end;
-      end;
+      NodeFound := True;
+      NodeExe := Candidates[I];
+      NodeVersion := Ver;
+    end;
+    Major := StrToIntDef(Copy(Ver, 1, Pos('.', Ver) - 1), 0);
+    if Major >= NodeMinMajor then
+    begin
+      NodeOk := True;
+      NodeExe := Candidates[I];
+      NodeVersion := Ver;
+      Log(Format('Node 探测：ok version=%s exe=%s', [NodeVersion, NodeExe]));
+      Exit;
     end;
   end;
-  Log('Node 探测：未找到可用的 Node.js');
+  if NodeFound then
+    Log(Format('Node 探测：版本过低 version=%s exe=%s', [NodeVersion, NodeExe]))
+  else
+    Log('Node 探测：未找到 Node.js');
 end;
 
 function NodePageSubCaption(): String;
@@ -217,8 +223,7 @@ begin
   DetectNode();
   NodePage := CreateInputOptionPage(wpSelectTasks,
     '运行环境检查', '选择如何处理 Node.js', NodePageSubCaption(), True, False);
-  NodePage.Add('用 winget 自动安装 Node.js LTS（推荐）');
-  NodePage.Add('打开 nodejs.org 下载页，我自己安装');
+  NodePage.Add('打开 nodejs.org 下载页，我自己安装（推荐）');
   NodePage.Add('先跳过（我稍后自己装）');
   NodePage.Values[0] := True;
   if NodeOk then
@@ -240,35 +245,13 @@ begin
 
   if NodePage.Values[0] then
   begin
-    { winget 安装：可见窗口，方便用户看到进度与可能的权限提示 }
-    if MsgBox('将调用 winget 安装 Node.js LTS。' + #13#10 + #13#10 +
-              '过程中可能弹出系统权限提示，属正常现象。是否继续？',
-              mbConfirmation, MB_YESNO) <> IDYES then
-    begin
-      Result := False;
-      Exit;
-    end;
-    WizardForm.NextButton.Enabled := False;
-    try
-      Exec(ExpandConstant('{cmd}'),
-           '/K "winget install --id OpenJS.NodeJS.LTS -e --accept-package-agreements --accept-source-agreements && echo. && echo 安装结束，按任意键继续... && pause > nul"',
-           '', SW_SHOW, ewWaitUntilTerminated, Code);
-    finally
-      WizardForm.NextButton.Enabled := True;
-    end;
-    DetectNode();
-    if not NodeOk then
-    begin
-      if MsgBox('仍未检测到可用的 Node.js。' + #13#10 + #13#10 +
-                '可以再试一次，或者先继续安装 BiliNest —— ' +
-                '装好后双击快捷方式会打开一份安装指引。' + #13#10 + #13#10 +
-                '是否仍要继续安装？', mbConfirmation, MB_YESNO) <> IDYES then
-        Result := False;
-    end;
-  end
-  else if NodePage.Values[1] then
-  begin
+    { 安装包自己不下载、不执行任何东西：只开浏览器打开下载页 }
     ShellExec('open', NodeUrl, '', '', SW_SHOWNORMAL, ewNoWait, Code);
+    if MsgBox('装好 Node.js 之后回到这里继续。' + #13#10 + #13#10 +
+              '点「确定」重新检测一次（不用重开安装包）；点「取消」先继续安装 —— ' +
+              '装好后双击快捷方式会看到安装指引。',
+              mbConfirmation, MB_OKCANCEL) = IDOK then
+      DetectNode();
   end;
 end;
 
