@@ -1616,11 +1616,11 @@
       ? '<button type="button" class="card-remove" data-tab-remove="' + esc(f.id) + '" data-tab-id="' + esc(ctx.tab) + '" data-tab-kind="folder" title="从本标签页移除（不会移出收藏夹库）" aria-label="从本标签页移除">✕</button>'
       : '<button type="button" class="card-remove" data-card-remove="' + esc(f.id) + '" title="从收藏夹库移除" aria-label="移除">✕</button>';
     return (
-      '<article class="card folder-card" data-folder="' + esc(f.id) + '" title="' + esc(f.title) + '">' +
-        (cover
-          ? '<div class="card-cover"><img src="' + esc(cover) + '" alt="" loading="lazy" referrerpolicy="no-referrer">' +
-              '<span class="cover-chip">收藏夹</span></div>'
-          : '<div class="card-cover card-cover--folder">' + folderCoverIconHtml() + '</div>') +
+      '<article class="card folder-card' + (cover ? '' : ' card--flat') +
+      '" data-folder="' + esc(f.id) + '" title="' + esc(f.title) + '">' +
+        // 收藏夹不做封面占位：没有封面图就**不渲染封面块**，卡片自然更扁，
+        // 和视频卡片（永远有 16:9 封面）一眼就能分辨。
+        (cover ? '<div class="card-cover"><img src="' + esc(cover) + '" alt="" loading="lazy" referrerpolicy="no-referrer"></div>' : '') +
         '<div class="card-body">' +
           '<h3 class="card-title">' + esc(f.title) + '</h3>' +
           '<div class="card-meta">' +
@@ -2607,18 +2607,6 @@
   /** 占位封面里最初渲染的"海报标题"（量完放不下就换掉） */
   function posterTitleHtml(title) {
     return '<span class="ph-title" data-title="' + esc(title) + '">' + esc(title) + '</span>';
-  }
-
-  /** 收藏夹没有封面图时的中性瓦片图标（不跟视频的彩色海报撞脸） */
-  function folderCoverIconHtml() {
-    return (
-      '<span class="cover-folder-icon" aria-hidden="true">' +
-        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" ' +
-        'stroke-linecap="round" stroke-linejoin="round">' +
-          '<path d="M4 7.5A2.5 2.5 0 0 1 6.5 5H10l2 2.2h5.5A2.5 2.5 0 0 1 20 9.7v7.8A2.5 2.5 0 0 1 17.5 20h-11A2.5 2.5 0 0 1 4 17.5z"></path>' +
-        '</svg>' +
-      '</span>'
-    );
   }
 
   /**

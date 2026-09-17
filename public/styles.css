@@ -502,38 +502,11 @@ main { max-width: 1200px; margin: 0 auto; padding: 24px 22px 64px; }
 }
 
 /*
- * 收藏夹卡片：**不跟视频共用海报封面**（一眼看去全是彩色海报就分不出"收藏"和"视频"了）。
- *   · 没有封面图 → 中性瓦片 + 收藏图标，名字仍然写在卡片下方；
- *   · 有封面图（B站给的）→ 左上角挂一枚「收藏夹」小角标。
+ * 收藏夹卡片不参与封面占位：没有封面图时直接不渲染 .card-cover，
+ * 卡片比视频卡片矮一截 —— 这就是它和视频最好的区分方式。
+ * 这种"扁卡片"的 ✕ 是绝对定位在卡片右上角的，标题要给它让出位置，免得压在一起。
  */
-.card-cover--folder { background: var(--surface-2); }
-/* 中性瓦片上没有文字/角标要压，去掉那层底部暗角（否则浅色底会显脏） */
-.card-cover--folder::after { display: none; }
-.cover-folder-icon {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-2);
-  opacity: .5;
-}
-.cover-folder-icon svg { width: 34%; height: auto; max-width: 92px; }
-.cover-chip {
-  position: absolute;
-  left: 8px;
-  top: 8px;
-  z-index: 3;
-  padding: 3px 8px;
-  border-radius: 7px;
-  background: rgba(15, 15, 20, .5);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-  color: #fff;
-  font-size: 11.5px;
-  font-weight: 600;
-  letter-spacing: .02em;
-}
+.card--flat .card-title { padding-right: 30px; }
 .card-cover img {
   width: 100%;
   height: 100%;
