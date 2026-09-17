@@ -14,7 +14,8 @@ window.BiliNestLocal = (function () {
   // 旧版本（BiliPure）使用的数据库名：改名后首次打开自动迁移文件句柄
   var LEGACY_DB_NAME = 'bilipure-files';
   var STORE_NAME = 'handles';
-  var urlMap = new Map(); // entryId -> objectURL
+  var urlMap = new Map(); // entryId -> 最近一次创建的 objectURL
+  var fileMap = new Map(); // entryId -> File（input / webkitdirectory 这类只在本次会话有效的条目）
   var dbPromise = null;
   var legacyMigrated = false;
 
@@ -126,7 +127,10 @@ window.BiliNestLocal = (function () {
         {
           description: '视频文件',
           accept: {
-            'video/*': ['.mp4', '.mkv', '.webm', '.mov', '.avi', '.flv', '.ts', '.m4v']
+            'video/mp4': ['.mp4', '.m4v'],
+            'video/quicktime': ['.mov'],
+            'video/webm': ['.webm'],
+            'video/x-matroska': ['.mkv']
           }
         }
       ]
@@ -135,28 +139,71 @@ window.BiliNestLocal = (function () {
     for (var i = 0; i < handles.length; i++) {
       var file = await handles[i].getFile();
       var id = 'local-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+      // 先探一次：时长要写进卡片 / 选集，浏览器解不了的文件也在这里被挡下
+      var probeUrl = URL.createObjectURL(file);
+      var probe = await probeVideo(probeUrl);
+      URL.revokeObjectURL(probeUrl);
+      if (!probe.ok) continue;
       try {
         await putHandle(id, handles[i]);
       } catch (e) {
         /* 句柄持久化失败不影响本次播放 */
       }
+      fileMap.set(id, file);
       entries.push({
         id: id,
         kind: 'local',
         name: file.name,
         size: file.size,
+        duration: probe.duration,
         lastModified: file.lastModified,
         addedAt: Date.now(),
         stars: 0,
-        handle: true,
-        url: URL.createObjectURL(file)
+        handle: true
       });
-      urlMap.set(id, entries[entries.length - 1].url);
     }
     return entries;
   }
 
-  var VIDEO_RE = /\.(mp4|mkv|webm|mov|avi|flv|ts|m4v)$/i;
+  /*
+   * 只收浏览器原生能播的容器：mp4 / m4v / mov（H.264 + AAC）、webm、mkv。
+   * avi / flv / ts / rmvb 这些浏览器解不了，放进列表只会"点开就报错"，
+   * 所以解析文件夹时直接跳过；下面还会用 <video preload=metadata> 实测一遍，
+   * 连编码不兼容（比如 HEVC 的 mp4）也会被挡在外面。
+   */
+  var VIDEO_RE = /\.(mp4|m4v|mov|webm|mkv)$/i;
+  var PROBE_TIMEOUT_MS = 6000;
+
+  /** 用临时 <video> 探一次：能不能播、时长多少 */
+  function probeVideo(url) {
+    return new Promise(function (resolve) {
+      var v = document.createElement('video');
+      var done = false;
+      var finish = function (ok) {
+        if (done) return;
+        done = true;
+        var dur = ok && isFinite(v.duration) ? v.duration : 0;
+        try { v.removeAttribute('src'); v.load(); } catch (e) { /* ignore */ }
+        resolve({ ok: ok, duration: dur });
+      };
+      v.preload = 'metadata';
+      v.onloadedmetadata = function () { finish(true); };
+      v.onerror = function () { finish(false); };
+      setTimeout(function () { finish(false); }, PROBE_TIMEOUT_MS);
+      v.src = url;
+    });
+  }
+
+  /** 按 4 个一批并发跑（文件夹里几十个文件时别一个接一个地等） */
+  async function mapLimit(items, limit, fn) {
+    var out = [];
+    for (var i = 0; i < items.length; i += limit) {
+      var batch = items.slice(i, i + limit);
+      var res = await Promise.all(batch.map(fn));
+      out = out.concat(res);
+    }
+    return out;
+  }
 
   /** 文件名自然排序（"第2集" 排在 "第10集" 前面） */
   function byName(a, b) {
@@ -173,11 +220,11 @@ window.BiliNestLocal = (function () {
       kind: 'local',
       name: name,
       size: size,
+      duration: 0,
       lastModified: lastModified,
       addedAt: Date.now(),
       stars: 0,
-      handle: !!handle,
-      url: null
+      handle: !!handle
     };
   }
 
@@ -203,25 +250,35 @@ window.BiliNestLocal = (function () {
       /* 遍历中断：用已拿到的部分 */
     }
     files.sort(byName);
-    var episodes = [];
-    for (var i = 0; i < files.length; i++) {
+    var skipped = 0;
+    var probed = await mapLimit(files, 4, async function (handle) {
       var file = null;
-      try { file = await files[i].getFile(); } catch (e) { continue; }
+      try { file = await handle.getFile(); } catch (e) { return null; }
+      var url = URL.createObjectURL(file);
+      var probe = await probeVideo(url);
+      URL.revokeObjectURL(url);
+      if (!probe.ok) { skipped++; return null; }   // 浏览器解不了（avi 之类）：不放进列表
+      return { handle: handle, file: file, duration: probe.duration };
+    });
+    var episodes = [];
+    for (var i = 0; i < probed.length; i++) {
+      var it = probed[i];
+      if (!it) continue;
       var id = newId();
-      try { await putHandle(id, files[i]); } catch (e) { /* 句柄存不下也能本次会话播放 */ }
-      urlMap.set(id, URL.createObjectURL(file));
-      var ep = makeEntry(id, files[i].name, file.size, file.lastModified, true);
-      ep.url = urlMap.get(id);
+      try { await putHandle(id, it.handle); } catch (e) { /* 句柄存不下也能本次会话播放 */ }
+      fileMap.set(id, it.file);
+      var ep = makeEntry(id, it.file.name, it.file.size, it.file.lastModified, true);
+      ep.duration = it.duration;
       episodes.push(ep);
     }
-    return { name: dir.name, episodes: episodes };
+    return { name: dir.name, episodes: episodes, skipped: skipped };
   }
 
   /**
    * 兜底：<input type="file" webkitdirectory> 的 FileList（Firefox / Safari 走这条路）。
    * 以 webkitRelativePath 的第一段为文件夹名，其余的同级视频作为列表项。
    */
-  function entriesFromDirFiles(fileList) {
+  async function entriesFromDirFiles(fileList) {
     var files = [];
     for (var i = 0; i < fileList.length; i++) {
       var f = fileList[i];
@@ -234,63 +291,86 @@ window.BiliNestLocal = (function () {
     if (!files.length) return null;
     files.sort(byName);
     var target = files[0].dir;
+    var picked = files.filter(function (f) { return f.dir === target; });  // 只收同一个文件夹
+    var skipped = 0;
+    var probed = await mapLimit(picked, 4, async function (item) {
+      var url = URL.createObjectURL(item.file);
+      var probe = await probeVideo(url);
+      URL.revokeObjectURL(url);
+      if (!probe.ok) { skipped++; return null; }
+      return { item: item, duration: probe.duration };
+    });
     var episodes = [];
-    for (var j = 0; j < files.length; j++) {
-      if (files[j].dir !== target) continue;     // 只收同一个文件夹（多选时取第一层）
+    for (var j = 0; j < probed.length; j++) {
+      var hit = probed[j];
+      if (!hit) continue;
       var id = newId();
-      var url = URL.createObjectURL(files[j].file);
-      urlMap.set(id, url);
-      var ep = makeEntry(id, files[j].name, files[j].file.size, files[j].file.lastModified, false);
-      ep.url = url;
+      fileMap.set(id, hit.item.file);
+      var ep = makeEntry(id, hit.item.name, hit.item.file.size, hit.item.file.lastModified, false);
+      ep.duration = hit.duration;
       episodes.push(ep);
     }
-    return { name: target, episodes: episodes };
+    return { name: target, episodes: episodes, skipped: skipped };
   }
 
   /** 兜底：由 <input type=file> 的 FileList 生成条目（仅本次会话可播放） */
-  function entriesFromFiles(fileList) {
-    var entries = [];
-    for (var i = 0; i < fileList.length; i++) {
-      var f = fileList[i];
-      var id = 'local-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+  async function entriesFromFiles(fileList) {
+    var files = [];
+    for (var i = 0; i < fileList.length; i++) files.push(fileList[i]);
+    var probed = await mapLimit(files, 4, async function (f) {
       var url = URL.createObjectURL(f);
-      urlMap.set(id, url);
+      var probe = await probeVideo(url);
+      URL.revokeObjectURL(url);
+      return probe.ok ? { file: f, duration: probe.duration } : null;
+    });
+    var entries = [];
+    for (var j = 0; j < probed.length; j++) {
+      if (!probed[j]) continue;
+      var f = probed[j].file;
+      var id = 'local-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+      fileMap.set(id, f);
       entries.push({
         id: id,
         kind: 'local',
         name: f.name,
         size: f.size,
+        duration: probed[j].duration,
         lastModified: f.lastModified,
         addedAt: Date.now(),
         stars: 0,
-        handle: false,
-        url: url
+        handle: false
       });
     }
     return entries;
   }
 
-  /** 尝试恢复条目的可播放地址（持久化句柄或会话内 objectURL），失败返回 null */
-  async function restoreEntry(entry) {
-    if (urlMap.has(entry.id)) return urlMap.get(entry.id);
-    if (entry.handle) {
+  /**
+   * 取一个**全新的**可播放地址。
+   *
+   * 为什么不能复用同一个 objectURL：ArtPlayer 的 `art.url = 新地址` setter 里会
+   * `URL.revokeObjectURL(上一个地址)`（非自定义类型走这条分支）。本地视频每次都用
+   * 同一个 blob 地址，第二次播放时就会被它 revoke 掉 → 报"视频加载失败（地址不支持）"
+   * ／控制台 `net::ERR_FILE_NOT_FOUND`。所以每次播都新建一个，让 ArtPlayer 去回收上一个。
+   */
+  async function freshUrl(entry) {
+    if (!entry) return null;
+    var file = fileMap.get(entry.id) || null;
+    if (!file && entry.handle) {
       try {
         var handle = await getHandle(entry.id);
-        if (!handle) return null;
-        var perm = await handle.queryPermission({ mode: 'read' });
-        if (perm !== 'granted') {
-          perm = await handle.requestPermission({ mode: 'read' });
+        if (handle) {
+          var perm = await handle.queryPermission({ mode: 'read' });
+          if (perm !== 'granted') perm = await handle.requestPermission({ mode: 'read' });
+          if (perm === 'granted') file = await handle.getFile();
         }
-        if (perm !== 'granted') return null;
-        var file = await handle.getFile();
-        var url = URL.createObjectURL(file);
-        urlMap.set(entry.id, url);
-        return url;
       } catch (e) {
-        return null;
+        /* 句柄不可用：交给调用方提示"无法读取本地文件" */
       }
     }
-    return null;
+    if (!file) return null;
+    var url = URL.createObjectURL(file);
+    urlMap.set(entry.id, url);
+    return url;
   }
 
   function getUrl(id) {
@@ -307,6 +387,7 @@ window.BiliNestLocal = (function () {
 
   async function removeEntry(entry) {
     revoke(entry.id);
+    fileMap.delete(entry.id);
     if (entry.handle) {
       try { await deleteHandle(entry.id); } catch (e) { /* ignore */ }
     }
@@ -317,7 +398,7 @@ window.BiliNestLocal = (function () {
     pickDirectory: pickDirectory,
     entriesFromDirFiles: entriesFromDirFiles,
     entriesFromFiles: entriesFromFiles,
-    restoreEntry: restoreEntry,
+    freshUrl: freshUrl,
     getUrl: getUrl,
     removeEntry: removeEntry
   };

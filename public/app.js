@@ -2626,7 +2626,8 @@
     var isAdded = !!(v.kind || v.addedAt);
     var epCount = (v.episodes && v.episodes.length) || v.episodeCount || 0;
     var localSeries = v.kind === 'local' && v.isSeries && epCount > 0;
-    var durLabel = v.kind === 'local' ? (localSeries ? epCount + ' 个视频' : '本地') : fmtDuration(dur);
+    // 本地文件现在也能读到时长（添加时用 <video> 探过），有就照常显示
+    var durLabel = v.kind === 'local' ? (localSeries ? epCount + ' 个视频' : (dur ? fmtDuration(dur) : '本地')) : fmtDuration(dur);
     var timeLabel = '';
     if (v.kind === 'local') {
       timeLabel = localSeries ? '文件夹' : (v.size ? fmtSize(v.size) : '本地视频');
@@ -2833,13 +2834,11 @@
    * @param {boolean} keepEpisodes 是否保留当前选集面板（本地列表切集时用）
    */
   async function playLocalEntry(entry, keepEpisodes) {
-    var url = local.getUrl(entry.id);
+    // 每次播放都取一个**新的** blob 地址：ArtPlayer 换源时会 revoke 上一个，
+    // 复用同一个地址会让第二次播放直接报"地址不支持"（详见 localfiles.js）。
+    var url = await local.freshUrl(entry);
     if (!url) {
-      toast('正在恢复本地文件…');
-      url = await local.restoreEntry(entry);
-    }
-    if (!url) {
-      toast('无法读取本地文件，请重新添加该视频', 'error');
+      toast('无法读取本地文件：权限已失效或文件被移动，请重新添加', 'error', 6000);
       loadDashboard();
       return;
     }
@@ -3094,7 +3093,9 @@
             cid: ep.cid,
             page: ep.page || 1,
             title: ep.title || '',
-            duration: ep.duration || 0
+            // 合集的每集时长不在 ep.duration 上，而在 ep.arc.duration 里
+            // （实测：多 P 用 pages[].duration，合集必须读 arc.duration，否则整列都是 0:00）
+            duration: ep.duration || (ep.arc && ep.arc.duration) || 0
           });
         });
       });
@@ -3319,10 +3320,9 @@
             '<input id="addVideoInput" type="text" placeholder="粘贴 B 站视频链接 / BV 号 / av 号" autocomplete="off">' +
             '<button type="submit" class="btn primary">添加</button>' +
           '</form>' +
-          '<p class="muted small">粘贴单集链接，或选本地视频 / 文件夹；加进来的都会出现在「视频库」标签页里。</p>' +
+          '<p class="muted small">粘贴单集链接，或加本地内容；加进来的都会出现在「视频库」标签页里。</p>' +
           '<div class="row">' +
-            '<button id="btnPickLocal" type="button" class="btn ghost">选择本地视频…</button>' +
-            '<button id="btnPickFolder" type="button" class="btn ghost">选择文件夹…</button>' +
+            '<button id="btnPickLocal" type="button" class="btn ghost">添加本地视频 / 文件夹…</button>' +
           '</div>' +
         '</section>' +
       '</div>',
@@ -3582,8 +3582,15 @@
     }
 
     document.getElementById('addVideoForm').addEventListener('submit', onAddVideo);
-    document.getElementById('btnPickLocal').addEventListener('click', onPickLocal);
-    document.getElementById('btnPickFolder').addEventListener('click', onPickFolder);
+    // 一个入口，点了再选"文件还是文件夹"：浏览器把这两种系统对话框分开了，
+    // showOpenFilePicker 选不了文件夹、showDirectoryPicker 选不了单个文件，
+    // 所以用一层小菜单让用户自己表明意图 —— 选文件按单视频处理，选文件夹按列表处理。
+    document.getElementById('btnPickLocal').addEventListener('click', function () {
+      openActionMenu(this, [
+        { label: '选择视频文件…', onClick: function () { onPickLocal(); } },
+        { label: '选择文件夹（整个文件夹当一个列表）', onClick: function () { onPickFolder(); } }
+      ]);
+    });
   }
 
   async function onAddVideo(e) {
@@ -3663,6 +3670,10 @@
   }
 
   function addLocalEntries(entries) {
+    if (!entries || !entries.length) {
+      toast('这个文件浏览器放不了（支持 mp4 / m4v / mov / webm / mkv）', 'error', 6000);
+      return;
+    }
     var list = store.get('customVideos') || [];
     for (var i = 0; i < entries.length; i++) list.unshift(entries[i]);
     store.set({ customVideos: list, source: { kind: 'mine', name: '我的视频' } });
@@ -3698,12 +3709,15 @@
     store.set({ customVideos: list, source: { kind: 'mine', name: '我的视频' } });
     closeModal();
     loadDashboard();
-    toast('已添加文件夹「' + res.name + '」（' + res.episodes.length + ' 个视频）· 点卡片右上角 ⋯ 可改名', 'success', 5000);
+    toast('已添加文件夹「' + res.name + '」（' + res.episodes.length + ' 个视频' +
+      (res.skipped ? '，跳过 ' + res.skipped + ' 个浏览器放不了的' : '') +
+      '）· 点卡片右上角 ⋯ 可改名', 'success', res.skipped ? 7000 : 5000);
   }
 
   async function onPickFolder() {
     var res = null;
     try {
+      toast('正在读取文件夹…（会逐个确认能不能播）', 'info', 6000);
       res = await local.pickDirectory();
     } catch (e) {
       if (e && e.name === 'AbortError') return;
@@ -3718,9 +3732,10 @@
     addLocalFolder(res);
   }
 
-  function onDirInputChange() {
+  async function onDirInputChange() {
     if (!els.dirInput.files || !els.dirInput.files.length) return;
-    var res = local.entriesFromDirFiles(els.dirInput.files);
+    toast('正在读取文件夹…（会逐个确认能不能播）', 'info', 6000);
+    var res = await local.entriesFromDirFiles(els.dirInput.files);
     els.dirInput.value = '';
     addLocalFolder(res);
   }
@@ -4984,9 +4999,9 @@
     playEpisodeAt(Number(row.dataset.ep));
   }
 
-  function onFileInputChange() {
+  async function onFileInputChange() {
     if (!els.fileInput.files || !els.fileInput.files.length) return;
-    var entries = local.entriesFromFiles(els.fileInput.files);
+    var entries = await local.entriesFromFiles(els.fileInput.files);
     els.fileInput.value = '';
     addLocalEntries(entries);
   }
