@@ -1144,8 +1144,10 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
   padding-top: 9px;
 }
 .card-foot .card-stars { margin-top: 0; }
-.card-remove {
-  /* 画面右上角的删除：与「+ / ✓」用同一种半透明材质 */
+.card-remove,
+.card-menu {
+  /* 画面右上角的操作按钮：与「+ / ✓」用同一种半透明材质。
+     card-menu 是「⋯」——重命名 / 恢复原名 / 删除都收在它里面。 */
   position: absolute;
   right: 8px;
   top: 8px;
@@ -1167,6 +1169,8 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
   transition: background var(--dur-2) var(--ease-state), color var(--dur-2) var(--ease-state);
 }
 .card-remove:hover { background: rgba(229, 72, 77, 0.14); color: #e5484d; }
+.card-menu { font-size: 15px; letter-spacing: 0.5px; }
+.card-menu:hover { background: rgba(255, 255, 255, 0.28); }
 
 /* ---------- 播放页 ---------- */
 /*
