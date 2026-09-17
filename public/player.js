@@ -309,6 +309,7 @@ window.BiliNestPlayer = (function () {
     });
 
     state.art = art;
+    mutePlayPauseNotice(art);
     els.endOverlay = els.player.querySelector('#endOverlay');
     applySubSettings(); // 字幕位置 / 字号（可能已持久化，先恢复再显示）
     bindEndOverlay();
@@ -1074,6 +1075,37 @@ window.BiliNestPlayer = (function () {
       var el = state.art.controls[name];
       if (el) el.style.display = show ? '' : 'none';
     });
+  }
+
+  /**
+   * 播放 / 暂停不弹提示。
+   *
+   * ArtPlayer 的 play/pause 存取器里会 `notice.show = i18n('Play' | 'Pause')`，
+   * 而控制条上本来就有播放/暂停图标，这个提示纯属重复（而且现在提示挪到画面正中了，
+   * 一按空格就在画面中间闪一下更碍眼）。这里只把这两句挡掉，其它提示照旧：
+   * 做法是给 notice 实例装一个自己的 `show` 存取器，过滤后再转发给原型上的实现。
+   */
+  function mutePlayPauseNotice(art) {
+    try {
+      var notice = art.notice;
+      if (!notice) return;
+      var desc = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(notice), 'show');
+      if (!desc || !desc.get || !desc.set) return;
+      Object.defineProperty(notice, 'show', {
+        configurable: true,
+        get: function () { return desc.get.call(notice); },
+        set: function (v) {
+          // 播放/暂停：不弹新提示，顺手把可能还挂在画面上的旧提示收掉
+          if (typeof v === 'string' && /^(播放|暂停|play|pause)$/i.test(v.trim())) {
+            desc.set.call(notice, '');
+            return;
+          }
+          desc.set.call(notice, v);
+        }
+      });
+    } catch (e) {
+      /* 拿不到存取器就保持原样：为一句提示影响播放不值得 */
+    }
   }
 
   /* ---------------- 停止 ---------------- */
