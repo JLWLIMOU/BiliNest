@@ -48,6 +48,7 @@ window.BiliNestStore = (function () {
     updateCheck: 'auto',      // 更新检查方式：auto=打开时自动检查（只在设置里显示一个小圆点）| manual=只在点按钮时检查
     settingsTab: 'login',     // 设置弹窗左栏当前分类：login | general | data | about
     subSettings: { pos: 100, size: 'md' }, // 字幕位置（滑块 0~100）/ 字号
+    playRate: 1,              // 播放倍速（播放器控制条上的档位，见 player.js 的 PLAY_RATES）
     customVideos: [],         // 手动添加的 B 站视频 / 本地视频
     studyFolders: [],         // 收藏夹库：{ id, title, cover, mediaCount, addedAt, stars }
     studyUps: [],             // 学习 UP主（本地书签）：{ mid, name, face, sign, fans, videos, level, addedAt, stars }

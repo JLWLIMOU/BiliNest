@@ -16,6 +16,16 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **播放倍速**：播放页控制条上新增倍速档位 —— 0.5× / 0.75× / 1.0× / 1.25× / 1.5× / 1.75× / 2.0×（1.25 是听课最常用的一档）。点一下即切换，**不是 1.0× 时按钮会亮成蓝色胶囊**，避免"忘了自己开着 1.5 倍速"；选择会记住，**换集、切清晰度、下次打开**都还是这个速度（切流会把 `playbackRate` 重置回 1.0，已在 `video:canplay` 补回来）。
+  - 档位定成这 7 个：0.5 / 0.75 给"听不懂要抠细节"，1.25 / 1.5 / 1.75 给"听课时拉进度"；0.5 以下和 2 以上基本只有刷课会用，列出来只会让下拉变长。
+- **安装包会认「已经装过」**：运行安装包时先找一遍本机有没有 BiliNest —— 注册表卸载信息 → 桌面快捷方式指向的目录（含改名前的 `BiliPure.lnk`）→ 常见安装位置 → 安装包自己所在的目录；找到后读它 `package.json` 里的**真实版本号**（应用内更新只换文件不写注册表，注册表里的 `DisplayVersion` 会滞后，所以一律以文件为准）：
+  - **安装包更新 → 按更新处理**：装回原目录、跳过目录选择页、只替换程序文件，并弹窗说明"这是更新到 vX，数据不动"；开装前先让正在跑的本地服务退出（否则新代码不会生效），装完由 `[Run]` 重新拉起。
+  - **版本相同** → 问一句要不要重装一遍（把程序文件修回原样）。
+  - **安装包更旧** → 问一句是否真的要用旧版覆盖；静默安装则直接拒绝，不会把新版本悄悄降级。
+  - **检测到源码检出（含 `.git`）** → 不覆盖，提示用 `git pull` 或在应用内更新。
+
 ### 修复
 
 - **点「更新」不再跳去 GitHub 网站**：以前安装版点更新只是打开浏览器下载页（下载地址就在 GitHub 上），用户得自己找文件、跑安装程序 —— 观感就是"被丢到 GitHub 去了"。现在改成**本地服务自己动手**：下载发布包（`*-portable.zip`）→ 就地替换 `server.mjs` 与 `public/` → 重启服务 → 页面自动刷新回到新版本，全程不离开应用，也不再打开任何新标签页。下载失败时会说明原因并给一个显式的「手动下载安装包」按钮（不点就不会跳转）。
@@ -30,7 +40,9 @@
 
 - `server.mjs`：新增 `selfUpdateFromRelease()` / `readZip()` / `downloadTo()` / `writeFileAtomic()`；`/api/update/apply` 按 `IS_GIT_CHECKOUT` 分流（git 检出仍是 `git pull`，其余走发布包就地替换）；`/api/update/check` 增加 `hasPortable`。
 - `public/app.js`：新增 `applyUpdateInApp()` / `openUpdateProgress()` / `updateProgressFail()`；`closeModal()` 加 `modalGen` 代次守卫；引导新增 `guideAutoOpened` 标记。
-- `public/styles.css`：新增 `.upd-bar` 进度条样式（带 `prefers-reduced-motion` 兜底）。
+- `public/player.js`：新增 `PLAY_RATES` / `loadPlayRate()` / `rateItems()` / `setPlayRate()` / `applyPlayRate()`，控制条新增 `speed` 控件（`index: 11`，在字幕左侧）。`public/storage.js` 新增 `playRate` 字段（默认 1，随状态一起备份）。
+- `installer/bilinest.iss`：新增 `DetectExistingInstall()` / `ConsiderCandidate()` / `ReadDirVersion()` / `CompareVer()` / `DirFromShortcut()`，以及 `InitializeSetup()`（定新装/更新/降级）、`CurStepChanged(ssInstall)`（先停服务再换文件）、`ShouldSkipPage/CurPageChanged`（更新时跳过并锁定目录页）；`DisableDirPage=auto`、`UsePreviousAppDir=yes`；`AppName / AppId / AppVersion` 支持用 ISCC 的 `/D` 覆盖，便于不动真实安装做回归测试。
+- `public/styles.css`：新增 `.upd-bar` 进度条样式（带 `prefers-reduced-motion` 兜底）与 `.bilinest-ctl.rate.on`（非 1.0× 时的蓝色胶囊）。
 
 ---
 

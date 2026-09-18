@@ -1449,6 +1449,14 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
 }
 .bilinest-ctl:hover { background: rgba(255, 255, 255, 0.12); }
 .bilinest-ctl.off { opacity: 0.45; }
+/* 倍速不是 1.0 时点出来：控制条上一眼看得到"现在不是常速" */
+.bilinest-ctl.rate { font-variant-numeric: tabular-nums; }
+.bilinest-ctl.rate.on {
+  color: #fff;
+  background: rgba(10, 132, 255, 0.85);
+}
+.bilinest-ctl.rate.on:hover { background: rgba(10, 132, 255, 1); }
+
 .bilinest-ctl.disabled {
   opacity: 0.3;
   cursor: default;

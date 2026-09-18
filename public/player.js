@@ -36,6 +36,12 @@ window.BiliNestPlayer = (function () {
   var DANMAKU_SEGMENT_DELAY_MS = 120;
   // 字幕字号与播放器宽度的比例系数（随窗口 / 全屏等比缩放）
   var SUB_SIZE_FACTORS = { sm: 0.020, md: 0.024, lg: 0.030, xl: 0.038 };
+  /*
+   * 播放倍速档位。挑这 7 档的理由：0.5/0.75 给"听不懂要抠细节"的，
+   * 1.25/1.5/1.75 给"听课时拉进度"的（1.25 是最常用的一档），
+   * 0.5 以下、2 以上基本只有刷课会用，列出来只会让下拉变长，不收。
+   */
+  var PLAY_RATES = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
   // 字幕请求序号：快速切换视频时，用序号丢弃旧视频的过期字幕结果
   var subtitleSeq = 0;
   // 弹幕请求序号：与字幕同理，防止旧视频的弹幕覆盖新视频
@@ -62,6 +68,7 @@ window.BiliNestPlayer = (function () {
     subtitleVttUrl: null,   // 当前字幕的 Blob URL（切集时 revoke）
     subtitleOn: false,      // 字幕默认关闭，由用户手动开启
     subSettings: loadSubSettings(), // 字幕位置 / 字号（持久化到 localStorage）
+    playRate: loadPlayRate(),       // 播放倍速（持久化到 localStorage）
     resumePoint: 0,         // 续播点（秒），媒体就绪后自动跳转（一次性，保留兼容）
     resumeTarget: 0,        // 期望续播点（秒），跨重试/恢复保持，直到真正到达才清零
     recovering: false,      // 处于“加载失败 → 自动恢复”过程中（此时不要回写进度）
@@ -185,6 +192,18 @@ window.BiliNestPlayer = (function () {
           html: '<span class="bilinest-ctl">字幕</span>',
           tooltip: '字幕开关',
           click: function () { toggleSubtitle(); }
+        },
+        {
+          name: 'speed',
+          position: 'right',
+          index: 11,
+          html: rateControlHtml(),
+          tooltip: '播放倍速',
+          selector: rateItems(),
+          onSelect: function (item) {
+            if (item && item.value) setPlayRate(Number(item.value));
+            return rateControlHtml();   // 控件上直接显示当前倍速
+          }
         },
         {
           name: 'substyle',
@@ -312,6 +331,7 @@ window.BiliNestPlayer = (function () {
     mutePlayPauseNotice(art);
     els.endOverlay = els.player.querySelector('#endOverlay');
     applySubSettings(); // 字幕位置 / 字号（可能已持久化，先恢复再显示）
+    applyPlayRate();    // 上次用的倍速（换集 / 重试后由 loadedmetadata 再补一次）
     bindEndOverlay();
     // ArtPlayer 模板里自带 <track default kind="metadata" src="">：
     //   · src="" 会被解析成当前页面地址，浏览器会白请求一次 —— 所以清掉 src；
@@ -362,6 +382,8 @@ window.BiliNestPlayer = (function () {
       state.freshTries = 0;
       state.qualityTries = 0;
       state.recovering = false;
+      // 换流（尤其切清晰度 / dash 重建 MSE）后 playbackRate 可能被重置回 1.0，这里补回来
+      applyPlayRate();
     });
     art.on('video:loadedmetadata', function () {
       // 自动从上次观看进度续播（跨重试保持：只要尚未成功 seek，就重新跳转）
@@ -871,6 +893,56 @@ window.BiliNestPlayer = (function () {
       var color = '#' + ('000000' + (d.color >>> 0).toString(16)).slice(-6);
       return { time: d.time, text: d.text, color: color, mode: mode };
     });
+  }
+
+  /* ---------------- 播放倍速 ---------------- */
+
+  /** 读上次用的倍速；值不在档位里（或旧数据）就回到 1.0 */
+  function loadPlayRate() {
+    var v = Number((store && store.get && store.get('playRate')) || 1);
+    return PLAY_RATES.indexOf(v) >= 0 ? v : 1;
+  }
+
+  /** 倍速的显示文本：0.5 / 0.75 / 1.0 / 1.25 …（末尾不留多余的 0） */
+  function fmtRate(v) {
+    return (Math.round(Number(v) * 100) / 100).toFixed(2).replace(/0$/, '');
+  }
+
+  /** 控制条上那个按钮的内容：不是在 1.0 倍速时高亮一下，避免"我明明开了倍速却忘了" */
+  function rateControlHtml() {
+    return '<span class="bilinest-ctl rate' + (state.playRate === 1 ? '' : ' on') + '">' +
+      fmtRate(state.playRate) + '×</span>';
+  }
+
+  /** 倍速下拉的档位（当前值带勾） */
+  function rateItems() {
+    return PLAY_RATES.map(function (v) {
+      return {
+        html: v === 1 ? '正常（1.0×）' : fmtRate(v) + '×',
+        value: String(v),
+        default: state.playRate === v
+      };
+    });
+  }
+
+  /** 把当前倍速写到 <video> 上（ArtPlayer 会代理到 video.playbackRate） */
+  function applyPlayRate() {
+    var art = state.art;
+    if (!art) return;
+    try {
+      art.playbackRate = state.playRate;
+    } catch (e) {
+      /* 个别浏览器在未就绪时会抛错，忽略即可（loadedmetadata 后会再应用一次） */
+    }
+  }
+
+  /** 设置倍速：立即生效 + 持久化（下次打开还是这个速度）+ 一条提示 */
+  function setPlayRate(v) {
+    var n = Number(v);
+    state.playRate = PLAY_RATES.indexOf(n) >= 0 ? n : 1;
+    if (store && store.set) store.set({ playRate: state.playRate });
+    applyPlayRate();
+    if (state.art && state.art.notice) state.art.notice.show = '倍速 ' + fmtRate(state.playRate) + '×';
   }
 
   /* ---------------- 字幕（改用 ArtPlayer 原生组件）设置 ---------------- */
