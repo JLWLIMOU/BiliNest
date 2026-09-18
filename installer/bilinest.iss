@@ -26,7 +26,7 @@
   #define AppName "BiliNest"
 #endif
 #ifndef AppVersion
-  #define AppVersion "1.4.2"
+  #define AppVersion "1.4.3"
 #endif
 #ifndef AppId
   #define AppId "{{B1A9E4C2-7D3F-4A86-9C15-2E7B6F0A5D34}"
@@ -44,7 +44,7 @@ AppPublisher={#AppPublisher}
 AppPublisherURL={#AppUrl}
 AppSupportURL={#AppUrl}
 AppUpdatesURL={#AppUrl}
-VersionInfoVersion=1.4.2.0
+VersionInfoVersion=1.4.3.0
 VersionInfoProductName={#AppName}
 VersionInfoDescription={#AppName} 无干扰 B 站学习播放器 安装程序
 DefaultDirName={autopf}\{#AppName}

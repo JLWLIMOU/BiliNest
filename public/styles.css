@@ -1838,6 +1838,31 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
   .upd-bar > span { animation: none; width: 100%; opacity: 0.55; }
 }
 
+/*
+ * 更新区里的"重要提醒"：正文最上面那段 ⚠（见 server.mjs 的 extractUrgent）。
+ * 用暖色的浅底 + 左侧色条，和普通说明文字区分开，但不至于像报错一样刺眼。
+ */
+.update-urgent {
+  margin: 4px 0 12px;
+  padding: 10px 12px 10px 14px;
+  border-radius: var(--r-2);
+  border-left: 3px solid var(--warn);
+  background: color-mix(in srgb, var(--warn) 12%, var(--surface) 88%);
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+/* 更新确认框里的同一条提醒：不再画框，只换成暖色文字，避免弹窗里套框 */
+.update-urgent-inline {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--warn);
+  font-weight: 600;
+  line-height: 1.65;
+}
+
 /* 收藏夹列表 */
 .folder-list { display: flex; flex-direction: column; gap: 6px; }
 .folder-row {

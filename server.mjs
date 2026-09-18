@@ -91,6 +91,21 @@ function compareVersion(a, b) {
   return 0;
 }
 
+/**
+ * 从 release 正文里挑出"重要提醒"。
+ *
+ * 约定：紧急提醒写在正文最上面（第一个 `##` 小标题之前），以 ⚠ 开头。
+ * 为什么用正文而不是加个新字段：旧版本的更新检查只认 GitHub 的 `body`
+ * （原样显示在"这次更新了什么"里），写在正文顶部它们照样能看到；
+ * 新版本再用这个函数把它提出来，直接摆到设置面板和更新确认框里。
+ */
+function extractUrgent(body) {
+  const text = String(body || '');
+  const cut = text.search(/^##\s/m);
+  const head = (cut >= 0 ? text.slice(0, cut) : text).trim();
+  return head.includes('⚠') ? head : '';
+}
+
 async function checkUpdate(force) {
   if (!force && updateCache.data && Date.now() - updateCache.at < UPDATE_CACHE_MS) {
     return updateCache.data;
@@ -113,6 +128,7 @@ async function checkUpdate(force) {
     hasUpdate: compareVersion(latest, APP_VERSION) > 0,
     publishedAt: rel.published_at || rel.created_at || '',
     notes: rel.body || '',
+    urgent: extractUrgent(rel.body),
     htmlUrl: rel.html_url || `https://github.com/${UPDATE_REPO}/releases`,
     assets,
     hasPortable: assets.some((a) => UPDATE_ZIP_ASSET_RE.test(a.name)),

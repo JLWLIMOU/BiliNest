@@ -4127,6 +4127,7 @@
            * 是 git 检出的话还能直接"拉取源码更新"；否则给安装包下载。
            */
           '<h3>更新</h3>' +
+          '<div id="updateUrgent" class="update-urgent" hidden></div>' +
           '<div class="row update-row">' +
             '<button id="btnRunUpdate" type="button" class="btn primary">检查更新</button>' +
             '<label class="update-mode"><span class="muted small">检查方式</span>' +
@@ -4161,6 +4162,26 @@
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   }
 
+  /**
+   * 更新确认框里前置的"重要提醒"。
+   * 文案来自 release 正文顶部那段 ⚠（见 server.mjs 的 extractUrgent）——
+   * 旧版本客户端也会把同一段文字原样显示在"这次更新了什么"里。
+   */
+  /** 正文是 markdown，面板和弹窗都是纯文本渲染，这里把引用符号和强调标记去掉 */
+  function plainUrgent(text) {
+    return String(text || '')
+      .split('\n')
+      .map(function (line) { return line.replace(/^\s*>\s?/, ''); })
+      .join('\n')
+      .replace(/\*\*/g, '')
+      .replace(/`/g, '');
+  }
+
+  function urgentLead(d) {
+    if (!d || !d.urgent) return '';
+    return '<span class="update-urgent-inline">' + esc(plainUrgent(d.urgent)).replace(/\n/g, '<br>') + '</span><br><br>';
+  }
+
   var updateCheckedOnce = false;
   var lastUpdate = null;        // 最近一次检查结果（打开设置时据此直接渲染，不用再等网络）
 
@@ -4176,6 +4197,14 @@
   function renderUpdateResult(d) {
     // 设置图标上的小圆点：自动检查发现新版本时提示，不打扰
     if (els.btnSettings) els.btnSettings.classList.toggle('has-update', !!(d && d.ok && d.hasUpdate));
+
+    // 紧急提醒（release 正文最上面那段 ⚠）单独摆出来，不塞进折叠区
+    var urgentBox = document.getElementById('updateUrgent');
+    if (urgentBox) {
+      var urgentText = (d && d.ok && d.hasUpdate && d.urgent) ? d.urgent : '';
+      urgentBox.hidden = !urgentText;
+      urgentBox.textContent = plainUrgent(urgentText);
+    }
 
     var status = document.getElementById('updateStatus');
     if (!status) return;
@@ -4349,6 +4378,7 @@
     if (d.canGitPull) {
       // 源码版：拉取 + 重启 + 重新打开页面，全自动
       confirmAction(
+        urgentLead(d) +
         '发现新版本：v' + d.current + ' → <b>v' + d.latest + '</b>。<br>' +
         '<span class="muted small">将执行 git pull，然后重启本地服务并重新打开页面（约几秒，期间页面会短暂断开）。' +
         '本地有未提交的改动时会中止，不会动你的工作区。</span>',
@@ -4383,6 +4413,7 @@
     if (d.hasPortable) {
       // 应用内一键更新：本地服务自己下载 + 替换 + 重启，用户不用离开页面
       confirmAction(
+        urgentLead(d) +
         '发现新版本：v' + d.current + ' → <b>v' + d.latest + '</b>。<br>' +
         '<span class="muted small">现在直接更新？本地服务会下载新版本、替换程序文件并重启' +
         '（约几秒，页面会短暂断开，数据与登录状态都不受影响）。</span>',
@@ -4397,6 +4428,7 @@
       // 只有安装包、没有便携包（1.4.0 及更早的发布）：退化成浏览器下载安装包，
       // 但这一步必须用户自己点"确定"才会发生，不会平白跳走。
       confirmAction(
+        urgentLead(d) +
         '发现新版本：v' + d.current + ' → <b>v' + d.latest + '</b>。<br>' +
         '<span class="muted small">这次发布没有附带可自动更新的压缩包，需要下载安装包（' + fmtMB(setup.size) +
         '）手动运行 —— 安装程序会停掉旧服务并重启，数据不会动。</span>',
@@ -4411,6 +4443,7 @@
 
     // 既不能拉取、也没有安装包（例如只有源码压缩包）：说明清楚，用户点了才去 release 页
     confirmAction(
+      urgentLead(d) +
       '发现新版本：v' + d.current + ' → <b>v' + d.latest + '</b>。<br>' +
       '<span class="muted small">这次发布没有可自动安装的文件，只能打开下载页面手动更新。</span>',
       function () { window.open(d.htmlUrl, '_blank', 'noopener'); }
@@ -4421,7 +4454,16 @@
   async function autoCheckUpdate() {
     if ((store.get('updateCheck') || 'auto') === 'manual') return;
     try {
-      renderUpdateResult(await fetchUpdate(false));
+      var d = await fetchUpdate(false);
+      renderUpdateResult(d);
+      /*
+       * 带紧急提醒的版本：自动检查时主动说一声。按版本号只提醒一次，
+       * 免得每次打开页面都弹（关掉提示后也不会再来）。
+       */
+      if (d && d.ok && d.hasUpdate && d.urgent && store.get('urgentNotified') !== d.latest) {
+        store.set({ urgentNotified: d.latest });
+        toast('发现 v' + d.latest + '：这次修复了重要问题，建议尽快更新', 'error', 9000);
+      }
     } catch (e) { /* 自动检查失败就静默，别打扰 */ }
   }
 

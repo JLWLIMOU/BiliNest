@@ -62,7 +62,8 @@ window.BiliNestStore = (function () {
                               //   { daily: { 'YYYY-MM-DD': 秒 }, byKey: { '进度键': 秒 } }
                               //   和别的数据一样存在 localStorage + 服务端备份里，不额外落盘
     hiddenHistoryKeys: [],    // 用户从“继续学习”栏手动隐藏的卡片（按合并键，历史数据保留）
-    guideSeen: null           // 是否已看过首次启动引导（true = 不再显示）
+    guideSeen: null,          // 是否已看过首次启动引导（true = 不再显示）
+    urgentNotified: null      // 已弹过提示的"紧急更新"版本号（同一版本只提醒一次）
   };
 
   // 仅本次会话使用的 Cookie（不落盘）
