@@ -16,7 +16,7 @@
 ; =============================================================
 
 #define AppName "BiliNest"
-#define AppVersion "1.4.1"
+#define AppVersion "1.4.2"
 #define AppPublisher "JLWLIMOU"
 #define AppUrl "https://github.com/JLWLIMOU/BiliNest"
 #define SrcDir ".."
@@ -30,7 +30,7 @@ AppPublisher={#AppPublisher}
 AppPublisherURL={#AppUrl}
 AppSupportURL={#AppUrl}
 AppUpdatesURL={#AppUrl}
-VersionInfoVersion=1.4.1.0
+VersionInfoVersion=1.4.2.0
 VersionInfoProductName={#AppName}
 VersionInfoDescription={#AppName} 无干扰 B 站学习播放器 安装程序
 DefaultDirName={autopf}\{#AppName}
