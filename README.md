@@ -43,7 +43,7 @@ BiliNest 的思路很简单：**只把你指定的内容留下来，其它的全
 - **Local-first & private**: a tiny zero-dependency Node proxy on `127.0.0.1` forwards only whitelisted read-only Bilibili APIs. Your credentials stay in your own browser; requests never touch any third party.
 - **Zero install of dependencies**: pure Node 18+ built-ins + static frontend, no `npm install` needed.
 - **Cross-platform**: works on Windows, macOS and Linux.
-- **Built-in updates**: `Settings → About → Update` checks the latest release and, with one confirmation, either pulls the source and restarts the local server (git checkout) or downloads the Windows installer — no terminal needed.
+- **Built-in updates**: `Settings → About → Update` checks the latest release and, with one confirmation, either pulls the source (git checkout) or, for installed/portable copies, downloads the release in the background, replaces the program files in place and restarts the local server — the page reloads when it's back. Nothing is opened in your browser, no terminal, no installer.
 - **Unofficial**: a third-party hobby project — not affiliated with, endorsed by, or sponsored by Bilibili. For personal study use only; please respect Bilibili's terms of service.
 
 **How it's built**: AI-assisted development — requirements, review, testing and releases are done by the maintainer; most code is generated with OpenAI Codex under his direction and then verified by hand (every change ships with a reproduction/verification note in [CHANGELOG.md](./CHANGELOG.md)). Codex is a tool, not a contributor or maintainer of this project.
@@ -87,7 +87,7 @@ See the Chinese section below for login methods, usage and the full feature list
 - **视频卡片改名（右上角 ⋯）**：视频卡片的右上角是「⋯」，里面是「重命名 /（恢复原名）/ 删除」——删除也收进来了，右上角不再单独放一个 ✕；右键视频卡片同样能打开。改名是就地编辑（回车保存、Esc 取消），只改本地显示，源站标题不动。收藏夹 / 学习 UP主 / 继续学习的卡片不参与改名，保持原来的 ✕。
 - **没有封面就生成一张**：本地视频、本地文件夹列表、以及 B 站封面缺失的**视频**条目，卡片封面会按名字生成同色系柔光渐变海报，标题自动缩放铺在上面；名字太长放不下时退化成"首字大字"，完整标题回到卡片下方。颜色由名字决定，同一条内容每次都是同一个色。**收藏夹不参与**：它没有封面时干脆不画封面区，卡片比视频扁一截，一眼就能分辨。
 - **数据不丢**：状态存在浏览器本地，同时自动备份到 `%APPDATA%\BiliNest\state-backup.json`；换浏览器、换端口或清过浏览器数据后打开会自动取回，两边都有数据时以较新的一份为准。
-- **版本更新**：`设置 → 关于 → 更新` 一个按钮搞定——源码版自动 `git pull` + 重启服务 + 刷新页面，安装包版自动下载安装包（运行它即可，数据不动）；检查方式可切「自动（打开时，只在设置图标点一个小圆点）/ 仅手动」。详见[更新方法](#更新方法)。
+- **版本更新**：`设置 → 关于 → 更新` 一个按钮搞定——源码版自动 `git pull`，安装版 / 便携版由本地服务自己下载新版本、就地替换文件并重启，两条路都是重启完自动刷新页面，全程不用离开应用；检查方式可切「自动（打开时，只在设置图标点一个小圆点）/ 仅手动」。详见[更新方法](#更新方法)。
 - **极简界面**：大标题 + 卡片网格的布局，滚动时标签栏吸顶；深色 / 浅色 / 跟随系统三档主题。
 - **隐私友好**：凭据只保存在你自己的浏览器里，请求只发给本机代理，不经过任何第三方服务器。
 
@@ -175,7 +175,7 @@ powershell -ExecutionPolicy Bypass -File installer\build.ps1
 
 打开 `设置 → 关于 → 更新`：平时按钮是「检查更新」，查到新版本会变成「更新到 vX.Y.Z」，点一下、确认即可。
 
-- **安装包版**：自动下载 `BiliNest-x.y.z-Setup.exe`，运行安装包就完成了 —— 它会自己停掉旧服务、装完重启，数据不动。
+- **安装版 / 便携版**：本地服务自己下载发布包，就地替换程序文件（`server.mjs`、`public/` 等）并重启，页面自动刷新到新版本 —— 全程留在应用里，不用自己下载、也不用运行任何安装程序。更新只覆盖程序文件，**用户数据与 `.env` 都不会被动**。
 - **源码版（git 检出）**：自动 `git pull` → 重启本地服务 → 刷新页面，全程不用开终端。本地有未提交的改动时会中止，不会动你的工作区。
 - 检查方式可以切换：**自动（打开页面时）**——发现新版本只在设置图标右上角点一个小圆点，不弹窗打扰；或者**仅手动**，只在点按钮时检查。
 
@@ -336,7 +336,7 @@ Chromium 内核浏览器自动恢复文件权限；被拒则删除重加。其�
 说明系统里找不到可用的 Node.js 18+。双击快捷方式时会自动打开一份图文安装指引（也可以直接看 `public/setup-help.html`）：按 `Win` 输入 `cmd` 后执行 `winget install OpenJS.NodeJS.LTS`，或者到 [nodejs.org](https://nodejs.org/zh-cn/download) 下载 LTS 版本安装，装好后重新双击快捷方式即可。安装时请保持勾选 **Add to PATH**。
 
 **Q：怎么知道有没有新版本？怎么更新？**
-打开 `设置 → 关于 → 更新`：按钮会显示「检查更新」或「更新到 vX.Y.Z」，点一下按提示确认即可（源码版会自动 `git pull` + 重启服务 + 刷新页面；安装包版会下载安装包，运行它即可，数据不受影响）。默认**每次打开页面自动检查**，发现新版本只在设置图标右上角点一个小圆点，不打扰；也可以在同一个位置把检查方式改成「仅手动」。手动更新的话见上面「[更新方法](#更新方法)」。
+打开 `设置 → 关于 → 更新`：按钮会显示「检查更新」或「更新到 vX.Y.Z」，点一下按提示确认即可（源码版自动 `git pull`；安装版 / 便携版由本地服务自己下载并替换文件、重启，然后页面自动刷新 —— 都不用离开应用，数据不受影响）。默认**每次打开页面自动检查**，发现新版本只在设置图标右上角点一个小圆点，不打扰；也可以在同一个位置把检查方式改成「仅手动」。手动更新的话见上面「[更新方法](#更新方法)」。
 
 **Q：如何打包成桌面应用？**
 本应用即“静态页面 + 本地服务”，可用任意壳包装，例如 Electron：

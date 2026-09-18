@@ -27,6 +27,9 @@ import crypto from 'node:crypto';
 import os from 'node:os';
 import { execFile, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import zlib from 'node:zlib';
+import { Readable, Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -71,6 +74,8 @@ const UPDATE_REPO = 'JLWLIMOU/BiliNest';
 const UPDATE_RELEASE_API = `https://api.github.com/repos/${UPDATE_REPO}/releases/latest`;
 const UPDATE_CACHE_MS = 10 * 60 * 1000;
 const IS_GIT_CHECKOUT = fs.existsSync(path.join(__dirname, '.git'));
+// 发布包里用于"就地自更新"的那一份（便携版 zip）
+const UPDATE_ZIP_ASSET_RE = /-portable\.zip$/i;
 let updateCache = { at: 0, data: null };
 
 /** 比较 x.y.z；a > b 返回 1，相等 0，小于 -1（缺位按 0 处理） */
@@ -110,6 +115,7 @@ async function checkUpdate(force) {
     notes: rel.body || '',
     htmlUrl: rel.html_url || `https://github.com/${UPDATE_REPO}/releases`,
     assets,
+    hasPortable: assets.some((a) => UPDATE_ZIP_ASSET_RE.test(a.name)),
     canGitPull: IS_GIT_CHECKOUT
   };
   updateCache = { at: Date.now(), data };
@@ -133,6 +139,148 @@ function gitPull() {
       resolve({ ok: true, output, changed: !/Already up[ -]to[ -]date/i.test(output) });
     });
   });
+}
+
+/* ------------------------------------------------------------------
+ * 0.3 就地自更新（安装版 / 便携版）
+ *     以前点"更新"只是 window.open 到 GitHub 的下载地址：用户被丢进浏览器，
+ *     还得自己找文件、跑安装程序 —— 观感上就是"跳去了 GitHub 网站"。
+ *     现在服务端自己把发布包（*-portable.zip）下下来、就地替换 server.mjs 与
+ *     public/，然后重启自己，前端只管等它回来刷新页面。
+ *
+ *     只覆写白名单里的程序文件：用户数据在 %APPDATA%\BiliNest\，.env 也不在
+ *     名单内，不会被碰到。
+ * ------------------------------------------------------------------ */
+const UPDATE_ZIP_LIMIT = 40 * 1024 * 1024;   // 发布包约 1MB，给足余量
+const UPDATE_FILES = new Set([
+  'server.mjs', 'package.json', 'launcher.vbs', 'create-shortcut.ps1',
+  'start.sh', 'bin/bilinest.mjs', 'README.md', 'CHANGELOG.md', 'LICENSE', '.env.example'
+]);
+
+/** 发布包里允许被覆写的路径；public/ 整个目录都在内（前端全在这里） */
+function isUpdatablePath(rel) {
+  return UPDATE_FILES.has(rel) || rel.startsWith('public/');
+}
+
+/** 归一化 zip 内条目名；越界（绝对路径 / ..）一律拒绝 */
+function safeRelPath(name) {
+  const clean = String(name || '').replace(/\\/g, '/');
+  if (!clean || clean.startsWith('/') || /^[a-zA-Z]:/.test(clean)) return '';
+  const parts = clean.split('/').filter((p) => p && p !== '.');
+  if (!parts.length || parts.some((p) => p === '..')) return '';
+  return parts.join('/');
+}
+
+/** 发布包通常套一层顶层目录（BiliNest-1.4.3/...）；全部同层时返回要裁掉的长度 */
+function topDirCut(names) {
+  if (names.length < 2) return 0;
+  const first = names[0].split('/')[0];
+  const sameTop = names.every((n) => n.includes('/') && n.split('/')[0] === first);
+  return sameTop ? first.length + 1 : 0;
+}
+
+/**
+ * 极简 ZIP 解析：只认 store(0) / deflate(8) —— 自己的发布包就这两种，
+ * 换来的是"零第三方依赖"，和项目其余部分一致。
+ */
+function readZip(buf) {
+  let eocd = -1;
+  const from = Math.max(0, buf.length - 66000);
+  for (let i = buf.length - 22; i >= from; i--) {
+    if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error('不是有效的 ZIP 文件');
+  const count = buf.readUInt16LE(eocd + 10);
+  let off = buf.readUInt32LE(eocd + 16);
+  const out = [];
+  for (let n = 0; n < count; n++) {
+    if (off + 46 > buf.length || buf.readUInt32LE(off) !== 0x02014b50) throw new Error('ZIP 目录损坏');
+    const method = buf.readUInt16LE(off + 10);
+    const compSize = buf.readUInt32LE(off + 20);
+    const uncompSize = buf.readUInt32LE(off + 24);
+    const nameLen = buf.readUInt16LE(off + 28);
+    const extraLen = buf.readUInt16LE(off + 30);
+    const commentLen = buf.readUInt16LE(off + 32);
+    const localOff = buf.readUInt32LE(off + 42);
+    const name = buf.toString('utf8', off + 46, off + 46 + nameLen);
+    off += 46 + nameLen + extraLen + commentLen;
+    if (name.endsWith('/')) continue;                 // 目录条目：写文件时按需创建
+    if (localOff + 30 > buf.length || buf.readUInt32LE(localOff) !== 0x04034b50) {
+      throw new Error('ZIP 数据头损坏：' + name);
+    }
+    const dataStart = localOff + 30 + buf.readUInt16LE(localOff + 26) + buf.readUInt16LE(localOff + 28);
+    const raw = buf.subarray(dataStart, dataStart + compSize);
+    let data;
+    if (method === 0) data = Buffer.from(raw);
+    else if (method === 8) data = zlib.inflateRawSync(raw);
+    else throw new Error('不支持的压缩方式（' + method + '）：' + name);
+    if (uncompSize && data.length !== uncompSize) throw new Error('解压大小不符：' + name);
+    out.push({ name, data });
+  }
+  return out;
+}
+
+/** 下载到磁盘（带体积上限，避免被塞大文件） */
+async function downloadTo(url, dest, limit) {
+  const res = await fetch(url, {
+    headers: { 'User-Agent': 'BiliNest/' + APP_VERSION, Accept: 'application/octet-stream' }
+  });
+  if (!res.ok || !res.body) throw new Error('下载失败：HTTP ' + res.status);
+  const len = Number(res.headers.get('content-length') || 0);
+  if (len && len > limit) throw new Error('发布包体积异常，已中止');
+  let seen = 0;
+  const counter = new Transform({
+    transform(chunk, _enc, cb) {
+      seen += chunk.length;
+      if (seen > limit) return cb(new Error('发布包体积异常，已中止'));
+      cb(null, chunk);
+    }
+  });
+  await pipeline(Readable.fromWeb(res.body), counter, fs.createWriteStream(dest));
+}
+
+/** 写文件：先写临时文件再改名，避免替换到一半被读到（Windows 上 rename 会覆盖目标） */
+function writeFileAtomic(dest, data) {
+  const tmp = dest + '.bilinest-new';
+  fs.writeFileSync(tmp, data);
+  try {
+    fs.renameSync(tmp, dest);
+  } catch (e) {
+    fs.writeFileSync(dest, data);                    // 目标被占用时退化为直接写
+    try { fs.unlinkSync(tmp); } catch { /* ignore */ }
+  }
+}
+
+/** 下载最新发布包并就地替换程序文件；调用方负责重启服务 */
+async function selfUpdateFromRelease() {
+  const rel = await checkUpdate(true);               // 强制刷新，不用 10 分钟前的缓存
+  if (!rel.hasUpdate) return { ok: false, message: '已经是最新版本 v' + rel.current + '，不需要更新。' };
+  const asset = (rel.assets || []).find((a) => UPDATE_ZIP_ASSET_RE.test(a.name));
+  if (!asset) return { ok: false, message: '这次发布没有附带可自动更新的压缩包，请到 Releases 页面手动更新。' };
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bilinest-update-'));
+  try {
+    const zipPath = path.join(tmpDir, 'release.zip');
+    await downloadTo(asset.url, zipPath, UPDATE_ZIP_LIMIT);
+    const entries = readZip(fs.readFileSync(zipPath));
+    const names = entries.map((e) => safeRelPath(e.name)).filter(Boolean);
+    const cut = topDirCut(names);
+    const written = [];
+    for (const e of entries) {
+      const rel = safeRelPath(e.name);
+      const target = rel ? rel.slice(cut) : '';
+      if (!target || !isUpdatablePath(target)) continue;
+      const dest = path.join(__dirname, target);
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      writeFileAtomic(dest, e.data);
+      written.push(target);
+    }
+    if (!written.length) return { ok: false, message: '发布包里没有可更新的文件。' };
+    log(`[update] 就地更新 ${written.length} 个文件：v${rel.current} → v${rel.latest}`);
+    return { ok: true, mode: 'zip', current: rel.current, latest: rel.latest, files: written.length };
+  } finally {
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* 清理失败无所谓 */ }
+  }
 }
 
 /**
@@ -1490,19 +1638,30 @@ const server = http.createServer((req, res) => {
         }
       }
       /*
-       * 一键更新：拉取源码（仅 git 检出）→ 重启服务。
+       * 一键更新：git 检出走 git pull；安装版 / 便携版下载发布包就地替换文件。
+       * 两条路都是"服务端自己动手"，前端只负责等它重启回来再刷新页面 ——
+       * 不再把用户丢到 GitHub 的下载页（那样等于让用户自己装一遍）。
        * 重启后端口不变，前端会轮询 /api/health，等它回来就刷新页面（于是新前端也一起生效）。
-       * 非 git 的安装包版不做自动替换：那种装法由安装程序负责更新与重启，
-       * 前端会引导用户下载安装包（见 public/app.js 的 runUpdate）。
        */
       if (url.pathname === '/api/update/apply') {
         if (!isSameOriginRequest(req)) {
           return sendJson(res, 403, { ok: false, message: '仅允许本机同源请求' });
         }
-        const pulled = await gitPull();
-        if (!pulled.ok) return sendJson(res, 200, pulled);
-        const restarting = restartServerSoon();
-        return sendJson(res, 200, { ok: true, changed: pulled.changed, output: pulled.output, restarting });
+        if (IS_GIT_CHECKOUT) {
+          const pulled = await gitPull();
+          if (!pulled.ok) return sendJson(res, 200, pulled);
+          const restarting = restartServerSoon();
+          return sendJson(res, 200, { ok: true, mode: 'git', changed: pulled.changed, output: pulled.output, restarting });
+        }
+        try {
+          const done = await selfUpdateFromRelease();
+          if (!done.ok) return sendJson(res, 200, done);
+          const restarting = restartServerSoon();
+          return sendJson(res, 200, Object.assign({}, done, { restarting }));
+        } catch (e) {
+          log('[update] 自动更新失败：' + (e && e.message ? e.message : e));
+          return sendJson(res, 200, { ok: false, message: '自动更新失败：' + ((e && e.message) || e) });
+        }
       }
       // 客户端状态备份（仅供换环境时无感迁移）：仅同源可读写
       if (url.pathname === '/api/state/backup') {

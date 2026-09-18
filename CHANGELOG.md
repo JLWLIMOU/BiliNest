@@ -16,7 +16,21 @@
 
 ## [Unreleased]
 
-（下一版的内容写在这里）
+### 修复
+
+- **点「更新」不再跳去 GitHub 网站**：以前安装版点更新只是打开浏览器下载页（下载地址就在 GitHub 上），用户得自己找文件、跑安装程序 —— 观感就是"被丢到 GitHub 去了"。现在改成**本地服务自己动手**：下载发布包（`*-portable.zip`）→ 就地替换 `server.mjs` 与 `public/` → 重启服务 → 页面自动刷新回到新版本，全程不离开应用，也不再打开任何新标签页。下载失败时会说明原因并给一个显式的「手动下载安装包」按钮（不点就不会跳转）。
+  - 只覆写白名单内的程序文件（`server.mjs` / `public/` / `launcher.vbs` 等）；用户数据在 `%APPDATA%\BiliNest\`，`.env` 也不在名单内，更新不会碰。
+  - ZIP 解压用自带的极简解析（只认 store / deflate），依旧**零第三方依赖**；发布包体积有上限校验，条目名做越界过滤（`..` / 绝对路径一律拒绝）。
+  - 更新期间有一个进度弹窗（不定量进度条 + 当前步骤），失败时给出原因和出口，不会把用户留在"点了没反应"的状态。
+  - 顺带修了弹窗的一个老毛病：确认框关闭的退场动画会把**紧接着打开**的新弹窗一起清空（更新进度弹窗因此会一闪就没）。
+  - 安装版走这条路不需要管理员权限、也不用跑安装程序；代价是 Windows「应用和功能」里显示的版本号仍是当初安装时的那个（功能不受影响，想对齐可以再跑一次安装包覆盖安装）。
+- **引导页不再重复弹**：以前只有点到最后一步或「跳过」才记「看过」，用 ✕ / 点背景 / Esc 关掉的话下次打开还会弹一遍。现在**任何一种关闭方式都算看过**，扫码登录成功后也直接记为看过；并且引导**只对干净的新环境自动弹**（有数据 / 已登录的老用户打开时不再被拦一道，想看可以去 设置 → 关于 → 查看使用引导）。
+
+### 涉及文件 / 技术细节
+
+- `server.mjs`：新增 `selfUpdateFromRelease()` / `readZip()` / `downloadTo()` / `writeFileAtomic()`；`/api/update/apply` 按 `IS_GIT_CHECKOUT` 分流（git 检出仍是 `git pull`，其余走发布包就地替换）；`/api/update/check` 增加 `hasPortable`。
+- `public/app.js`：新增 `applyUpdateInApp()` / `openUpdateProgress()` / `updateProgressFail()`；`closeModal()` 加 `modalGen` 代次守卫；引导新增 `guideAutoOpened` 标记。
+- `public/styles.css`：新增 `.upd-bar` 进度条样式（带 `prefers-reduced-motion` 兜底）。
 
 ---
 

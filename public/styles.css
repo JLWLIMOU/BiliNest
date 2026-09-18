@@ -1801,6 +1801,35 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
   word-break: break-word;
 }
 
+/*
+ * 更新进度条（应用内自动更新时显示）。
+ * 不画百分比：下载/替换/重启一共几秒，给一条安静游走的进度就够了 ——
+ * 具体数值既不准也没必要，动的东西多了反而显得慌。
+ */
+.upd-bar {
+  position: relative;
+  height: 4px;
+  margin: 14px 0 10px;
+  border-radius: var(--r-pill);
+  background: var(--fill);
+  overflow: hidden;
+}
+.upd-bar > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 38%;
+  border-radius: var(--r-pill);
+  background: var(--accent);
+  animation: upd-slide 1.15s var(--ease-in-out) infinite;
+}
+@keyframes upd-slide {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(297%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .upd-bar > span { animation: none; width: 100%; opacity: 0.55; }
+}
+
 /* 收藏夹列表 */
 .folder-list { display: flex; flex-direction: column; gap: 6px; }
 .folder-row {

@@ -4232,7 +4232,98 @@
     return false;
   }
 
-  /** 一键更新：git 检出 → 拉取 + 重启 + 自动刷新；安装包版 → 下载安装包 */
+  /** 更新进度弹窗：更新期间给用户交代，别让人对着没反应的按钮猜 */
+  function openUpdateProgress(title, detail) {
+    openModal(
+      '<div class="modal-head"><h2>' + esc(title) + '</h2></div>' +
+      '<div class="modal-body">' +
+        '<p id="updDetail">' + esc(detail) + '</p>' +
+        '<div class="upd-bar" aria-hidden="true"><span></span></div>' +
+        '<p class="muted small upd-hint">更新期间不用管这个页面；服务重启后它会自己刷新。</p>' +
+      '</div>'
+    );
+    bindClose();
+  }
+
+  function updateProgressText(msg) {
+    var el = document.getElementById('updDetail');
+    if (el) el.textContent = msg;
+  }
+
+  /** 更新失败：收起进度条，把原因说清楚，并留一个"手动下载"的出口（默认不跳转） */
+  function updateProgressFail(msg, htmlUrl) {
+    // 用户可能已经把进度弹窗关掉了：那就重新开一个来说结果
+    if (!els.modalRoot.querySelector('.modal-body')) {
+      openModal('<div class="modal-head"><h2>更新</h2></div><div class="modal-body"><p id="updDetail"></p></div>');
+      bindClose();
+    }
+    var bar = els.modalRoot.querySelector('.upd-bar');
+    if (bar) bar.remove();
+    var hint = els.modalRoot.querySelector('.upd-hint');   // 都失败了就别再说"不用管"
+    if (hint) hint.remove();
+    var el = document.getElementById('updDetail');
+    if (el) el.innerHTML = esc(msg);
+    var body = els.modalRoot.querySelector('.modal-body');
+    if (!body) return;
+    var row = document.createElement('div');
+    row.className = 'row';
+    var close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'btn ghost';
+    close.textContent = '关闭';
+    close.addEventListener('click', closeModal);
+    row.appendChild(close);
+    if (htmlUrl) {
+      var manual = document.createElement('button');
+      manual.type = 'button';
+      manual.className = 'btn ghost';
+      manual.textContent = '手动下载安装包';
+      manual.addEventListener('click', function () { window.open(htmlUrl, '_blank', 'noopener'); });
+      row.appendChild(manual);
+    }
+    body.appendChild(row);
+    toast('更新没有完成', 'error', 6000);
+  }
+
+  /** 安装版 / 便携版：让本地服务自己下载并替换文件，然后等它重启回来刷新页面 */
+  async function applyUpdateInApp(d) {
+    openUpdateProgress('更新到 v' + d.latest, '正在下载发布包…');
+    try {
+      var res = await fetch('/api/update/apply', { method: 'POST' });
+      var r = await res.json();
+      if (!r.ok) {
+        updateProgressFail(r.message || '未知错误', d.htmlUrl);
+        return;
+      }
+      if (r.restarting === false) {
+        updateProgressFail('文件已更新，但自动重启没成功 —— 请关掉本地服务的窗口，再双击桌面快捷方式重新打开。', d.htmlUrl);
+        return;
+      }
+      updateProgressText('文件已替换，正在重启本地服务…');
+      var back = await waitForServerBack(d.current);
+      if (back) {
+        toast('已更新到 v' + (r.latest || d.latest) + '，正在刷新页面…', 'success', 4000);
+        location.reload();
+        return;
+      }
+      updateProgressFail('服务重启超时 —— 请关掉本地服务窗口，再双击桌面快捷方式重新打开。', d.htmlUrl);
+    } catch (e) {
+      // 服务重启时连接被掐断是正常的，缓一下再看它回不回来
+      updateProgressText('正在等本地服务回来…');
+      if (await waitForServerBack(d.current)) {
+        location.reload();
+        return;
+      }
+      updateProgressFail('更新失败：' + (e.message || '网络错误'), d.htmlUrl);
+    }
+  }
+
+  /**
+   * 一键更新：
+   *   - git 检出 → git pull + 重启服务 + 自动刷新；
+   *   - 安装版 / 便携版 → 本地服务下载发布包、就地替换文件、重启服务，
+   *     全程留在应用里（以前是打开 GitHub 下载页，让用户自己再装一遍）。
+   */
   async function runUpdate() {
     var status = document.getElementById('updateStatus');
     var btn = document.getElementById('btnRunUpdate');
@@ -4289,12 +4380,26 @@
       return;
     }
 
-    if (setup) {
-      // 安装包版：不做文件替换，交给安装程序（它会停掉旧服务、装完重启）
+    if (d.hasPortable) {
+      // 应用内一键更新：本地服务自己下载 + 替换 + 重启，用户不用离开页面
       confirmAction(
         '发现新版本：v' + d.current + ' → <b>v' + d.latest + '</b>。<br>' +
-        '<span class="muted small">现在开始下载安装包（' + fmtMB(setup.size) + '）？下载完运行它即可完成更新 —— ' +
-        '安装程序会自动停掉旧服务并重启，数据不会动。</span>',
+        '<span class="muted small">现在直接更新？本地服务会下载新版本、替换程序文件并重启' +
+        '（约几秒，页面会短暂断开，数据与登录状态都不受影响）。</span>',
+        function () {
+          applyUpdateInApp(d);
+        }
+      );
+      return;
+    }
+
+    if (setup) {
+      // 只有安装包、没有便携包（1.4.0 及更早的发布）：退化成浏览器下载安装包，
+      // 但这一步必须用户自己点"确定"才会发生，不会平白跳走。
+      confirmAction(
+        '发现新版本：v' + d.current + ' → <b>v' + d.latest + '</b>。<br>' +
+        '<span class="muted small">这次发布没有附带可自动更新的压缩包，需要下载安装包（' + fmtMB(setup.size) +
+        '）手动运行 —— 安装程序会停掉旧服务并重启，数据不会动。</span>',
         function () {
           window.open(setup.url, '_blank', 'noopener');
           var st = document.getElementById('updateStatus');
@@ -4304,10 +4409,10 @@
       return;
     }
 
-    // 既不能拉取、也没有安装包（例如只有源码压缩包）：去 release 页面
+    // 既不能拉取、也没有安装包（例如只有源码压缩包）：说明清楚，用户点了才去 release 页
     confirmAction(
       '发现新版本：v' + d.current + ' → <b>v' + d.latest + '</b>。<br>' +
-      '<span class="muted small">打开下载页面手动更新？</span>',
+      '<span class="muted small">这次发布没有可自动安装的文件，只能打开下载页面手动更新。</span>',
       function () { window.open(d.htmlUrl, '_blank', 'noopener'); }
     );
   }
@@ -4664,6 +4769,12 @@
 
   var guideIndex = 0;
   var guideFromSettings = false;
+  /*
+   * 这次引导是不是"首次启动自动弹的"。是的话，用户用任何一种方式关掉它
+   * （✕ / 点背景 / Esc / 跳过）都算看过 —— 以前只有点到最后一步或"跳过"
+   * 才记这个标记，于是关掉再打开又弹一遍。
+   */
+  var guideAutoOpened = false;
 
   function guidePageHtml(step, i) {
     var inner = '';
@@ -4728,6 +4839,7 @@
   function openGuideModal(fromSettings) {
     guideIndex = 0;
     guideFromSettings = !!fromSettings;
+    guideAutoOpened = !guideFromSettings;
     openModal(guideSheetHtml());
     bindClose();
     bindGuide();
@@ -4775,6 +4887,7 @@
   }
 
   function finishGuide() {
+    guideAutoOpened = false;
     if (!guideFromSettings) store.set({ guideSeen: true });
     closeModal();
   }
@@ -4802,6 +4915,10 @@
     var refresh = root.querySelector('[data-guide-page="0"] #btnQrRefresh');
     if (refresh) {
       authSuccessHook = function () {
+        // 扫码登录成功：引导第一页的目的已经达成，直接记为"看过"，
+        // 免得用户下次打开又被拦在引导页上。
+        store.set({ guideSeen: true });
+        guideAutoOpened = false;
         // 扫码成功后重新核一次登录态，把"已登录 · 昵称"标到大标题下面，再翻页
         checkLogin(true).then(function () {
           renderGuideAuth();
@@ -4961,8 +5078,16 @@
   }
 
   /* ---------------- 弹窗 / Toast 通用 ---------------- */
+  /*
+   * 弹窗"代次"：退场动画是异步收尾的，如果这中间又开了新弹窗（例如
+   * 确认框刚关就弹出更新进度），旧那次的收尾会把新弹窗一起清空。
+   * 每次 openModal 递增，收尾时对不上号就直接放弃。
+   */
+  var modalGen = 0;
+
   function openModal(html, opts) {
     opts = opts || {};
+    modalGen++;
     els.modalRoot.innerHTML =
       '<div class="overlay"><div class="modal' + (opts.wide ? ' wide' : '') + (opts.cls ? ' ' + opts.cls : '') + '">' +
       html + '</div></div>';
@@ -4982,14 +5107,20 @@
   function closeModal() {
     clearInterval(qrPollTimer);
     qrPollTimer = null;
+    // 首次启动自动弹的引导：只要被关掉（✕ / 背景 / Esc / 跳过 / 走完）就记为看过
+    if (guideAutoOpened) {
+      guideAutoOpened = false;
+      store.set({ guideSeen: true });
+    }
     // 退场要和进场对称：先打上 data-closing 让遮罩与弹窗一起反向补间，
     // 等过渡结束（或兜底超时）再真正移除节点。以前直接清空 innerHTML，
     // 弹窗是"啪"地消失的——这是最刺眼的一处观感问题。
     var overlay = els.modalRoot.firstElementChild;
     if (!overlay) return;
+    var gen = modalGen;
     var done = false;
     var finish = function () {
-      if (done) return;
+      if (done || gen !== modalGen) return;   // 期间开了别的弹窗：这次收尾作废
       done = true;
       els.modalRoot.innerHTML = '';
     };
@@ -6383,7 +6514,11 @@
     // 打开页面时自动检查更新（设置里可切成"仅手动"）。检查结果只体现在设置图标的小圆点上，
     // 不弹任何东西；服务端有 10 分钟缓存，代价极低。
     autoCheckUpdate();
-    // 首次启动：分页引导（第一页就是扫码登录，后面逐页介绍功能）
-    if (store.get('guideSeen') !== true) openGuideModal(false);
+    /*
+     * 首次启动：分页引导（第一页就是扫码登录，后面逐页介绍功能）。
+     * 只对"干干净净的新环境"自动弹：已经有数据/登录态的用户（从旧版升级上来的）
+     * 不再被拦一道 —— 他们想看可以去 设置 → 关于 → 查看使用引导。
+     */
+    if (store.get('guideSeen') !== true && !store.hasRealData()) openGuideModal(false);
   })();
 })();
