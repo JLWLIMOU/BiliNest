@@ -37,6 +37,14 @@
         <span class="brand-tag">无干扰学习</span>
       </div>
       <div class="topbar-actions">
+        <!--
+          账号状态入口：不显示头像，只用一颗小圆点表示登录态
+          （已登录 = 绿色 + 一点发光，未登录 = 灰色）。点它：
+          未登录直接出二维码，已登录则是账号卡片（切换账号 / 退出）。
+        -->
+        <button id="btnAccount" class="icon-btn account-btn" type="button" aria-label="账号">
+          <span class="account-dot" aria-hidden="true"></span>
+        </button>
         <button id="btnTheme" class="icon-btn" type="button" title="切换深色 / 浅色模式" aria-label="切换主题">
           <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path class="icon-sun" d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M18.4 5.6L17 7M7 17l-1.4 1.4"/>

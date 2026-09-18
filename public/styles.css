@@ -36,9 +36,18 @@
   --card-inner: inset 0 1px 0 rgba(255, 255, 255, 0.7);
   /* 页面顶部的环境光（单一色相，不是彩虹渐变） */
   --glow: color-mix(in srgb, var(--accent) 14%, transparent);
-  --radius-sm: 8px;
-  --radius: 16px;
-  --radius-lg: 18px;
+  /* ---------- 圆角：一条尺度 + 一条同心规则 ----------
+     ① 尺度：全站只用 4 档 + 胶囊，不再散落 4/6/9/10/12/14/16/18 各种值；
+     ② 同心：内层元素的圆角 = 外层圆角 − 两者间距，套起来才"顺"
+        （例如卡片 14，内部 inset 8px 的小块就该是 6）。 */
+  --r-1: 6px;    /* 徽标、标签、微小的内嵌块 */
+  --r-2: 10px;   /* 按钮、输入框、行项 */
+  --r-3: 14px;   /* 卡片、面板、分段控件容器 */
+  --r-4: 20px;   /* 模态框、大容器 */
+  --r-pill: 999px;
+  --radius-sm: var(--r-2);
+  --radius: var(--r-3);
+  --radius-lg: var(--r-4);
   --topbar-h: 58px;
 
   /* ---------- 动效令牌（按"意图"分层，不按数值） ----------
@@ -172,7 +181,7 @@ button {
 
 code {
   background: var(--surface-2);
-  border-radius: 4px;
+  border-radius: var(--r-1);
   padding: 1px 5px;
   font-size: 0.92em;
 }
@@ -253,6 +262,27 @@ code {
   transition: transform var(--dur-1) var(--ease-out);
 }
 
+/* ---------- 账号状态（顶栏右侧，不带头像） ----------
+   只一颗小圆点：已登录 = 绿色 + 一圈柔和外发光；未登录 = 灰色。
+   状态变化是一次"材质变化"，所以底色与外发光一起过渡（§12 材质、§1 反馈）。 */
+.account-btn { width: 34px; height: 34px; }
+.account-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--border-strong);
+  box-shadow: 0 0 0 0 transparent;
+  transition: background var(--dur-3) var(--ease-out), box-shadow var(--dur-3) var(--ease-out),
+    transform var(--dur-3) var(--ease-spring-soft);
+}
+.account-btn[data-state="on"] .account-dot {
+  background: var(--ok);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 18%, transparent),
+    0 0 10px color-mix(in srgb, var(--ok) 55%, transparent);
+}
+.account-btn[data-state="on"]:hover .account-dot { transform: scale(1.08); }
+.account-btn[data-state="stale"] .account-dot { background: var(--warn); }
+
 .icon { width: 18px; height: 18px; flex: none; }
 
 /* 主题按钮里同时放太阳/月亮两组路径，用 CSS 控制显示哪一组 */
@@ -294,7 +324,7 @@ code {
 .brand-dot {
   width: 20px;
   height: 20px;
-  border-radius: 6px;
+  border-radius: var(--r-1);
   background: var(--accent);
   box-shadow: var(--shadow-sm);
 }
@@ -305,7 +335,7 @@ code {
   font-size: 12px;
   color: var(--text-2);
   padding: 3px 8px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   /* 只是品牌旁的一句定位说明，不该和「内容源」按钮抢注意力：
      去掉边框、背景再压淡一档，让它退到第二层。 */
   background: var(--fill);
@@ -511,7 +541,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 24px 22px 64px; }
 #customPlayer .art-subtitle { text-shadow: none; }
 #customPlayer .art-subtitle-line {
   padding: 3px 12px 4px;
-  border-radius: 9px;
+  border-radius: var(--r-2);
   background: rgba(0, 0, 0, .52);
   backdrop-filter: blur(8px) saturate(140%);
   -webkit-backdrop-filter: blur(8px) saturate(140%);
@@ -546,7 +576,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 24px 22px 64px; }
   right: 8px;
   bottom: 8px;
   padding: 2px 7px;
-  border-radius: 6px;
+  border-radius: var(--r-1);
   background: rgba(0, 0, 0, 0.68);
   color: #fff;
   font-size: 12px;
@@ -559,7 +589,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 24px 22px 64px; }
   left: 8px;
   top: 8px;
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--accent);
   color: #fff;
   font-size: 11.5px;
@@ -572,7 +602,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 24px 22px 64px; }
   left: 8px;
   top: 8px;
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: rgba(0, 0, 0, 0.62);
   color: #fff;
   font-size: 11.5px;
@@ -607,7 +637,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 24px 22px 64px; }
   color: var(--text);
   background: var(--surface-2);
   border: 1px solid var(--accent);
-  border-radius: 6px;
+  border-radius: var(--r-1);
   padding: 2px 6px;
   outline: none;
 }
@@ -659,7 +689,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 24px 22px 64px; }
   padding: 4px;
   width: fit-content;
     max-width: 100%;
-    border-radius: 14px;
+    border-radius: var(--r-3);
   background: color-mix(in srgb, var(--surface) 74%, transparent);
   backdrop-filter: blur(20px) saturate(1.8);
   -webkit-backdrop-filter: blur(20px) saturate(1.8);
@@ -673,7 +703,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 24px 22px 64px; }
   top: 4px;
   bottom: 4px;
   width: 1px;
-  border-radius: 10px;
+  border-radius: var(--r-2);
   background: var(--surface);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.10), 0 1px 1px rgba(0, 0, 0, 0.06);
   transform: translateX(0);
@@ -721,7 +751,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 24px 22px 64px; }
   color: var(--text-2);
   border: none;
   background: none;
-  border-radius: 10px;
+  border-radius: var(--r-2);
   transition: color var(--dur-2) var(--ease-state), transform var(--dur-3) var(--ease-spring-soft);
   white-space: nowrap;
 }
@@ -759,7 +789,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 24px 22px 64px; }
   transition: scale var(--dur-2) var(--ease-out);
   scale: 1.03;
   background: var(--surface);
-  border-radius: 10px;
+  border-radius: var(--r-2);
   color: var(--tab-green);
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.16), 0 1px 3px rgba(0, 0, 0, 0.10);
 }
@@ -815,7 +845,7 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
   gap: 5px;
   padding: 5px 12px 5px 14px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--fill);
   color: var(--text-2);
   font: inherit;
@@ -869,7 +899,7 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
   max-height: none;
   border: 0;
   border-left: 1px solid var(--border);
-  border-radius: 18px 0 0 18px;
+  border-radius: var(--r-4) 0 0 var(--r-4);
   background: color-mix(in srgb, var(--surface) 88%, transparent);
   backdrop-filter: blur(24px) saturate(1.8);
   -webkit-backdrop-filter: blur(24px) saturate(1.8);
@@ -948,10 +978,10 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
 .study-more { width: 100%; margin-top: 18px; }
 
 /* 详细页 */
-.study-range { display: inline-flex; gap: 2px; padding: 3px; border-radius: 12px; background: var(--fill); }
+.study-range { display: inline-flex; gap: 2px; padding: 3px; border-radius: var(--r-2); background: var(--fill); }
 .study-range button {
   border: 0; background: none; font: inherit; font-size: 12.5px; font-weight: 500;
-  color: var(--text-2); padding: 5px 12px; border-radius: 9px; cursor: pointer;
+  color: var(--text-2); padding: 5px 12px; border-radius: var(--r-2); cursor: pointer;
   transition: background var(--dur-2) var(--ease-state), color var(--dur-2) var(--ease-state);
 }
 .study-range button.on { background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm); }
@@ -961,7 +991,7 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
 .chart-host { position: relative; }
 .chart-tip {
   position: absolute; top: 0; right: 4px; z-index: 2;
-  padding: 3px 8px; border-radius: 8px;
+  padding: 3px 8px; border-radius: var(--r-2);
   background: color-mix(in srgb, var(--surface) 82%, transparent);
   border: 1px solid var(--separator);
   color: var(--text-2); font-size: 11.5px; font-variant-numeric: tabular-nums;
@@ -973,8 +1003,8 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
   flex: none; width: 104px; color: var(--text-2); font-size: 12.5px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.top-bar { flex: 1; height: 9px; border-radius: 6px; background: var(--fill); overflow: hidden; }
-.top-bar i { display: block; height: 100%; background: var(--accent); border-radius: 6px; }
+.top-bar { flex: 1; height: 9px; border-radius: var(--r-1); background: var(--fill); overflow: hidden; }
+.top-bar i { display: block; height: 100%; background: var(--accent); border-radius: var(--r-1); }
 .top-val {
   flex: none; width: 78px; text-align: right; font-size: 12px; color: var(--text-2);
   font-variant-numeric: tabular-nums; white-space: nowrap;
@@ -1083,7 +1113,7 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
   left: 10px;
   top: 10px;
   padding: 3px 10px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   /* 和右下角的时长胶囊用同一种材质（半透明深色 + 模糊）：
      角标是"压在画面上的说明"，不是按钮，实心强调色太抢画面。 */
   background: rgba(0, 0, 0, 0.5);
@@ -1128,7 +1158,7 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
 
 .progress {
   height: 4px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   /* 轨道用中性的 systemFill（和搜索框、排序控件同一档），不带色相：
      它只是"这条进度条有多长"，不该自己变成一个颜色 */
   background: var(--fill);
@@ -1224,7 +1254,7 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
   width: auto;
   height: 26px;
   padding: 0 10px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   font-size: 12.5px;
   background: rgba(0, 0, 0, 0.62);
 }
@@ -1283,7 +1313,7 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
 }
 #customPlayer .art-notice .art-notice-inner {
   padding: 10px 18px;
-  border-radius: 12px;
+  border-radius: var(--r-2);
   font-size: 15px;
   font-weight: 600;
   line-height: 1.25;
@@ -1313,7 +1343,7 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
 .player-head .btn.ghost {
   background: var(--fill);
   border-color: transparent;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   padding: 7px 14px 7px 11px;
 }
 @media (hover: hover) and (pointer: fine) {
@@ -1327,7 +1357,7 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
   background: #000;
   /* 画面是这一页的主角：圆角 + 一层克制的阴影（浅色页面上靠"浮起一点"表达层次，
      但不用之前那种 64px 大字报阴影） */
-  border-radius: 18px;
+  border-radius: var(--r-4);
   overflow: hidden;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 14px 34px rgba(0, 0, 0, 0.14);
   /* 建立独立层叠上下文：确保视频上的浮层在全屏合成时始终位于视频之上 */
@@ -1407,7 +1437,7 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
 .bilinest-ctl {
   display: inline-block;
   padding: 4px 9px;
-  border-radius: 6px;
+  border-radius: var(--r-1);
   font-size: 12.5px;
   font-weight: 600;
   line-height: 1.4;
@@ -1457,7 +1487,7 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
   width: 132px;
   padding: 18px 12px 14px;
   border: 1px solid rgba(255, 255, 255, 0.28);
-  border-radius: 14px;
+  border-radius: var(--r-3);
   background: rgba(255, 255, 255, 0.14);
   -webkit-backdrop-filter: blur(18px) saturate(150%);
   backdrop-filter: blur(18px) saturate(150%);
@@ -1477,7 +1507,7 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
 .end-progress {
   width: 100%;
   height: 4px;
-  border-radius: 4px;
+  border-radius: var(--r-1);
   background: rgba(255, 255, 255, 0.25);
   overflow: hidden;
 }
@@ -1515,7 +1545,7 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
 .badge {
   display: inline-block;
   padding: 3px 10px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--accent-soft);
   color: var(--accent);
   font-size: 12.5px;
@@ -1576,7 +1606,7 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
   /* 行是"列表项"，不是一个个小盒子：默认无边界，悬浮才浮出底色 */
   border: none;
   background: transparent;
-  border-radius: 10px;
+  border-radius: var(--r-2);
   padding: 10px 12px;
   font-size: 13.5px;
   transition: background var(--dur-2) var(--ease-state), border-color var(--dur-2) var(--ease-state);
@@ -1594,7 +1624,7 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 7px;
+  border-radius: var(--r-1);
   background: var(--surface-2);
   font-size: 12px;
   color: var(--text-2);
@@ -1615,7 +1645,7 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
   z-index: 200;
   max-width: min(340px, 60vw);
   padding: 7px 11px;
-  border-radius: 8px;
+  border-radius: var(--r-2);
   background: rgba(16, 18, 24, 0.94);
   border: 1px solid rgba(255, 255, 255, 0.12);
   color: #f2f3f5;
@@ -1674,11 +1704,13 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
 .modal-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
   padding: 18px 22px 14px;
   border-bottom: 1px solid var(--border);
 }
-.modal-head h2 { margin: 0; font-size: 18px; font-weight: 700; }
+/* 标题吃掉剩余宽度，后面的按钮（跳过 / ×）自然贴到右边；
+   三个以上子元素时也不会再把中间那个推到画面正中。 */
+.modal-head h2 { flex: 1; min-width: 0; margin: 0; font-size: 18px; font-weight: 700; }
 
 .modal-body {
   padding: 6px 22px 22px;
@@ -1724,7 +1756,7 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
 .settings-nav-item {
   padding: 8px 10px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--r-1);
   background: none;
   color: var(--text-2);
   font-family: inherit;
@@ -1821,7 +1853,7 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
   width: 76px;
   height: 46px;
   object-fit: cover;
-  border-radius: 6px;
+  border-radius: var(--r-1);
   background: var(--surface-2);
 }
 .mine-row .mine-name {
@@ -1900,7 +1932,7 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
   /* 填充式搜索框：控件自己带底色，聚焦时才浮起并亮出焦点环 */
   background: var(--fill);
   border: 1px solid transparent;
-  border-radius: 12px;
+  border-radius: var(--r-2);
   padding: 9px 13px;
   outline: none;
   transition: background var(--dur-2) var(--ease-state), border-color var(--dur-2) var(--ease-state),
@@ -2001,19 +2033,35 @@ details.help .steps { margin-top: 4px; }
 .guide-actions { margin-top: 18px; }
 
 /* ---------- 扫码登录 ---------- */
+.modal-auth { max-width: 460px; }
+.auth-lead {
+  margin: 0 0 4px;
+  font-size: 15px;
+  color: var(--text);
+  line-height: 1.5;
+  letter-spacing: -0.005em;
+}
+.auth-hint { margin: 0 0 6px; font-size: 12.5px; color: var(--text-2); line-height: 1.5; }
+/* 已登录：一行"账号 + 状态"，不展示头像，和顶栏那颗点同一套语言 */
+.auth-account { display: flex; align-items: center; gap: 10px; margin: 2px 0 14px; }
+.auth-account .account-dot { flex: none; width: 11px; height: 11px; border-radius: 50%; background: var(--ok);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 18%, transparent), 0 0 10px color-mix(in srgb, var(--ok) 50%, transparent); }
+.auth-account b { font-size: 16px; font-weight: 600; letter-spacing: var(--track-tight); }
+.auth-account .muted { font-size: 12.5px; }
 .qr-box {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 12px;
-  padding: 10px 0 4px;
+  padding: 14px 0 6px;
 }
 .qr-box canvas {
   width: min(280px, 70vw);
   height: auto;
-  border: 1px solid var(--border);
-  border-radius: 12px;
+  border: 0;
+  border-radius: var(--r-3);   /* 同心：外框 20 − 内边距 6 ≈ 14 */
   background: #fff;
+  box-shadow: var(--shadow-sm);
 }
 .qr-status {
   font-size: 13.5px;
@@ -2026,6 +2074,80 @@ details.help .steps { margin-top: 4px; }
 .qr-status[data-state="error"] { color: var(--danger); }
 .qr-actions { margin: 6px 0 10px; }
 .qr-link-wrap { word-break: break-all; font-size: 12.5px; }
+
+/* 折叠的"其他登录方式"：常用路径（扫码）先露出来，高级选项深一层 */
+.auth-more { margin-top: 12px; }
+
+/* ---------- 使用引导：分页（Apple 的做法，一页只说一件事） ----------
+   横向翻页的轨道 + 底部圆点进度；页面本身可纵向滚动，翻页手势只吃水平方向。 */
+.guide-count {
+  margin-left: auto;
+  margin-right: 4px;
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+.guide-pager {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  touch-action: pan-y;              /* 竖向滚动留给页面，横向留给翻页 */
+  overscroll-behavior: contain;
+}
+.guide-track {
+  display: flex;
+  will-change: transform;
+  transition: transform var(--dur-4) var(--ease-out);
+}
+.guide-page {
+  flex: 0 0 100%;
+  min-width: 0;
+  min-height: min(56vh, 420px);     /* 每页等高：翻页时弹窗高度不会跳 */
+  padding: 6px 22px 4px;
+  box-sizing: border-box;
+}
+.guide-title {
+  margin: 4px 0 8px;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: var(--track-tight);
+}
+.guide-lead {
+  margin: 0 0 16px;
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--text-2);
+}
+.guide-page .steps, .guide-page .faq { margin: 0; }
+.guide-page .steps li, .guide-page .faq li { line-height: 1.6; }
+
+.guide-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 22px 16px;
+  border-top: 1px solid var(--separator);
+}
+.guide-dots { flex: 1; display: flex; align-items: center; gap: 7px; }
+.guide-dot {
+  width: 7px;
+  height: 7px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--border-strong);
+  opacity: .5;
+  cursor: pointer;
+  transition: background var(--dur-2) var(--ease-state), opacity var(--dur-2) var(--ease-state),
+    transform var(--dur-3) var(--ease-spring-soft);
+}
+.guide-dot.active { background: var(--accent); opacity: 1; transform: scale(1.25); }
+.guide-btns { display: flex; gap: 8px; }
+@media (prefers-reduced-motion: reduce) {
+  .guide-track { transition: transform var(--dur-3) ease; }
+}
 
 /* ---------- Toast ---------- */
 .toast-root {
@@ -2044,7 +2166,7 @@ details.help .steps { margin-top: 4px; }
 .toast {
   max-width: min(560px, calc(100vw - 40px));
   padding: 10px 16px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--surface);
   color: var(--text);
   border: 1px solid var(--border-strong);
@@ -2064,7 +2186,7 @@ details.help .steps { margin-top: 4px; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb {
   background: var(--border-strong);
-  border-radius: 8px;
+  border-radius: var(--r-2);
   border: 2px solid var(--bg);
 }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -2089,7 +2211,7 @@ details.help .steps { margin-top: 4px; }
   gap: 12px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--r-1);
   padding: 12px;
   position: relative;
   cursor: pointer;
@@ -2175,7 +2297,7 @@ details.help .steps { margin-top: 4px; }
   width: 18px;
   height: 18px;
   line-height: 17px;
-  border-radius: 4px;
+  border-radius: var(--r-1);
   font-size: 13px;
   color: var(--text-2);
   opacity: 0;
@@ -2204,7 +2326,7 @@ details.help .steps { margin-top: 4px; }
   box-sizing: border-box;
   font: inherit;
   border: 1px solid color-mix(in srgb, var(--accent) 42%, transparent);
-  border-radius: 8px;
+  border-radius: var(--r-2);
   background: var(--fill);
   color: var(--text);
   outline: none;
@@ -2218,7 +2340,7 @@ details.help .steps { margin-top: 4px; }
   padding: 4px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--r-2);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
 }
 .tab-menu-item {
@@ -2226,7 +2348,7 @@ details.help .steps { margin-top: 4px; }
   width: 100%;
   padding: 7px 10px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--r-1);
   background: none;
   color: var(--text);
   font-family: inherit;
@@ -2244,7 +2366,7 @@ details.help .steps { margin-top: 4px; }
   gap: 10px;
   padding: 12px 16px;
   border: 1px dashed var(--border-strong);
-  border-radius: 6px;
+  border-radius: var(--r-1);
   background: none;
   color: var(--text-2);
   font-family: inherit;
@@ -2267,7 +2389,7 @@ details.help .steps { margin-top: 4px; }
 .picker-tab {
   padding: 6px 12px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: none;
   color: var(--text-2);
   font-family: inherit;
@@ -2281,7 +2403,7 @@ details.help .steps { margin-top: 4px; }
   max-height: 46vh;
   overflow-y: auto;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--r-2);
 }
 .picker-row {
   display: flex;
@@ -2301,7 +2423,7 @@ details.help .steps { margin-top: 4px; }
   width: 18px;
   height: 18px;
   border: 1px solid var(--border-strong);
-  border-radius: 4px;
+  border-radius: var(--r-1);
   color: var(--accent);
   font-size: 12px;
   line-height: 16px;
@@ -2315,7 +2437,7 @@ details.help .steps { margin-top: 4px; }
   flex: none;
   width: 64px;
   height: 40px;
-  border-radius: 4px;
+  border-radius: var(--r-1);
   object-fit: cover;
   background: var(--surface-2);
 }

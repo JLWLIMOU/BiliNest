@@ -42,6 +42,7 @@
     btnSource: document.getElementById('btnSource'),
     btnSettings: document.getElementById('btnSettings'),
     btnTheme: document.getElementById('btnTheme'),
+    btnAccount: document.getElementById('btnAccount'),
     btnHome: document.getElementById('btnHome'),
     btnBackHome: document.getElementById('btnBackHome'),
     btnBack: document.getElementById('btnBack'),
@@ -95,6 +96,7 @@
 
   var videoInfoCache = new Map(); // bvid -> { at, data }
   var qrPollTimer = null;         // 扫码登录轮询定时器
+  var authSuccessHook = null;     // 登录成功后的额外动作（引导里用来翻到下一页）
   var progressLastSave = 0;       // 观看进度上次保存时间
 
   /* ---------------- 工具函数 ---------------- */
@@ -188,6 +190,7 @@
     var c = creds();
     if (!c.cookie && !c.sid) {
       store.set({ login: null }, false);
+      syncAccountButton();
       return null;
     }
     try {
@@ -198,9 +201,11 @@
       var mid = data.mid;
       if (!mid) throw new Error('未登录');
       store.set({ login: { mid: mid, uname: data.uname || 'B站用户' } }, false);
+      syncAccountButton();
       return store.get('login');
     } catch (e) {
       store.set({ login: null }, false);
+      syncAccountButton();
       if (showError) toast('登录校验失败：' + e.message, 'error');
       return null;
     }
@@ -2601,7 +2606,8 @@
       return '本地视频';
     }
     if (v.isSeries && epCount) return '共 ' + epCount + ' 集';
-    return (v.upper && v.upper.name) || v.upper || 'B站视频';
+    // 单集 B 站视频：UP 名就在下面那行元数据里，这里不再重复
+    return 'B站视频';
   }
 
   /** 占位封面里最初渲染的"海报标题"（量完放不下就换掉） */
@@ -4023,6 +4029,7 @@
   }
 
   function openSettingsModal() {
+    syncAccountButton();
     var login = store.get('login');
     var hasCookie = !!store.getCookie();
     var hasSid = !!store.get('sid');
@@ -4060,23 +4067,27 @@
         '<section class="settings-panel' + (tab === 'login' ? ' active' : '') + '" data-settings-panel="login">' +
           '<h3>登录与授权</h3>' +
           '<p class="muted">登录状态：' + statusHtml + '</p>' +
-          '<label class="field-label" for="cookieInput">SESSDATA / Cookie（推荐）</label>' +
-          '<input id="cookieInput" class="text-input" type="password" placeholder="粘贴 SESSDATA 或完整 Cookie" autocomplete="off">' +
-          '<label class="check"><input id="persistCookie" type="checkbox" checked> 保存到本地浏览器。<b>Cookie 等同账号凭证，请仅在个人设备上使用。</b></label>' +
+          /* 常用路径先露出来：扫码。手动粘贴 Cookie 退到折叠层（"高级选项深一层"）。 */
           '<div class="row">' +
-            '<button id="btnQrLogin" type="button" class="btn ghost">扫码登录（推荐）</button>' +
-            '<button id="btnSaveCookie" type="button" class="btn primary">保存并验证</button>' +
+            '<button id="btnQrLogin" type="button" class="btn primary">扫码登录</button>' +
             '<button id="btnClearAuth" type="button" class="btn ghost danger">清除登录</button>' +
-            oauthBtn +
           '</div>' +
+          '<p class="auth-hint">点「扫码登录」会直接给出二维码：用 B 站 App 扫一下、手机上确认即可，不用手动复制任何东西。</p>' +
           '<details class="help">' +
-            '<summary>如何获取 SESSDATA？（仅当扫码登录不便时使用）</summary>' +
-            '<p class="muted small">更推荐使用上方「扫码登录」：打开二维码、用 B 站 App 扫一下即可，无需手动复制。</p>' +
+            '<summary>其他登录方式（手动粘贴 SESSDATA）</summary>' +
+            '<label class="field-label" for="cookieInput">SESSDATA / Cookie</label>' +
+            '<input id="cookieInput" class="text-input" type="password" placeholder="粘贴 SESSDATA 或完整 Cookie" autocomplete="off">' +
+            '<label class="check"><input id="persistCookie" type="checkbox" checked> 保存到本地浏览器。<b>Cookie 等同账号凭证，请仅在个人设备上使用。</b></label>' +
+            '<div class="row">' +
+              '<button id="btnSaveCookie" type="button" class="btn primary">保存并验证</button>' +
+              oauthBtn +
+            '</div>' +
+            '<p class="auth-hint">在已登录 bilibili.com 的浏览器里按 F12 → 应用（Application）→ Cookie → 找到 <b>SESSDATA</b>，复制它的值（或整段 Cookie）粘贴进来。</p>' +
             '<ol class="steps">' +
               '<li>在浏览器中登录 <b>bilibili.com</b>；</li>' +
-              '<li>按 <b>F12</b> 打开开发者工具 → <b>应用（Application）</b> → <b>Cookie</b> → 选中 <code>https://www.bilibili.com</code>；</li>' +
-              '<li>找到 <b>SESSDATA</b>，复制它的值（也可以直接复制整段 Cookie 粘贴进来）；</li>' +
-              '<li>粘贴到上方输入框 → 勾选是否保存 → 点击「保存并验证」。</li>' +
+              '<li>F12 → <b>应用（Application）</b> → <b>Cookie</b> → 选中 <code>https://www.bilibili.com</code>；</li>' +
+              '<li>找到 <b>SESSDATA</b>，复制它的值（也可以直接复制整段 Cookie）；</li>' +
+              '<li>粘贴到上方输入框 → 勾选是否保存 → 点「保存并验证」。</li>' +
             '</ol>' +
           '</details>' +
           oauthNote +
@@ -4323,7 +4334,7 @@
     var restoreBtn = document.getElementById('btnRestoreBackup');
     if (restoreBtn) restoreBtn.addEventListener('click', onRestoreBackup);
     var guideBtnEl = document.getElementById('btnGuide');
-    if (guideBtnEl) guideBtnEl.addEventListener('click', openGuideModal);
+    if (guideBtnEl) guideBtnEl.addEventListener('click', function () { openGuideModal(true); });
     var shutdownBtn = document.getElementById('btnShutdown');
     if (shutdownBtn) shutdownBtn.addEventListener('click', onShutdown);
     var runUpdateBtn = document.getElementById('btnRunUpdate');
@@ -4352,33 +4363,113 @@
   }
 
   /* ---------------- 首次启动 / 使用引导 ---------------- */
-  function openQrLoginModal() {
+  /**
+   * 顶栏那颗账号小圆点的状态：'on' 已登录 / 'stale' 有凭据但没校验通过 / 'off' 未登录。
+   * 用一颗点的颜色与发光表达登录态 —— 不放头像：头像会让人以为这里能进"个人主页"，
+   * 而这里真正要回答的只有一句"我登上了没有"。
+   */
+  function accountState() {
+    var login = store.get('login');
+    if (login && login.uname) return 'on';
+    if (store.getCookie() || store.get('sid')) return 'stale';
+    return 'off';
+  }
+
+  function syncAccountButton() {
+    var btn = els.btnAccount;
+    if (!btn) return;
+    var st = accountState();
+    btn.dataset.state = st;
+    var login = store.get('login') || {};
+    var text = st === 'on'
+      ? '已登录：' + login.uname + ' · 点击查看 / 切换账号'
+      : st === 'stale'
+        ? '登录凭据可能已失效 · 点击重新登录'
+        : '未登录 · 点击扫码登录';
+    btn.title = text;
+    btn.setAttribute('aria-label', text);
+  }
+
+  /** 扫码区（未登录时的主体：打开就有二维码，不用先找按钮） */
+  function authQrHtml() {
     if (!state.backend || !state.backend.ok) {
-      toast('需要本地代理服务支持，请先通过桌面快捷方式启动 BiliNest', 'error');
-      return;
+      return '<p class="auth-lead">现在连不上本地服务，登录暂时不可用。</p>' +
+        '<p class="auth-hint">请先双击桌面上的 <b>BiliNest</b> 快捷方式启动本地服务，然后回到这个页面刷新一次。</p>';
     }
-    openModal(
-      '<div class="modal-head"><h2>扫码登录 B 站</h2><button type="button" class="icon-btn" data-close aria-label="关闭">×</button></div>' +
-      '<div class="modal-body">' +
-        '<div class="qr-box">' +
-          '<canvas id="qrCanvas" width="280" height="280"></canvas>' +
-          '<div id="qrStatus" class="qr-status">正在生成二维码…</div>' +
+    return '<p class="auth-lead">用手机上的 <b>B 站 App</b> 扫一下这个二维码，在手机上点「确认登录」就行。</p>' +
+      '<div class="qr-box">' +
+        '<canvas id="qrCanvas" width="280" height="280"></canvas>' +
+        '<div id="qrStatus" class="qr-status">正在生成二维码…</div>' +
+      '</div>' +
+      '<div class="row qr-actions">' +
+        '<button id="btnQrRefresh" type="button" class="btn ghost">刷新二维码</button>' +
+      '</div>' +
+      '<p class="auth-hint">扫码只用来拿登录凭据，密码不经过 BiliNest；成功后也不用再手动粘贴 Cookie。</p>';
+  }
+
+  /** 备选登录方式：默认折叠，"常用路径先露出来，高级选项深一层" */
+  function authOtherWaysHtml() {
+    var oauthBtn = (state.backend && state.backend.oauthEnabled)
+      ? '<button id="btnOAuth" type="button" class="btn ghost">使用 OAuth 登录</button>'
+      : '';
+    return '<details class="help auth-more">' +
+        '<summary>其他登录方式（手动粘贴 Cookie）</summary>' +
+        '<label class="field-label" for="cookieInput">SESSDATA / Cookie</label>' +
+        '<input id="cookieInput" class="text-input" type="password" placeholder="粘贴 SESSDATA 或完整 Cookie" autocomplete="off">' +
+        '<label class="check"><input id="persistCookie" type="checkbox" checked> 保存到本地浏览器</label>' +
+        '<div class="row">' +
+          '<button id="btnSaveCookie" type="button" class="btn primary">保存并验证</button>' +
+          oauthBtn +
         '</div>' +
-        '<div class="row qr-actions">' +
-          '<button id="btnQrRefresh" type="button" class="btn ghost">刷新二维码</button>' +
-          '<label class="check"><input id="qrPersist" type="checkbox" checked> 保存登录状态（下次自动登录）</label>' +
+        '<p class="auth-hint">Cookie 等同账号凭证，请只在个人设备上使用。获取方法见「设置 → 登录与授权」。</p>' +
+      '</details>';
+  }
+
+  /**
+   * 账号面板：未登录 = 直接出二维码；已登录 = 账号卡片（切换账号 / 退出）。
+   * @param {string} [force] 'qr' 表示即使已登录也直接给二维码（设置里的"扫码登录"用）
+   */
+  function openAuthSheet(force) {
+    var st = accountState();
+    var login = store.get('login') || {};
+    var head = '<div class="modal-head"><h2>' + (st === 'on' && force !== 'qr' ? '账号' : '登录 B 站') +
+      '</h2><button type="button" class="icon-btn" data-close aria-label="关闭">×</button></div>';
+    var body;
+
+    if (st === 'on' && force !== 'qr') {
+      body = '<p class="auth-account"><span class="account-dot" aria-hidden="true"></span>' +
+          '<span><b>' + esc(login.uname) + '</b><br><span class="muted">已登录 · 收藏夹与观看进度可以正常同步</span></span></p>' +
+        '<div class="row">' +
+          '<button id="btnReLogin" type="button" class="btn primary">切换账号（重新扫码）</button>' +
+          '<button id="btnAuthClear" type="button" class="btn ghost danger">退出登录</button>' +
         '</div>' +
-        '<details class="help">' +
-          '<summary>手机不便扫码？</summary>' +
-          '<p class="muted small">在<b>已登录哔哩哔哩</b>的手机浏览器中打开下面的链接，并点击「确认登录」即可：</p>' +
-          '<p class="qr-link-wrap"><a id="qrLink" href="#" target="_blank" rel="noopener">正在生成链接…</a></p>' +
-        '</details>' +
-        '<p class="muted small">扫码登录不会泄露密码；成功后无需再手动粘贴 Cookie。</p>' +
-      '</div>'
-    );
+        '<p class="auth-hint">凭据只存在这台电脑上（浏览器 + 本机服务的备份文件），不会发给任何第三方。</p>';
+    } else {
+      body = authQrHtml() + authOtherWaysHtml();
+    }
+
+    openModal(head + '<div class="modal-body">' + body + '</div>', { cls: 'modal-auth' });
     bindClose();
-    document.getElementById('btnQrRefresh').addEventListener('click', startQrLogin);
-    startQrLogin();
+    authSuccessHook = null;   // 账号面板：登录成功后正常关窗回到列表
+
+    var refresh = document.getElementById('btnQrRefresh');
+    if (refresh) {
+      refresh.addEventListener('click', startQrLogin);
+      startQrLogin();
+    }
+    var reLogin = document.getElementById('btnReLogin');
+    if (reLogin) reLogin.addEventListener('click', function () { openAuthSheet('qr'); });
+    var clearBtn = document.getElementById('btnAuthClear');
+    if (clearBtn) clearBtn.addEventListener('click', onClearAuth);
+    var saveBtn = document.getElementById('btnSaveCookie');
+    if (saveBtn) saveBtn.addEventListener('click', onSaveCookie);
+    var oa = document.getElementById('btnOAuth');
+    if (oa) oa.addEventListener('click', onOAuth);
+  }
+
+  /** 兼容旧调用：设置里的「扫码登录」直接给二维码 */
+  function openQrLoginModal() {
+    openAuthSheet('qr');
   }
 
   /** 请求生成二维码并渲染到 canvas，然后开始轮询 */
@@ -4392,8 +4483,7 @@
     var g = canvas.getContext('2d');
     status.textContent = '正在生成二维码…';
     status.dataset.state = '';
-    link.href = '#';
-    link.textContent = '正在生成链接…';
+    if (link) { link.href = '#'; link.textContent = '正在生成链接…'; }
     try {
       var data = await fetchQrGenerate();
       if (typeof window.qrcode !== 'function') throw new Error('二维码库未加载');
@@ -4415,8 +4505,7 @@
       }
       status.textContent = '请用 B 站 App 扫码，并在手机上点击「确认登录」';
       status.dataset.state = 'wait';
-      link.href = data.url;
-      link.textContent = data.url;
+      if (link) { link.href = data.url; link.textContent = data.url; }
       qrPollTimer = setInterval(function () { pollQrLogin(data.qrcode_key); }, 2500);
     } catch (e) {
       status.textContent = '生成失败：' + e.message;
@@ -4456,10 +4545,12 @@
         status.textContent = '登录成功！';
         status.dataset.state = 'ok';
         var info = await checkLogin(true);
+        syncAccountButton();
         if (info) toast('扫码登录成功：' + info.uname, 'success');
-        closeModal();
         // 尽力把 B 站会话同步进浏览器（供嵌入播放器的高画质/弹幕使用）
         tryBrowserCookieSync(key);
+        if (authSuccessHook) { authSuccessHook(); return; }   // 引导里：不关弹窗，翻到下一页
+        closeModal();
         loadDashboard();
       } else if (json.code === 86090) {
         status.textContent = '已扫码，请在手机上点击「确认登录」';
@@ -4502,71 +4593,243 @@
     }
   }
 
-  function openGuideModal() {
-    openModal(
-      '<div class="modal-head"><h2>使用引导</h2><button type="button" class="icon-btn" data-close aria-label="关闭">×</button></div>' +
-      '<div class="modal-body">' +
-        '<p class="muted">首次使用请先启动本地代理：Windows 双击桌面上的 <b>BiliNest</b> 快捷方式（或项目目录里的 <code>launcher.vbs</code>），macOS / Linux 运行 <code>./start.sh</code>（或通用 <code>npm start</code>），否则收藏夹与 B 站接口不可用。详见仓库 README「快速开始」。</p>' +
-        '<section><h3>① 登录 B 站账号</h3>' +
-          '<ol class="steps">' +
-            '<li>点击右上角「设置」→ <b>扫码登录（推荐）</b>；</li>' +
-            '<li>用 B 站 App 扫描页面上的二维码，在手机上点击「确认登录」；</li>' +
-            '<li>不方便扫码时，也可以在「设置」中手动粘贴 SESSDATA。</li>' +
-          '</ol>' +
-          '<p class="muted small">登录后即可读取收藏夹；不登录也能添加单个视频或本地视频。</p>' +
-        '</section>' +
-        '<section><h3>② 选择学习内容</h3>' +
-          '<ol class="steps">' +
-            '<li>点击右上角「内容源」，选择收藏夹：<b>设为内容源</b> 只显示它，<b>加入收藏夹库</b> 会显示在收藏夹库；</li>' +
-            '<li>进入收藏夹后，点视频卡片上的 <b>+</b> 可把其中单个视频加入视频库；内容源搜索到的收藏夹视频也能直接「加入视频库」；</li>' +
-            '<li>也可以粘贴 B 站视频链接 / BV 号添加单个视频，或点「选择本地视频」；</li>' +
-            '<li>给视频和收藏夹点星星打分（5 星最重要，优先显示），排序支持：添加时间 / 发布时间 / 星级 / 播放量。</li>' +
-          '</ol>' +
-        '</section>' +
-        '<section><h3>③ 主页标签页</h3>' +
-          '<ol class="steps">' +
-            '<li>主页分四个系统标签：<b>继续学习</b>（有观看记录时置顶，点击自动从上次位置继续）、<b>视频库</b>、<b>收藏夹库</b>、<b>学习 UP主</b>；每个标签「展开全部」可翻页 / 搜索 / 排序。</li>' +
-            '<li>标签栏末尾的 <b>＋</b> 可以新建<b>自定义标签页</b>（例如「动画课程」）：双击标签改名，按住标签左右拖动可排序，标签再多也不会挤出屏幕（横向滚动）。</li>' +
-            '<li>自定义标签页里的「＋ 添加内容」能从 <b>源收藏夹 / 视频库 / 收藏夹库 / 学习 UP主</b> 里挑内容（都带封面便于辨认）；卡片右下角 ✕ 移除时可选是否连库内一并删除。</li>' +
-          '</ol>' +
-        '</section>' +
-        '<section><h3>④ 播放器小技巧</h3>' +
-          '<ul class="steps">' +
-            '<li>双击画面全屏 / 退出全屏，单击播放 / 暂停，鼠标滚轮调音量；</li>' +
-            '<li>画质在页面内切换，不跳转 B 站官网；弹幕只显示、不能发送；</li>' +
-            '<li>字幕默认关闭，点「字幕」开启；旁边的「Aa」里能选字号（小/中/大/特大）和位置（贴底/中间/最高），选完记住；</li>' +
-            '<li>选集自动定位到当前集；支持上一集 / 下一集；播完自动连播下一集（5 秒倒计时）或「重温一遍」；</li>' +
-            '<li>点视频下方的 UP 名字可直接打开其 B 站主页；观看进度自动记录，随时可续播。</li>' +
-          '</ul>' +
-        '</section>' +
-        '<section><h3>⑤ 免责与隐私</h3>' +
-          '<ul class="faq">' +
-            '<li>BiliNest 是<b>非官方</b>第三方开源项目，与哔哩哔哩没有隶属、合作或授权关系，也不使用其商标与标识；仅供个人学习自用。</li>' +
-            '<li>不破解付费 / 会员内容，不绕过账号权限，不提供下载、批量抓取、去水印或地区限制绕过能力；请求只发往本机代理。</li>' +
-            '<li>登录凭据只存在你这台电脑上，不会发给任何第三方；但备份文件是<b>明文</b>，请不要分享或同步 <code>%APPDATA%\\BiliNest</code> 目录。</li>' +
-            '<li>第三方客户端通常不符合平台的用户协议与 API 使用规范，请自行判断是否使用，账号风险由使用者承担。</li>' +
-          '</ul>' +
-        '</section>' +
-        '<section><h3>常见问题</h3>' +
-          '<ul class="faq">' +
-            '<li><b>提示“已切换官方播放器”？</b> 说明播放地址服务暂时不可用（多为网络或风控），已自动降级；稍后可重试。</li>' +
-            '<li><b>提示 412 或频繁失败？</b> 属于 B 站风控，请稍后再试，避免短时间内反复刷新。</li>' +
-            '<li><b>字幕按钮置灰 / 没有字幕？</b> 说明该视频没有 CC 字幕，或字幕加载失败；换一集或刷新页面重试。</li>' +
-            '<li><b>想用 OAuth 登录？</b> 需自行在 B 站开放平台注册应用并配置环境变量，见 README。</li>' +
-            '<li><b>数据存在哪里？</b> 保存在本机浏览器里，同时会自动备份到 <code>%APPDATA%\\BiliNest\\state-backup.json</code>：换浏览器、换端口或清过浏览器数据后打开会自动取回，两边都有数据时以较新的一份为准；「设置 → 数据」里可一键清除或手动恢复。</li>' +
-          '</ul>' +
-        '</section>' +
-        '<div class="row guide-actions">' +
-          '<button id="btnGuideOk" type="button" class="btn primary">开始使用</button>' +
-          '<label class="check"><input id="guideNoMore" type="checkbox" checked> 下次启动不再显示</label>' +
+  /*
+   * 引导 = 配置 + 分页（Apple 的做法：一页只说一件事，横向翻页，底部一个圆点进度）。
+   * 每一页就是下面这个数组里的一项 —— 加一页只加一条数据，不用碰渲染代码。
+   *   kind: 'login' 的那页会内联一个可刷新的二维码，扫码成功自动翻到下一页。
+   */
+  var GUIDE_STEPS = [
+    {
+      id: 'login',
+      kind: 'login',
+      title: '先登录 B 站账号',
+      lead: '登录之后就能读取你的收藏夹，观看进度也会自动记录。暂时不登录也能用：单个视频、本地视频和本地文件夹都不需要账号。'
+    },
+    {
+      id: 'source',
+      title: '把要学的内容装进来',
+      lead: '右上角「内容源」是唯一的入口。',
+      points: [
+        '收藏夹可以整个「加入收藏夹库」，也可以进去挑单个视频加入视频库；',
+        '粘贴 B 站视频链接 / BV 号，或选本地视频、本地文件夹（文件夹会变成一个列表）；',
+        '给视频和收藏夹打星星：5 星最重要，排序支持添加时间 / 发布时间 / 星级 / 播放量。'
+      ]
+    },
+    {
+      id: 'tabs',
+      kind: 'push',
+      title: '用标签页把内容分开',
+      lead: '每个标签页就是一个栏目。',
+      points: [
+        '「继续学习」自动接着上次的位置播；下面依次是视频库、收藏夹库、学习 UP主；',
+        '标签栏末尾的「＋」新建自定义标签页（双击改名、按住拖动排序）；',
+        '纯标签页只放引用：删标签页不会删内容，卡片 ✕ 移除时还能选择是否连库里一起删。'
+      ]
+    },
+    {
+      id: 'player',
+      title: '播放页',
+      lead: '画质、弹幕、字幕都在页面里，不跳官网。',
+      points: [
+        '单击播放 / 暂停，双击全屏，空格暂停、方向键快进、滚轮调音量；',
+        '字幕默认关闭，点「字幕」开启，旁边的「Aa」调字号与位置；',
+        '播完自动连播下一集；点视频下方的 UP 名字可以打开他的主页。'
+      ]
+    },
+    {
+      id: 'stats',
+      title: '学习记录',
+      lead: '「继续学习」标题旁边就是你一共学了多久。',
+      points: [
+        '点进去看累计时长、最长连续、打卡日历，以及 7 / 14 / 30 天的趋势；',
+        '只统计真正播放的时间：拖进度条、暂停、切集都不算；',
+        '不足 1 分钟时入口不显示，不会拿「0 分钟」来烦你。'
+      ]
+    },
+    {
+      id: 'privacy',
+      title: '数据与边界',
+      lead: '非官方第三方开源项目，仅供个人学习自用。',
+      points: [
+        '凭据只存在这台电脑上（浏览器 + 本机服务的备份文件），不发给任何第三方；',
+        '不破解付费内容、不绕过账号权限、不提供下载或批量抓取；',
+        '备份文件里的凭据是明文的，别分享、别同步到网盘；账号风险由使用者自行承担。'
+      ]
+    }
+  ];
+
+  var guideIndex = 0;
+  var guideFromSettings = false;
+
+  function guidePageHtml(step, i) {
+    var inner = '';
+    if (step.kind === 'login') {
+      inner = authQrHtml() + authOtherWaysHtml() +
+        '<p class="auth-hint">' + esc(step.hint || '') + '</p>';
+    } else {
+      inner = '<ul class="' + (step.kind === 'push' ? 'steps' : 'faq') + '">' +
+        (step.points || []).map(function (p) { return '<li>' + p + '</li>'; }).join('') +
+        '</ul>';
+    }
+    return '<section class="guide-page" data-guide-page="' + i + '">' +
+        '<h3 class="guide-title">' + esc(step.title) + '</h3>' +
+        '<p class="guide-lead">' + esc(step.lead) + '</p>' +
+        inner +
+      '</section>';
+  }
+
+  function guideSheetHtml() {
+    var steps = GUIDE_STEPS;
+    return (
+      '<div class="modal-head">' +
+        '<h2>使用引导</h2>' +
+        (guideFromSettings ? '<span class="guide-count" data-guide-count></span>'
+          : '<button type="button" class="btn ghost small" data-guide-skip>跳过</button>') +
+        '<button type="button" class="icon-btn" data-close aria-label="关闭">×</button>' +
+      '</div>' +
+      '<div class="guide-pager" data-guide-pager>' +
+        '<div class="guide-track" data-guide-track>' + steps.map(guidePageHtml).join('') + '</div>' +
+      '</div>' +
+      '<div class="guide-foot">' +
+        '<div class="guide-dots" data-guide-dots>' +
+          steps.map(function (s, i) { return '<button type="button" class="guide-dot" data-guide-go="' + i + '" aria-label="第 ' + (i + 1) + ' 页"></button>'; }).join('') +
+        '</div>' +
+        '<div class="guide-btns">' +
+          '<button type="button" class="btn ghost" data-guide-prev>上一步</button>' +
+          '<button type="button" class="btn primary" data-guide-next>下一步</button>' +
         '</div>' +
       '</div>'
     );
+  }
+
+  function openGuideModal(fromSettings) {
+    guideIndex = 0;
+    guideFromSettings = !!fromSettings;
+    openModal(guideSheetHtml());
     bindClose();
-    document.getElementById('btnGuideOk').addEventListener('click', function () {
-      store.set({ guideSeen: document.getElementById('guideNoMore').checked });
-      closeModal();
+    bindGuide();
+    guideGo(0, true);
+  }
+
+  function guideRoot() { return els.modalRoot.querySelector('.modal'); }
+
+  /** 翻页：按钮 / 圆点 / 滑动都走这里。animate=false 用于首帧（不要从 0 滑进来） */
+  function guideGo(i, instant) {
+    var root = guideRoot();
+    if (!root) return;
+    var track = root.querySelector('[data-guide-track]');
+    var total = GUIDE_STEPS.length;
+    guideIndex = Math.max(0, Math.min(i, total - 1));
+
+    if (instant || (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)) {
+      track.style.transition = 'none';
+    } else {
+      track.style.transition = 'transform var(--dur-4) var(--ease-out)';
+    }
+    track.style.transform = 'translateX(' + (-guideIndex * 100) + '%)';
+    if (instant) {
+      // 让浏览器先采纳"无过渡"的起点，再恢复过渡（否则首帧会滑一下）
+      void track.offsetWidth;
+      track.style.transition = 'transform var(--dur-4) var(--ease-out)';
+    }
+
+    var dots = root.querySelectorAll('[data-guide-dot], .guide-dot');
+    for (var k = 0; k < dots.length; k++) {
+      dots[k].classList.toggle('active', k === guideIndex);
+      dots[k].setAttribute('aria-current', k === guideIndex ? 'true' : 'false');
+    }
+    var prev = root.querySelector('[data-guide-prev]');
+    var next = root.querySelector('[data-guide-next]');
+    if (prev) prev.disabled = guideIndex === 0;
+    if (next) next.textContent = guideIndex === total - 1
+      ? (guideFromSettings ? '完成' : '开始使用')
+      : '下一步';
+    var count = root.querySelector('[data-guide-count]');
+    if (count) count.textContent = (guideIndex + 1) + ' / ' + total;
+  }
+
+  function finishGuide() {
+    if (!guideFromSettings) store.set({ guideSeen: true });
+    closeModal();
+  }
+
+  function bindGuide() {
+    var root = guideRoot();
+    if (!root) return;
+    var track = root.querySelector('[data-guide-track]');
+    var pager = root.querySelector('[data-guide-pager]');
+    var next = root.querySelector('[data-guide-next]');
+    var prev = root.querySelector('[data-guide-prev]');
+    var skip = root.querySelector('[data-guide-skip]');
+
+    if (next) next.addEventListener('click', function () {
+      if (guideIndex >= GUIDE_STEPS.length - 1) finishGuide();
+      else guideGo(guideIndex + 1);
     });
+    if (prev) prev.addEventListener('click', function () { guideGo(guideIndex - 1); });
+    if (skip) skip.addEventListener('click', finishGuide);
+    root.querySelectorAll('.guide-dot').forEach(function (d) {
+      d.addEventListener('click', function () { guideGo(Number(this.dataset.guideGo) || 0); });
+    });
+
+    /* 登录页：内联二维码（打开即生成，可刷新），扫码成功自动翻页 */
+    var refresh = root.querySelector('[data-guide-page="0"] #btnQrRefresh');
+    if (refresh) {
+      authSuccessHook = function () {
+        toast('登录成功，继续看引导', 'success');
+        setTimeout(function () { guideGo(guideIndex + 1); }, 700);
+      };
+      refresh.addEventListener('click', startQrLogin);
+      var saveBtn = root.querySelector('#btnSaveCookie');
+      if (saveBtn) saveBtn.addEventListener('click', onSaveCookie);
+      var oauthBtn = root.querySelector('#btnOAuth');
+      if (oauthBtn) oauthBtn.addEventListener('click', onOAuth);
+      startQrLogin();
+    }
+
+    /* 滑动翻页：跟手 1:1，两端橡皮筋，松手按"位置 + 速度方向"决定翻不翻（§2 §6 §9 §10） */
+    if (!pager || !track) return;
+    var dragging = false, startX = 0, startY = 0, dx = 0, lastX = 0, lastT = 0, vx = 0, decided = false;
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    pager.addEventListener('pointerdown', function (e) {
+      if (reduce || e.pointerType === 'mouse' && e.button !== 0) return;
+      dragging = true; decided = false; dx = 0;
+      startX = lastX = e.clientX; startY = e.clientY;
+      lastT = performance.now(); vx = 0;
+      try { pager.setPointerCapture(e.pointerId); } catch (err) { /* 忽略 */ }
+    });
+    pager.addEventListener('pointermove', function (e) {
+      if (!dragging) return;
+      var mx = e.clientX - startX, my = e.clientY - startY;
+      if (!decided) {
+        if (Math.abs(mx) < 10 && Math.abs(my) < 10) return;   // 10px 迟滞，避免误触
+        if (Math.abs(my) > Math.abs(mx)) { dragging = false; return; }  // 竖向滚动，交还给页面
+        decided = true;
+      }
+      var w = pager.clientWidth || 1;
+      var now = performance.now();
+      if (now - lastT > 0) { vx = (e.clientX - lastX) / (now - lastT); lastX = e.clientX; lastT = now; }
+      dx = mx;
+      // 两端橡皮筋：越过去越拖不动
+      var over = (guideIndex === 0 && dx > 0) || (guideIndex === GUIDE_STEPS.length - 1 && dx < 0);
+      var shown = over ? dx * (1 / (1 + Math.abs(dx) / w * 3)) : dx;
+      track.style.transition = 'none';
+      track.style.transform = 'translateX(calc(' + (-guideIndex * 100) + '% + ' + shown + 'px))';
+      e.preventDefault();
+    });
+    var endDrag = function (e) {
+      if (!dragging) { return; }
+      dragging = false;
+      if (!decided) { return; }
+      var w = pager.clientWidth || 1;
+      var far = Math.abs(dx) > w * 0.22;
+      var flick = Math.abs(vx) > 0.35;                  // 速度方向决定翻不翻
+      var dir = vx !== 0 ? (vx < 0 ? 1 : -1) : (dx < 0 ? 1 : -1);
+      guideGo(far || flick ? guideIndex + dir : guideIndex);
+    };
+    pager.addEventListener('pointerup', endDrag);
+    pager.addEventListener('pointercancel', endDrag);
   }
 
   async function onShutdown() {
@@ -4600,23 +4863,31 @@
 
   async function onSaveCookie() {
     var input = document.getElementById('cookieInput');
-    var persist = document.getElementById('persistCookie').checked;
-    var parsed = parseCookie(input.value);
+    var persistEl = document.getElementById('persistCookie');
+    var persist = persistEl ? persistEl.checked : true;
+    var parsed = parseCookie(input ? input.value : '');
     if (!parsed) {
       toast('未能从输入中识别出 SESSDATA', 'error');
       return;
     }
     store.setCookie(parsed, persist);
-    input.value = '';
+    if (input) input.value = '';
     var info = await checkLogin(true);
-    if (info) toast('登录成功：' + info.uname, 'success');
-    else toast('登录校验失败，请检查 Cookie 是否完整有效', 'error');
-    openSettingsModal();
+    syncAccountButton();
+    if (!info) {
+      toast('登录校验失败，请检查 Cookie 是否完整有效', 'error');
+      return;
+    }
+    toast('登录成功：' + info.uname, 'success');
+    if (authSuccessHook) { authSuccessHook(); return; }   // 引导里：不关弹窗，翻到下一页
+    closeModal();
+    loadDashboard();
   }
 
   function onClearAuth() {
     store.clearCookie();
     store.set({ sid: null, login: null });
+    syncAccountButton();
     closeModal();
     loadDashboard();
     toast('已清除登录凭据');
@@ -4700,6 +4971,8 @@
       applyTheme();
     });
     els.btnSettings.addEventListener('click', openSettingsModal);
+    // 顶栏那颗账号点：未登录直接出二维码，已登录给账号卡片（切换 / 退出）
+    els.btnAccount.addEventListener('click', function () { openAuthSheet(); });
     els.btnSource.addEventListener('click', openSourceModal);
     els.btnHome.addEventListener('click', loadDashboard);
     els.btnHome.addEventListener('keydown', function (e) {
@@ -6071,11 +6344,12 @@
     // 恢复上次选中的主页标签（标签页被删或值非法时回落到「继续学习」）
     state.activeDashTab = normalizeDashTab(store.get('activeDashTab'));
     await checkLogin();
+    syncAccountButton();
     await loadDashboard();
     // 打开页面时自动检查更新（设置里可切成"仅手动"）。检查结果只体现在设置图标的小圆点上，
     // 不弹任何东西；服务端有 10 分钟缓存，代价极低。
     autoCheckUpdate();
-    // 首次启动展示登录与设置引导
-    if (store.get('guideSeen') !== true) openGuideModal();
+    // 首次启动：分页引导（第一页就是扫码登录，后面逐页介绍功能）
+    if (store.get('guideSeen') !== true) openGuideModal(false);
   })();
 })();
