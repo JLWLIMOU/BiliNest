@@ -4459,6 +4459,26 @@
       manual.addEventListener('click', function () { window.open(htmlUrl, '_blank', 'noopener'); });
       row.appendChild(manual);
     }
+    // 失败原因常常是"网络/代理/权限"这类要靠原文才能判断的事：给一个一键复制，
+    // 用户直接把技术细节发过来，比截图猜半天强。
+    var copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'btn ghost';
+    copy.textContent = '复制详情';
+    copy.addEventListener('click', function () {
+      var detail = 'BiliNest ' + ((state.backend && state.backend.appVersion) || '未知版本') +
+        ' 更新失败\n原因：' + msg + '\n' + navigator.userAgent;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(detail).then(function () {
+          toast('已复制，可以直接发给维护者', 'success');
+        }, function () {
+          toast('复制失败，请手动截图', 'error');
+        });
+      } else {
+        toast('这个浏览器不支持自动复制，请手动截图', 'info');
+      }
+    });
+    row.appendChild(copy);
     body.appendChild(row);
     toast('更新没有完成', 'error', 6000);
   }

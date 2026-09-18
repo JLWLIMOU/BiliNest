@@ -16,16 +16,25 @@
 
 ## [Unreleased]
 
+（下一版的内容写在这里）
+
+---
+
+## [1.4.5] - 2026-09-19
+
 ### 修复
 
 - **开着代理反而更新失败（"开了梯子也不行"）**：根因是 **Node 自带的请求不读系统代理** —— 浏览器走代理能打开 GitHub，本地服务却是直连，于是"检查更新"可能正常、"下载新版本"却超时或被重置。现在本地服务会自己发现并使用代理：**环境变量代理（`HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`，大小写都认）→ Windows 系统代理（注册表 `ProxyEnable=1` 时读 `ProxyServer`，支持 `host:port` 与 `http=…;https=…` 两种写法）→ 直连**，按顺序试、哪条通用哪条，并且**只给更新相关的请求用**（B 站接口在国内，不该被塞进代理）。全部失败时，错误信息会逐条列出每条通道失败的原因，例如 `环境变量代理 127.0.0.1:7899 代理不可用（ECONNREFUSED）；直连 connect ETIMEDOUT 10.255.255.1:443`。
   - 只支持 HTTP 代理：SOCKS-only 或 PAC 脚本场景请在代理软件里改用 HTTP/混合端口或开"系统代理"（README 的 FAQ 里写了怎么办）。**不需要任何第三方依赖**：CONNECT 隧道用 `net` + `tls` 手写（约 50 行）。
   - 顺带把下载的健壮性补上：连接层 60 秒无数据即断、下载总时长超 5 分钟放弃、中断时给一句人话（"下载中断（网络或代理不稳定）"）而不是把 `aborted` 直接甩出来；请求也终于有了超时，不会再出现"卡在正在下载发布包…不动了"。
   - 踩到一个坑记在这里：给 `https.request` 传 `agent: false` 会让 `createConnection` 被**忽略**、请求静默直连 —— 代理等于没生效还看不出来；不传 `agent` 才会走我们自己的隧道。
+- **"能打开 github.com、却下不动更新包"也能自救了**：很多人不开代理就能浏览 GitHub，但 release 资产是从另一个域名（`release-assets.githubusercontent.com`）发的，那个域名在部分网络下会被拦或 DNS 污染 —— 表现就是"页面能开、应用内下载失败"。现在下载有两条来源、按顺序试：**release 便携包 → GitHub 源码包（`codeload.github.com`，另一个域名）**。源码包同样是 GitHub 自己发的、内容就是这个 tag 的仓库文件，对更新来说完全够用（白名单里的文件它都有），**不引入任何第三方镜像**，也不改变信任来源。两条都失败才报错，并且会把每条来源的失败原因一起写出来。
+- **更新失败时可以一键"复制详情"**：失败弹窗多了一个按钮，把版本号、失败原因原文、浏览器 UA 复制到剪贴板 —— 这类"网络/代理/权限"问题靠一句话很难判断，用户直接发这段文字比截图快得多。
 
 ### 涉及文件 / 技术细节
 
 - `server.mjs`：新增出站请求层 `parseProxySpec` / `envProxySpec` / `systemProxySpec` / `outboundChannels` / `connectViaProxy` / `httpsGetOnce` / `httpGet` / `readAll`；`checkUpdate` 与 `downloadTo` 从 `fetch` 换成 `httpGet`（带超时、跳转跟随、通道回退）。
+- `server.mjs`：新增 `updateSources()`（便携包 → codeload 源码包），`selfUpdateFromRelease()` 改成逐个来源尝试、全失败时把每条原因合并报出；`public/app.js` 的 `updateProgressFail()` 增加「复制详情」按钮。
 
 ---
 

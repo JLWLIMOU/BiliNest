@@ -501,17 +501,51 @@ function writeFileAtomic(dest, data) {
 }
 
 /** 下载最新发布包并就地替换程序文件；调用方负责重启服务 */
+/**
+ * 发布包的候选来源，按顺序试：
+ *   1. release 里的便携包（下载会跳到 GitHub 的资产 CDN）；
+ *   2. **GitHub 源码压缩包**（codeload.github.com，另一个域名）——
+ *      这是"能打开 github.com、却下不动资产 CDN"的常见网络环境下唯一的自救办法：
+ *      同样是 GitHub 自己发的包，不引入任何第三方镜像，内容就是这个 tag 的仓库文件，
+ *      对更新来说完全够用（我们要的白名单文件它都有）。
+ */
+function updateSources(rel) {
+  const list = [];
+  const asset = (rel.assets || []).find((a) => UPDATE_ZIP_ASSET_RE.test(a.name));
+  if (asset) list.push({ label: '发布包 ' + asset.name, url: asset.url });
+  list.push({
+    label: '源码包 v' + rel.latest,
+    url: `https://codeload.github.com/${UPDATE_REPO}/zip/refs/tags/v${rel.latest}`
+  });
+  return list;
+}
+
 async function selfUpdateFromRelease() {
   const rel = await checkUpdate(true);               // 强制刷新，不用 10 分钟前的缓存
   if (!rel.hasUpdate) return { ok: false, message: '已经是最新版本 v' + rel.current + '，不需要更新。' };
-  const asset = (rel.assets || []).find((a) => UPDATE_ZIP_ASSET_RE.test(a.name));
-  if (!asset) return { ok: false, message: '这次发布没有附带可自动更新的压缩包，请到 Releases 页面手动更新。' };
+  const sources = updateSources(rel);
+  if (!sources.length) return { ok: false, message: '这次发布没有可下载的包，请到 Releases 页面手动更新。' };
 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bilinest-update-'));
   try {
-    const zipPath = path.join(tmpDir, 'release.zip');
-    await downloadTo(asset.url, zipPath, UPDATE_ZIP_LIMIT);
-    const entries = readZip(fs.readFileSync(zipPath));
+    /* 依次尝试每个来源：只要有一个能下下来并解析成功就用它 */
+    let entries = null;
+    const failures = [];
+    for (const src of sources) {
+      const zipPath = path.join(tmpDir, 'release.zip');
+      try { fs.rmSync(zipPath, { force: true }); } catch { /* ignore */ }
+      try {
+        await downloadTo(src.url, zipPath, UPDATE_ZIP_LIMIT);
+        entries = readZip(fs.readFileSync(zipPath));
+        if (src.label.indexOf('源码包') === 0) log('[update] 资产 CDN 不可用，改用 ' + src.label);
+        break;
+      } catch (e) {
+        failures.push(src.label + '：' + ((e && e.message) || e));
+        log('[update] ' + src.label + ' 下载失败：' + ((e && e.message) || e));
+      }
+    }
+    if (!entries) throw new Error(failures.join('；'));
+
     const names = entries.map((e) => safeRelPath(e.name)).filter(Boolean);
     const cut = topDirCut(names);
     const written = [];
