@@ -452,6 +452,13 @@
   function drawBars(host, labels, values, opts) {
     if (!host || !window.uPlot) return;
     opts = opts || {};
+    /*
+     * 两种形态：
+     *   - 默认：柱状（7 / 14 / 30 天的"离散"视图，一天一根，看得清哪一天补了课）；
+     *   - opts.area：折线 + 渐变填充（"全部"用）—— 跨度上百天时柱子会细到看不见，
+     *     而且一整段历史本来就该看形状和面积（累计量 = 面积），不该数柱子。
+     */
+    var isArea = !!opts.area;
     // 同一个 host 会被重复绘制（切 7 / 14 / 30 天）：先把上一张销毁、清空，
     // 否则 uPlot 会一层层往上叠，叠起来看着就是"图有点糊 / 图不见了"。
     if (host._uplot) {
@@ -474,28 +481,51 @@
     var maxV = Math.max(1, Math.max.apply(null, values));
     var width = host.clientWidth || 360;
     var barPaths = uPlot.paths.bars({ size: [0.6, 16] });
+    var paths = isArea ? uPlot.paths.linear() : barPaths;
+    var fillMain = /^#[0-9a-f]{6}$/i.test(color)
+      ? (isArea
+        ? function (u) {
+            // 从曲线向下的渐隐填充：面积本身就是"累计量"，看着像积分
+            var g = u.ctx.createLinearGradient(0, u.bbox.top, 0, u.bbox.top + u.bbox.height);
+            g.addColorStop(0, color + '4d');
+            g.addColorStop(1, color + '00');
+            return g;
+          }
+        : color + '22')
+      : 'rgba(0,113,227,.12)';
     var data = [labels.map(function (_, i) { return i; }), values];
     var series = [
       { value: function (u, v) { return labels[v] == null ? '' : labels[v]; } },
       {
         stroke: color,
-        fill: /^#[0-9a-f]{6}$/i.test(color) ? color + '22' : 'rgba(0,113,227,.12)',
-        paths: barPaths,
+        fill: fillMain,
+        paths: paths,
+        width: isArea ? 2 : 1,
         points: { show: false },
         value: function (u, v) { return v == null ? '' : v + ' 分钟'; }
       }
     ];
     // 最后一根柱子是"今天"：其它柱子是淡填充 + 描边，今天这根填实，一眼能认出来
-    var todayIdx = opts.highlightLast && values.length ? values.length - 1 : -1;
+    var todayIdx = (opts.highlightLast || isArea) && values.length ? values.length - 1 : -1;
     if (todayIdx >= 0 && values[todayIdx] != null) {
       data.push(values.map(function (v, i) { return i === todayIdx ? v : null; }));
-      series.push({
-        stroke: color,
-        fill: color,
-        paths: barPaths,
-        points: { show: false },
-        value: function () { return ''; }
-      });
+      series.push(isArea
+        // 面积曲线用"今天那个点"收尾，不需要再填一根柱子
+        ? {
+            stroke: color,
+            fill: color,
+            paths: uPlot.paths.linear(),
+            width: 0,
+            points: { show: true, size: 6, width: 0, fill: color, stroke: color },
+            value: function () { return ''; }
+          }
+        : {
+            stroke: color,
+            fill: color,
+            paths: barPaths,
+            points: { show: false },
+            value: function () { return ''; }
+          });
     }
     host._uplot = new uPlot({
       width: width,
@@ -511,7 +541,8 @@
           var i = u.cursor.idx;
           if (i == null || values[i] == null) { tip.hidden = true; return; }
           tip.hidden = false;
-          tip.textContent = (i === todayIdx ? '今天 ' : '') + (labels[i] || '') + ' · ' + values[i] + ' 分钟';
+          var head = (i === todayIdx && opts.tipToday) ? '今天 · ' : '';
+          tip.textContent = head + (opts.tips && opts.tips[i] ? opts.tips[i] : ((labels[i] || '') + ' · ' + values[i] + ' 分钟'));
         }]
       },
       // 横轴两端各留半格：不留的话最右边那根柱子（今天）会被画到画布外面，
@@ -540,14 +571,18 @@
 
   function drawStudyCharts(range) {
     var daily = statsData().daily;
-    var labels = [];
-    var values = [];
-    for (var i = range - 1; i >= 0; i--) {
-      var d = new Date(Date.now() - i * 86400000);
-      labels.push((d.getMonth() + 1) + '/' + d.getDate());
-      values.push(Math.round((daily[dayKeyOf(d.getTime())] || 0) / 60));
+    var win = studySeries(range);
+    var title = document.getElementById('studyDailyTitle');
+    if (title) {
+      title.innerHTML = esc(win.title) + ' <span class="muted small">' + esc(win.note) + '</span>';
     }
-    drawBars(document.getElementById('studyDaily'), labels, values, { height: 170, highlightLast: true });
+    drawBars(document.getElementById('studyDaily'), win.labels, win.values, {
+      height: win.area ? 190 : 170,
+      highlightLast: !win.area,
+      tipToday: win.mode === 'day',
+      tips: win.tips,
+      area: win.area
+    });
 
     // 一周里的规律：按星期几取平均（只算有记录的天）
     var sum = [0, 0, 0, 0, 0, 0, 0];
@@ -565,6 +600,118 @@
       sum.map(function (s, i) { return cnt[i] ? Math.round(s / cnt[i] / 60) : 0; }),
       { height: 150, tone: 'green' }
     );
+  }
+
+  /* ---------------- 学习记录：时间窗口 ---------------- */
+
+  /** 范围档位：数字 = 最近 N 天；'all' = 从第一条记录到今天 */
+  var STUDY_RANGES = [7, 14, 30, 'all'];
+
+  function rangeLabel(range) {
+    return range === 'all' ? '全部' : range + ' 天';
+  }
+
+  /**
+   * 取某个范围的数据点。
+   *   - 数字：最近 N 天，一天一个点，最后一个是今天（柱状图，看得清哪一天补了课）；
+   *   - 'all'：从"第一条有记录的那天"一直排到今天，**一天都不丢**。
+   *     跨度太长时按周 / 月合并（合并 = 把一段加起来，不是丢掉），
+   *     因为几百天甩在一条 380px 宽的曲线里只会变成一排噪声，看不出形状。
+   *     跨度 ≤ 120 天按天、≤ 840 天（约两年）按周、再往上按月。
+   */
+  function studySeries(range) {
+    var daily = statsData().daily || {};
+    var today = new Date();
+    today.setHours(0, 0, 0, 0);
+    var todayTs = today.getTime();
+    var startTs;
+    var mode = 'day';
+    if (range === 'all') {
+      var keys = Object.keys(daily).filter(function (k) { return daily[k] > 0; }).sort();
+      var first = keys.length ? new Date(keys[0] + 'T00:00:00') : null;
+      startTs = (first && !isNaN(first.getTime())) ? first.getTime() : todayTs;
+      var spanDays = Math.max(1, Math.round((todayTs - startTs) / 86400000) + 1);
+      if (spanDays > 840) mode = 'month';
+      else if (spanDays > 120) mode = 'week';
+      // 按周汇总时从那一周的周一开始，读起来正好是"这一周学了多少"
+      if (mode === 'week') {
+        var dow = (new Date(startTs).getDay() + 6) % 7;
+        startTs -= dow * 86400000;
+      }
+    } else {
+      startTs = todayTs - (Number(range) - 1) * 86400000;
+    }
+
+    var fmtMD = function (t) {
+      var d = new Date(t);
+      return (d.getMonth() + 1) + '/' + d.getDate();
+    };
+    var sumRange = function (from, to) {
+      var total = 0;
+      for (var t = from; t <= to; t += 86400000) total += daily[dayKeyOf(t)] || 0;
+      return total;
+    };
+
+    var labels = [];
+    var values = [];
+    var tips = [];
+
+    if (mode === 'day') {
+      var days = Math.max(1, Math.round((todayTs - startTs) / 86400000) + 1);
+      for (var i = 0; i < days; i++) {
+        var t = startTs + i * 86400000;
+        var mins = Math.round((daily[dayKeyOf(t)] || 0) / 60);
+        labels.push(fmtMD(t));
+        values.push(mins);
+        tips.push(fmtMD(t) + ' · ' + mins + ' 分钟');
+      }
+      return {
+        labels: labels, values: values, tips: tips, days: days,
+        startTs: startTs, mode: mode, area: false,
+        title: '每日学习时长',
+        note: range === 'all'
+          ? (days <= 1 ? '从今天开始' : '全部 ' + days + ' 天（' + fmtDate(startTs) + ' 起）')
+          : '近 ' + range + ' 天'
+      };
+    }
+
+    if (mode === 'week') {
+      for (var w = startTs; w <= todayTs; w += 7 * 86400000) {
+        var end = Math.min(w + 6 * 86400000, todayTs);
+        var secW = sumRange(w, end);
+        labels.push(fmtMD(w));
+        values.push(Math.round(secW / 60));
+        tips.push(fmtMD(w) + '–' + fmtMD(end) + ' · ' + Math.round(secW / 60) + ' 分钟');
+      }
+      var daySpan = Math.round((todayTs - startTs) / 86400000) + 1;
+      return {
+        labels: labels, values: values, tips: tips, days: daySpan,
+        startTs: startTs, mode: mode, area: true,
+        title: '每周学习时长',
+        note: '全部 ' + daySpan + ' 天 · 按周汇总（一周一根）'
+      };
+    }
+
+    // 按月：按自然月分组
+    var cursor = new Date(startTs);
+    cursor = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+    while (cursor.getTime() <= todayTs) {
+      var y = cursor.getFullYear();
+      var m = cursor.getMonth();
+      var next = new Date(y, m + 1, 1).getTime();
+      var secM = sumRange(cursor.getTime(), Math.min(next - 86400000, todayTs));
+      labels.push((m + 1) + '月');
+      values.push(Math.round(secM / 60));
+      tips.push(y + '年' + (m + 1) + '月 · ' + Math.round(secM / 60) + ' 分钟');
+      cursor = new Date(y, m + 1, 1);
+    }
+    var monthSpan = Math.round((todayTs - startTs) / 86400000) + 1;
+    return {
+      labels: labels, values: values, tips: tips, days: monthSpan,
+      startTs: startTs, mode: mode, area: true,
+      title: '每月学习时长',
+      note: '全部 ' + monthSpan + ' 天 · 按月汇总（一月一根）'
+    };
   }
 
   function renderStudyTop() {
@@ -601,10 +748,11 @@
       return head('学习记录', true) +
         '<div class="sheet-body">' +
           emptyHint +
-          '<div class="seg study-range">' + [7, 14, 30].map(function (n) {
-            return '<button type="button" data-study-range="' + n + '"' + (n === studyRange ? ' class="on"' : '') + '>' + n + ' 天</button>';
+          '<div class="seg study-range">' + STUDY_RANGES.map(function (n) {
+            return '<button type="button" data-study-range="' + n + '"' + (n === studyRange ? ' class="on"' : '') + '>' + rangeLabel(n) + '</button>';
           }).join('') + '</div>' +
-          '<h3 class="study-sub">每日学习时长</h3>' +
+          // 标题与说明由 drawStudyCharts 按当前档位填（全部时"每日/每周/每月"会变）
+          '<h3 class="study-sub" id="studyDailyTitle">每日学习时长</h3>' +
           '<div class="study-chart" id="studyDaily"></div>' +
           '<h3 class="study-sub">一周里的规律 <span class="muted small">按星期几的平均值</span></h3>' +
           '<div class="study-chart" id="studyWeekday"></div>' +
@@ -655,7 +803,8 @@
     var ranges = modal.querySelectorAll('[data-study-range]');
     for (var j = 0; j < ranges.length; j++) {
       ranges[j].addEventListener('click', function () {
-        studyRange = Number(this.dataset.studyRange) || 14;
+        var raw = this.dataset.studyRange;
+        studyRange = raw === 'all' ? 'all' : (Number(raw) || 14);
         var all = modal.querySelectorAll('[data-study-range]');
         for (var k = 0; k < all.length; k++) all[k].classList.toggle('on', all[k] === this);
         drawStudyCharts(studyRange);
