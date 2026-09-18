@@ -1699,7 +1699,7 @@
         '<div class="hcard-body">' +
           '<h3>' + esc(title) + '</h3>' +
           '<div class="progress"><div class="progress-fill" style="width:' + pct + '%"></div></div>' +
-          '<span class="muted">' + esc(meta) + '</span>' +
+          '<span class="muted" title="' + esc(meta) + '">' + esc(meta) + '</span>' +
         '</div>' +
       '</article>'
     );

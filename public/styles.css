@@ -651,13 +651,25 @@ main { max-width: 1200px; margin: 0 auto; padding: 24px 22px 64px; }
   font-size: var(--fs-xs);
   /* 日期、时长这类数字用等宽字形，行与行之间才对得齐 */
   font-variant-numeric: tabular-nums;
+  /*
+   * 信息行永远只占一行：整行不换行，溢出裁掉，UP 名过长时自己出省略号。
+   * 不这样写的话，"添加于 2026年8月24日" 这种较长的日期在窄卡片里会折成两行，
+   * 同一排卡片就整体差出一个行高（实测 294 vs 277）—— 在"继续学习 / 视频库"
+   * 里表现为卡片不齐。
+   */
+  white-space: nowrap;
+  overflow: hidden;
 }
 .card-meta .up {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 55%;
+  min-width: 0;
+  flex: 0 1 auto;
 }
+/* 右侧那截（日期 / 文件夹 / 大小）不参与收缩，宁可让 UP 名先省略 */
+.card-meta > span:not(.up) { flex: none; }
 .card-stars { margin-top: 9px; }
 
 /* 空状态 */
@@ -1142,7 +1154,19 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
   min-height: 2.8em;
   color: var(--text);
 }
-.hcard-body .muted { font-size: 12px; color: var(--text-2); }
+/*
+ * 续播卡片的信息行（共 N 集 · 第几话 · 进度）**必须是单行**：
+ * 剧集名长短不一，长到换行的那一张会比同排邻居高出整整一行（实测 344 vs 323），
+ * 一屏看过去就是"卡片不齐"。超长就省略号，完整内容放 title 里悬浮可看。
+ */
+.hcard-body .muted {
+  display: block;
+  font-size: 12px;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* 栏位“展开全部”按钮与二级浏览页 */
 .bar-more-wrap { text-align: center; }
