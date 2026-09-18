@@ -4396,7 +4396,11 @@
       return '<p class="auth-lead">现在连不上本地服务，登录暂时不可用。</p>' +
         '<p class="auth-hint">请先双击桌面上的 <b>BiliNest</b> 快捷方式启动本地服务，然后回到这个页面刷新一次。</p>';
     }
-    return '<p class="auth-lead">用手机上的 <b>B 站 App</b> 扫一下这个二维码，在手机上点「确认登录」就行。</p>' +
+    // 已经登录的人看到的是"换账号"的说法（引导第一页、或账号卡片的"切换账号"）
+    var lead = accountState() === 'on'
+      ? '你已经登录了。要换账号的话，用手机上的 <b>B 站 App</b> 扫这个二维码并确认即可。'
+      : '用手机上的 <b>B 站 App</b> 扫一下这个二维码，在手机上点「确认登录」就行。';
+    return '<p class="auth-lead">' + lead + '</p>' +
       '<div class="qr-box">' +
         '<canvas id="qrCanvas" width="280" height="280"></canvas>' +
         '<div id="qrStatus" class="qr-status">正在生成二维码…</div>' +
@@ -4673,9 +4677,28 @@
     }
     return '<section class="guide-page" data-guide-page="' + i + '">' +
         '<h3 class="guide-title">' + esc(step.title) + '</h3>' +
+        (step.kind === 'login' ? '<div class="guide-auth" data-guide-auth></div>' : '') +
         '<p class="guide-lead">' + esc(step.lead) + '</p>' +
         inner +
       '</section>';
+  }
+
+  /**
+   * 引导第一页的登录态：已登录就在大标题下面标一行「已登录 · 昵称」，
+   * 未登录什么都不显示（和顶栏那颗点的语言一致：绿点 + 名字）。
+   */
+  function renderGuideAuth() {
+    var slot = els.modalRoot.querySelector('[data-guide-auth]');
+    if (!slot) return;
+    if (accountState() !== 'on') {
+      slot.innerHTML = '';
+      slot.hidden = true;
+      return;
+    }
+    var login = store.get('login') || {};
+    slot.hidden = false;
+    slot.innerHTML = '<span class="guide-auth-dot" aria-hidden="true"></span>' +
+      '<span>已登录 · <b>' + esc(login.uname || 'B站用户') + '</b></span>';
   }
 
   function guideSheetHtml() {
@@ -4708,6 +4731,9 @@
     openModal(guideSheetHtml());
     bindClose();
     bindGuide();
+    // 打开时先按当前登录态标一次（未登录就是空的）
+    renderGuideAuth();
+    checkLogin().then(function () { renderGuideAuth(); });   // 再跟服务端核一次
     guideGo(0, true);
   }
 
@@ -4776,8 +4802,12 @@
     var refresh = root.querySelector('[data-guide-page="0"] #btnQrRefresh');
     if (refresh) {
       authSuccessHook = function () {
-        toast('登录成功，继续看引导', 'success');
-        setTimeout(function () { guideGo(guideIndex + 1); }, 700);
+        // 扫码成功后重新核一次登录态，把"已登录 · 昵称"标到大标题下面，再翻页
+        checkLogin(true).then(function () {
+          renderGuideAuth();
+          toast('登录成功，继续看引导', 'success');
+          setTimeout(function () { guideGo(guideIndex + 1); }, 900);
+        });
       };
       refresh.addEventListener('click', startQrLogin);
       var saveBtn = root.querySelector('#btnSaveCookie');
@@ -4794,10 +4824,11 @@
 
     pager.addEventListener('pointerdown', function (e) {
       if (reduce || e.pointerType === 'mouse' && e.button !== 0) return;
+      // 点在按钮 / 链接 / 输入框上时不要开始拖拽 —— 否则会把它们的点击吃掉
+      if (e.target.closest('button, a, input, label, select, textarea, summary')) return;
       dragging = true; decided = false; dx = 0;
       startX = lastX = e.clientX; startY = e.clientY;
       lastT = performance.now(); vx = 0;
-      try { pager.setPointerCapture(e.pointerId); } catch (err) { /* 忽略 */ }
     });
     pager.addEventListener('pointermove', function (e) {
       if (!dragging) return;
@@ -4806,6 +4837,9 @@
         if (Math.abs(mx) < 10 && Math.abs(my) < 10) return;   // 10px 迟滞，避免误触
         if (Math.abs(my) > Math.abs(mx)) { dragging = false; return; }  // 竖向滚动，交还给页面
         decided = true;
+        /* 确认是横向拖拽之后才捕获指针：一按下就捕获会把页内按钮的点击也吞掉
+           （实测"刷新二维码"因此点不动）。 */
+        try { pager.setPointerCapture(e.pointerId); } catch (err) { /* 忽略 */ }
       }
       var w = pager.clientWidth || 1;
       var now = performance.now();

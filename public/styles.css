@@ -2120,6 +2120,25 @@ details.help .steps { margin-top: 4px; }
   line-height: 1.55;
   color: var(--text-2);
 }
+/* 引导第一页的登录态：已登录才出现，和顶栏那颗点同一套语言（绿点 + 名字） */
+.guide-auth {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -4px 0 14px;
+  font-size: 13.5px;
+  color: var(--ok);
+}
+.guide-auth[hidden] { display: none; }
+.guide-auth b { font-weight: 600; }
+.guide-auth-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 16%, transparent),
+    0 0 8px color-mix(in srgb, var(--ok) 45%, transparent);
+}
 .guide-page .steps, .guide-page .faq { margin: 0; }
 .guide-page .steps li, .guide-page .faq li { line-height: 1.6; }
 
