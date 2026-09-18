@@ -320,7 +320,20 @@ async function checkUpdate(force) {
     headers: { 'User-Agent': 'BiliNest/' + APP_VERSION, Accept: 'application/vnd.github+json' },
     timeoutMs: 25000
   });
-  if (res.status !== 200) throw new Error('GitHub 返回 ' + res.status);
+  if (res.status !== 200) {
+    /*
+     * 把 GitHub 自己给的原因带上：最常见的 403 是"匿名接口每小时 60 次"用完了
+     * （校园网 / 公司网 / 运营商 NAT 出口是共享 IP，很容易撞上），
+     * 不解释的话用户会以为是自己的网络或应用坏了。
+     */
+    let why = '';
+    try {
+      const body = await readAll(res.stream, 64 * 1024);
+      const msg = (JSON.parse(body) || {}).message || '';
+      if (msg) why = '（' + String(msg).slice(0, 120) + '）';
+    } catch { /* 读不出原因就算了 */ }
+    throw new Error('GitHub 返回 ' + res.status + why);
+  }
   const rel = JSON.parse(await readAll(res.stream, 4 * 1024 * 1024));
   const latest = String(rel.tag_name || '').replace(/^v/i, '');
   const assets = (rel.assets || []).map((a) => ({
