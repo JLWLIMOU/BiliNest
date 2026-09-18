@@ -25,10 +25,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import os from 'node:os';
-import { execFile, spawn } from 'node:child_process';
+import net from 'node:net';
+import tls from 'node:tls';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import zlib from 'node:zlib';
-import { Readable, Transform } from 'node:stream';
+import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -78,6 +80,210 @@ const IS_GIT_CHECKOUT = fs.existsSync(path.join(__dirname, '.git'));
 const UPDATE_ZIP_ASSET_RE = /-portable\.zip$/i;
 let updateCache = { at: 0, data: null };
 
+/* ------------------------------------------------------------------
+ * 0.2 出站请求：走代理还是直连
+ *
+ * 为什么需要这一节：Node 自带的 fetch **不读系统代理**。而用户的"梯子"通常是
+ * 系统代理模式 —— 浏览器走它、Node 直连，于是浏览器能打开 GitHub 页面，
+ * 应用内下载却超时或被重置（表现就是"开了梯子也不行"）。
+ *
+ * 所以这里自己实现一个够用的 https GET：可选 CONNECT 隧道穿代理、自动发现代理
+ * （环境变量 → Windows 系统代理）、失败时换通道重试，并把每条通道的失败原因
+ * 一起报出来。只给"更新相关"的请求用 —— B 站接口是国内的，不该被塞进代理。
+ * ------------------------------------------------------------------ */
+
+/** 解析 "http://127.0.0.1:7890" / "127.0.0.1:7890" → { host, port }；socks 不支持（返回 null 走直连） */
+function parseProxySpec(raw) {
+  const s = String(raw || '').trim();
+  if (!s || /^socks/i.test(s)) return null;
+  const m = /^(?:https?:\/\/)?([^\/:]+):(\d+)\s*$/i.exec(s);
+  if (!m) return null;
+  const port = Number(m[2]);
+  return port ? { host: m[1], port } : null;
+}
+
+let proxyCache = { at: 0, spec: null };
+
+/** 环境变量里的代理（大小学都认，很多工具两种都写） */
+function envProxySpec() {
+  const raw = process.env.HTTPS_PROXY || process.env.https_proxy ||
+              process.env.HTTP_PROXY || process.env.http_proxy ||
+              process.env.ALL_PROXY || process.env.all_proxy || '';
+  return parseProxySpec(raw);
+}
+
+/**
+ * Windows 系统代理：读注册表里浏览器用的那套设置（只读）。
+ * ProxyServer 可能是 "127.0.0.1:7890"，也可能是 "http=...;https=..." 的分号写法。
+ * 结果缓存 60 秒，免得每次检查更新都去读一遍注册表。
+ */
+function systemProxySpec() {
+  if (Date.now() - proxyCache.at < 60000) return proxyCache.spec;
+  proxyCache = { at: Date.now(), spec: null };
+  if (process.platform !== 'win32') return null;
+  try {
+    const key = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings';
+    const out = execFileSync('reg.exe', ['query', key], { windowsHide: true, encoding: 'utf8', timeout: 5000 });
+    const val = (name) => {
+      const line = out.split(/\r?\n/).find((l) => new RegExp('\\b' + name + '\\s+REG_', 'i').test(l)) || '';
+      return line.replace(/^.*\bREG_(?:SZ|DWORD|EXPAND_SZ)\s+/i, '').trim();
+    };
+    if (val('ProxyEnable') !== '0x1') return null;
+    const server = val('ProxyServer');
+    let spec = parseProxySpec(server);
+    if (!spec && server) {
+      const parts = server.split(';');
+      const pick = (n) => {
+        const hit = parts.find((p) => p.trim().toLowerCase().startsWith(n + '='));
+        return hit ? hit.split('=')[1] : '';
+      };
+      spec = parseProxySpec(pick('https')) || parseProxySpec(pick('http')) || null;
+    }
+    proxyCache.spec = spec;
+  } catch { /* 读不到就按"没有代理"处理 */ }
+  return proxyCache.spec;
+}
+
+/** 候选通道：配了代理先用代理，最后一定留一条直连兜底 */
+function outboundChannels() {
+  const list = [];
+  const env = envProxySpec();
+  if (env) list.push({ label: '环境变量代理 ' + env.host + ':' + env.port, proxy: env });
+  const sys = systemProxySpec();
+  if (sys && (!env || sys.host !== env.host || sys.port !== env.port)) {
+    list.push({ label: '系统代理 ' + sys.host + ':' + sys.port, proxy: sys });
+  }
+  list.push({ label: '直连', proxy: null });
+  return list;
+}
+
+/** 通过 HTTP 代理开一条 CONNECT 隧道，再在上面握手 TLS，返回可直接用的 TLS socket */
+function connectViaProxy(proxy, host, port, cb) {
+  const sock = net.connect({ host: proxy.host, port: proxy.port });
+  let done = false;
+  let head = Buffer.alloc(0);
+  const fail = (err) => {
+    if (done) return;
+    done = true;
+    try { sock.destroy(); } catch { /* ignore */ }
+    cb(err instanceof Error ? err : new Error(String(err)));
+  };
+  sock.setTimeout(15000, () => fail(new Error('代理连接超时')));
+  sock.once('error', (e) => fail(new Error('代理不可用（' + (e.code || e.message) + '）')));
+  sock.once('connect', () => {
+    sock.write('CONNECT ' + host + ':' + port + ' HTTP/1.1\r\n' +
+               'Host: ' + host + ':' + port + '\r\n\r\n');
+  });
+  const onData = (chunk) => {
+    head = Buffer.concat([head, chunk]);
+    const idx = head.indexOf('\r\n\r\n');
+    if (idx < 0) {
+      if (head.length > 8192) fail(new Error('代理返回数据异常'));
+      return;
+    }
+    sock.removeListener('data', onData);
+    sock.setTimeout(0);
+    const firstLine = head.slice(0, head.indexOf('\r\n')).toString('latin1');
+    const code = Number((/^HTTP\/1\.[01]\s+(\d{3})/.exec(firstLine) || [])[1] || 0);
+    if (code !== 200) return fail(new Error('代理拒绝 CONNECT（' + firstLine.trim() + '）'));
+    const rest = head.slice(idx + 4);
+    if (rest.length) sock.unshift(rest);   // CONNECT 之后残留在缓冲里的字节交还给 TLS
+    let tlsSock;
+    try {
+      tlsSock = tls.connect({ socket: sock, servername: host });
+    } catch (e) {
+      return fail(e);
+    }
+    tlsSock.once('error', fail);
+    tlsSock.once('secureConnect', () => {
+      if (done) return;
+      done = true;
+      tlsSock.removeListener('error', fail);
+      cb(null, tlsSock);
+    });
+  };
+  sock.on('data', onData);
+}
+
+/** 单次 https GET（不跟随跳转）；proxy 非空时走 CONNECT 隧道 */
+function httpsGetOnce(urlStr, opts) {
+  return new Promise((resolve, reject) => {
+    let u;
+    try {
+      u = new URL(urlStr);
+    } catch (e) {
+      return reject(new Error('地址无效：' + urlStr));
+    }
+    if (u.protocol !== 'https:') return reject(new Error('只支持 https：' + urlStr));
+    const port = Number(u.port || 443);
+    const timeoutMs = opts.timeoutMs || 30000;
+    const req = https.request({
+      method: 'GET',
+      host: u.hostname,
+      port,
+      path: u.pathname + u.search,
+      headers: opts.headers || {},
+      timeout: timeoutMs,
+      /*
+       * 注意：这里**不能**写 agent: false —— 实测那样会让 createConnection 被忽略、
+       * 请求静默直连（代理等于没生效，且完全看不出来）。不传 agent 时才走我们的隧道。
+       */
+      createConnection: opts.proxy
+        ? (o, cb) => connectViaProxy(opts.proxy, u.hostname, port, cb)
+        : undefined
+    }, (res) => resolve({ status: res.statusCode, headers: res.headers, stream: res }));
+    req.on('timeout', () => req.destroy(new Error('连接超时（' + Math.round(timeoutMs / 1000) + ' 秒无响应）')));
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+/** 带"换通道 + 跟随跳转"的 GET（release 资产会 302 到 objects.githubusercontent.com） */
+async function httpGet(urlStr, opts = {}) {
+  const channels = outboundChannels();
+  let current = urlStr;
+  for (let hop = 0; hop <= 5; hop++) {
+    const errors = [];
+    let res = null;
+    for (const ch of channels) {
+      try {
+        res = await httpsGetOnce(current, Object.assign({}, opts, { proxy: ch.proxy }));
+        if (ch.proxy) log('[http] 经' + ch.label + ' 访问 ' + new URL(current).host);
+        break;
+      } catch (e) {
+        errors.push(ch.label + ' ' + (e.message || e));
+      }
+    }
+    if (!res) throw new Error(errors.join('；'));
+    if (res.status >= 300 && res.status < 400 && res.headers.location) {
+      res.stream.resume();                       // 跳转响应体丢掉即可
+      current = new URL(res.headers.location, current).toString();
+      continue;
+    }
+    return res;
+  }
+  throw new Error('跳转次数过多');
+}
+
+/** 把响应体读成字符串（带上限，避免被塞大文件） */
+function readAll(stream, limit) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks = [];
+    stream.on('data', (c) => {
+      size += c.length;
+      if (size > limit) {
+        stream.destroy();
+        reject(new Error('响应体积异常'));
+        return;
+      }
+      chunks.push(c);
+    });
+    stream.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    stream.on('error', reject);
+  });
+}
+
 /** 比较 x.y.z；a > b 返回 1，相等 0，小于 -1（缺位按 0 处理） */
 function compareVersion(a, b) {
   const pa = String(a || '').split('.').map((n) => parseInt(n, 10) || 0);
@@ -110,11 +316,12 @@ async function checkUpdate(force) {
   if (!force && updateCache.data && Date.now() - updateCache.at < UPDATE_CACHE_MS) {
     return updateCache.data;
   }
-  const res = await fetch(UPDATE_RELEASE_API, {
-    headers: { 'User-Agent': 'BiliNest/' + APP_VERSION, Accept: 'application/vnd.github+json' }
+  const res = await httpGet(UPDATE_RELEASE_API, {
+    headers: { 'User-Agent': 'BiliNest/' + APP_VERSION, Accept: 'application/vnd.github+json' },
+    timeoutMs: 25000
   });
-  if (!res.ok) throw new Error('GitHub 返回 ' + res.status);
-  const rel = await res.json();
+  if (res.status !== 200) throw new Error('GitHub 返回 ' + res.status);
+  const rel = JSON.parse(await readAll(res.stream, 4 * 1024 * 1024));
   const latest = String(rel.tag_name || '').replace(/^v/i, '');
   const assets = (rel.assets || []).map((a) => ({
     name: a.name,
@@ -238,12 +445,19 @@ function readZip(buf) {
 
 /** 下载到磁盘（带体积上限，避免被塞大文件） */
 async function downloadTo(url, dest, limit) {
-  const res = await fetch(url, {
-    headers: { 'User-Agent': 'BiliNest/' + APP_VERSION, Accept: 'application/octet-stream' }
+  const res = await httpGet(url, {
+    headers: { 'User-Agent': 'BiliNest/' + APP_VERSION, Accept: 'application/octet-stream' },
+    timeoutMs: 60000
   });
-  if (!res.ok || !res.body) throw new Error('下载失败：HTTP ' + res.status);
-  const len = Number(res.headers.get('content-length') || 0);
-  if (len && len > limit) throw new Error('发布包体积异常，已中止');
+  if (res.status !== 200) {
+    res.stream.resume();
+    throw new Error('下载失败：HTTP ' + res.status);
+  }
+  const len = Number(res.headers['content-length'] || 0);
+  if (len && len > limit) {
+    res.stream.destroy();
+    throw new Error('发布包体积异常，已中止');
+  }
   let seen = 0;
   const counter = new Transform({
     transform(chunk, _enc, cb) {
@@ -252,7 +466,26 @@ async function downloadTo(url, dest, limit) {
       cb(null, chunk);
     }
   });
-  await pipeline(Readable.fromWeb(res.body), counter, fs.createWriteStream(dest));
+  /*
+   * 两道保险：
+   *   · 连接层：httpGet 的 socket 空闲超时（60 秒没数据就断）；
+   *   · 总时长：下载超过 5 分钟直接放弃 —— 代理抽风时最怕"看着像在下载，其实永远下不完"。
+   * 中断时给一句人话，别把 `aborted` / `premature close` 这种原始错误直接甩给用户。
+   */
+  const hardStop = setTimeout(() => {
+    try { res.stream.destroy(new Error('下载超时（超过 5 分钟）')); } catch { /* ignore */ }
+  }, 5 * 60 * 1000);
+  try {
+    await pipeline(res.stream, counter, fs.createWriteStream(dest));
+  } catch (e) {
+    const msg = String((e && e.message) || e);
+    if (/aborted|premature close|ECONNRESET|socket hang up|超时/.test(msg)) {
+      throw new Error('下载中断（网络或代理不稳定）：' + msg);
+    }
+    throw e;
+  } finally {
+    clearTimeout(hardStop);
+  }
 }
 
 /** 写文件：先写临时文件再改名，避免替换到一半被读到（Windows 上 rename 会覆盖目标） */
