@@ -11,6 +11,9 @@
 4. 条目下方的「涉及文件 / 技术细节」供核对用，**不要粘贴进 GitHub Release**；
 5. 发布前建议快速验证：`npm start`（或双击 `launcher.vbs`）→ 登录 → 播放一个收藏夹视频（弹幕/字幕/画质）→ 设置里确认版本号；
 6. 若涉及配置/存储键/端口文件（见各条「技术细节」），在 Release 描述里提示旧数据会自动迁移，无需用户手动操作。
+7. **上传资产时，除了带版本号的两个文件，再传一份不带版本号的副本**（`BiliNest-Setup.exe` / `BiliNest-portable.zip`）——
+   README 里的下载直链用的是 `releases/latest/download/BiliNest-Setup.exe`，这样"点开就是最新版"永远有效，不用每次改 README。
+   （应用内更新按 `*-portable.zip` 匹配，两份都能用。）
 
 ---
 
