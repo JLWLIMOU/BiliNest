@@ -743,6 +743,15 @@ main { max-width: 1200px; margin: 0 auto; padding: 24px 22px 64px; }
   overflow-y: hidden;
   scroll-behavior: smooth;
   scrollbar-width: none;
+  /*
+   * 必须自己撑起层叠顺序（z-index 高于滑块）：
+   * 滚动到一定位置时这个容器会带上 mask-image（左侧渐隐），而 **mask 会创建层叠上下文** ——
+   * 里面的标签从此被"关"在这个上下文里，滑块（后面的兄弟节点、且是不透明绿色）
+   * 就会画到标签文字上面。表现就是：任何自定义标签，只要标签栏滚动过，名字立刻消失、
+   * 只剩一块空绿块（不滚动时标签的 z-index:1 还能压住滑块，所以只有滚动后才出问题）。
+   */
+  position: relative;
+  z-index: 1;
 }
 .dash-tabs-scroll::-webkit-scrollbar { display: none; }
 /* 向左滚出内容时左侧渐隐，提示还有更多 */
