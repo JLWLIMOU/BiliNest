@@ -50,6 +50,8 @@ window.BiliNestStore = (function () {
     subSettings: { pos: 100, size: 'md' }, // 字幕位置（滑块 0~100）/ 字号
     playRate: 1,              // 播放倍速（播放器控制条上的档位，见 player.js 的 PLAY_RATES）
     defaultQuality: 'auto',   // 默认清晰度：auto | high | mid | low（见 player.js 的 applyDefaultQuality）
+    danmakuOn: true,          // 每个视频打开时是否默认显示弹幕（设置 → 播放）
+    subtitleOnDefault: false, // 每个视频打开时是否默认开启字幕（设置 → 播放）
     customVideos: [],         // 手动添加的 B 站视频 / 本地视频
     studyFolders: [],         // 收藏夹库：{ id, title, cover, mediaCount, addedAt, stars }
     studyUps: [],             // 学习 UP主（本地书签）：{ mid, name, face, sign, fans, videos, level, addedAt, stars }

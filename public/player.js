@@ -238,7 +238,9 @@ window.BiliNestPlayer = (function () {
           fontSize: 25,
           color: '#FFFFFF',
           antiOverlap: true,
-          display: true,
+          // 注意：插件的开关选项叫 visible（以前这里写的 display 是无效字段，插件根本不认）。
+          // 默认值来自设置 → 播放 →「默认显示弹幕」。
+          visible: loadDanmakuOnDefault(),
           theme: 'dark',
           heatmap: false,
           emitter: false,             // 不显示“发弹幕”输入框（只读观看，避免遮挡控件）
@@ -334,6 +336,7 @@ window.BiliNestPlayer = (function () {
     els.endOverlay = els.player.querySelector('#endOverlay');
     applySubSettings(); // 字幕位置 / 字号（可能已持久化，先恢复再显示）
     applyPlayRate();    // 上次用的倍速（换集 / 重试后由 loadedmetadata 再补一次）
+    applyDanmakuDefault(); // 设置里的"默认显示弹幕"：建播放器时就定好，图标状态一并同步
     bindEndOverlay();
     // ArtPlayer 模板里自带 <track default kind="metadata" src="">：
     //   · src="" 会被解析成当前页面地址，浏览器会白请求一次 —— 所以清掉 src；
@@ -901,6 +904,67 @@ window.BiliNestPlayer = (function () {
 
   /* ---------------- 默认清晰度 ---------------- */
 
+  /* ---------------- 弹幕 / 字幕的默认值（设置 → 播放） ---------------- */
+
+  /** 设置里的"默认显示弹幕"（缺省视为开，保持老行为） */
+  function loadDanmakuOnDefault() {
+    var v = (store && store.get && store.get('danmakuOn'));
+    return v === false ? false : true;
+  }
+
+  /** 设置里的"默认开启字幕"（缺省关，保持老行为） */
+  function loadSubtitleOnDefault() {
+    var v = (store && store.get && store.get('subtitleOnDefault'));
+    return v === true;
+  }
+
+  /**
+   * 把"默认显示弹幕"应用到当前播放器。
+   * 走插件自己的 config({visible}) + reset()：前者管显示/隐藏与 show/hide 事件，
+   * 后者把控制条上那个「弹」按钮的图标状态同步过来（跟用户手点那个按钮是同一条路径）。
+   */
+  function applyDanmakuDefault() {
+    var dp = danmakuPlugin();
+    if (!dp) return;
+    var want = loadDanmakuOnDefault();
+    try {
+      /*
+       * 直接用插件的 show() / hide()：它们会设置弹幕层的 opacity、更新 option.visible
+       * 并抛出 artplayerPluginDanmuku:show / :hide 事件（控制条那个「弹」按钮的提示词
+       * 就是听这两个事件更新的）。最后 reset() 把配置面板里的开关状态也同步过来。
+       *
+       * 为什么不走 config({visible})：那是插件构造时用的初始化入口，
+       * 运行中改状态它并不保证重新走一遍 show/hide。
+       */
+      if (want) { if (dp.show) dp.show(); else dp.config({ visible: true }); }
+      else { if (dp.hide) dp.hide(); else dp.config({ visible: false }); }
+      if (dp.reset) dp.reset();
+      /*
+       * 控制条上那枚「弹」按钮的"开/关"图标是靠 [data-danmuku-visible] 属性切 CSS 的
+       * （插件源码里 `[data-danmuku-visible=false] .apd-toggle-off{display:block}`），
+       * 而 show()/hide() 只改弹幕层 opacity 和提示词，属性要我们补一下，
+       * 否则会出现"弹幕已经关了、图标还是开着的"。
+       */
+      var holder = els.player.querySelector('[data-danmuku-visible]');
+      if (holder) holder.setAttribute('data-danmuku-visible', want ? 'true' : 'false');
+    } catch (e) { /* 插件状态异常时不打断播放 */ }
+  }
+
+  /**
+   * 把"默认开启字幕"应用到当前视频。
+   * 只在当前视频真的有字幕时才切（没有字幕就什么也不做，避免弹一个"暂无字幕"的提示）。
+   */
+  function applySubtitleDefault() {
+    if (!state.subtitleVttUrl) return;
+    var want = loadSubtitleOnDefault();
+    if (!!state.subtitleOn === want) return;
+    state.subtitleOn = want;
+    setNativeSubtitleVisible(want);
+    updateSubtitleControl();
+    // 保险：字幕层/控件可能刚被别的渲染路径重建过，下一帧再同步一次按钮状态
+    setTimeout(updateSubtitleControl, 60);
+  }
+
   /**
    * 按设置里的"默认清晰度"在当前 dash 实例上选一档。
    *
@@ -1211,7 +1275,9 @@ window.BiliNestPlayer = (function () {
         }
       } catch (e) { /* ignore */ }
       applySubSettings();             // 应用字号 / 位置样式
-      setNativeSubtitleVisible(false); // 默认关，由用户手动开
+      // 默认开关来自设置（设置 → 播放 →「默认开启字幕」；缺省仍是关，由用户手动开）
+      state.subtitleOn = loadSubtitleOnDefault();
+      setNativeSubtitleVisible(state.subtitleOn);
     }
     updateSubtitleControl();
   }
@@ -1345,6 +1411,12 @@ window.BiliNestPlayer = (function () {
     setEpisodeNavHandler: function (fn) { state.episodeNavHandler = fn; },
     /** 设置里改了"默认清晰度"：正在播的话立刻切过去（详见 applyDefaultQuality） */
     applyDefaultQuality: function () { applyDefaultQuality(); },
+    /** 设置里改了"默认显示弹幕"：立刻应用（控制条图标也会同步） */
+    applyDanmakuDefault: function () { applyDanmakuDefault(); },
+    /** 设置里改了"默认开启字幕"：当前视频有字幕就立刻切 */
+    applySubtitleDefault: function () { applySubtitleDefault(); },
+    /** 设置里改字幕字号 / 位置：立刻生效并持久化（同一份 subSettings） */
+    setSubSettings: function (patch) { setSubSettings(patch || {}); },
     /** 应用层根据选集列表更新上一集/下一集按钮：{ visible, prev, next } */
     updateEpisodeNav: function (nav) {
       var art = state.art;

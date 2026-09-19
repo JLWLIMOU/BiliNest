@@ -4444,6 +4444,11 @@
     var hasSid = !!store.get('sid');
     var theme = store.get('theme') || 'auto';
     var quality = store.get('defaultQuality') || 'auto';
+    var danmakuOn = store.get('danmakuOn') !== false;      // 缺省：开
+    var subtitleOn = store.get('subtitleOnDefault') === true; // 缺省：关
+    var subSettings = store.get('subSettings') || {};
+    var subSize = subSettings.size || 'md';
+    var subPos = typeof subSettings.pos === 'number' ? subSettings.pos : 100;
     var statusHtml;
     if (login) statusHtml = '<span class="ok">已登录 · ' + esc(login.uname) + '</span>';
     else if (hasCookie || hasSid) statusHtml = '<span class="warn">已保存凭据，但校验未通过（可能已过期）</span>';
@@ -4524,6 +4529,27 @@
             '<b>中</b> = 最接近 480P 的那一档（没有就取最接近的，并列时取低的一档）；<b>低</b> = 最低那一档；' +
             '<b>自动</b> = 交给播放器按网速实时决定。</p>' +
           '<p class="muted small">播放页控制条上的「画质」随时可以手动改，改的是这一个视频、不会影响这里的默认值。</p>' +
+          '<h3>弹幕</h3>' +
+          '<label class="check"><input type="checkbox" id="danmakuDefault"' + (danmakuOn ? ' checked' : '') + '> 默认显示弹幕</label>' +
+          '<p class="muted small">关掉后每个视频都从"弹幕关闭"开始；播放页控制条上的「弹」随时可以单独打开。</p>' +
+          '<h3>字幕</h3>' +
+          '<label class="check"><input type="checkbox" id="subtitleDefault"' + (subtitleOn ? ' checked' : '') + '> 默认开启字幕</label>' +
+          '<div class="row">' +
+            '<label class="field-label" for="subSizeSelect">字号</label>' +
+            '<select id="subSizeSelect" class="select">' +
+              '<option value="sm"' + (subSize === 'sm' ? ' selected' : '') + '>小</option>' +
+              '<option value="md"' + (subSize === 'md' ? ' selected' : '') + '>中</option>' +
+              '<option value="lg"' + (subSize === 'lg' ? ' selected' : '') + '>大</option>' +
+              '<option value="xl"' + (subSize === 'xl' ? ' selected' : '') + '>特大</option>' +
+            '</select>' +
+            '<label class="field-label" for="subPosSelect">位置</label>' +
+            '<select id="subPosSelect" class="select">' +
+              '<option value="0"' + (Number(subPos) === 0 ? ' selected' : '') + '>贴底</option>' +
+              '<option value="50"' + (Number(subPos) === 50 ? ' selected' : '') + '>中间</option>' +
+              '<option value="100"' + (Number(subPos) === 100 ? ' selected' : '') + '>最高</option>' +
+            '</select>' +
+          '</div>' +
+          '<p class="muted small">和播放页控制条上的「Aa」是同一份设置：这里改，正在播的那个视频也会立刻跟着变。</p>' +
         '</section>' +
         '<section class="settings-panel' + (tab === 'data' ? ' active' : '') + '" data-settings-panel="data">' +
           '<h3>数据</h3>' +
@@ -4926,6 +4952,27 @@
       // 正在播的话立刻切过去：否则用户改了设置却看不到任何变化，会以为没生效
       try { window.BiliNestPlayer.applyDefaultQuality(); } catch (err) { /* 播放器还没初始化就算了 */ }
       toast('默认清晰度：' + ({ auto: '自动', high: '高', mid: '中', low: '低' })[e.target.value], 'success');
+    });
+    // 弹幕默认开关 / 字幕默认开关 + 样式：和播放页控制条共用同一份设置，正在播也立刻生效
+    var dmDefault = document.getElementById('danmakuDefault');
+    if (dmDefault) dmDefault.addEventListener('change', function (e) {
+      store.set({ danmakuOn: e.target.checked });
+      try { window.BiliNestPlayer.applyDanmakuDefault(); } catch (err) { /* ignore */ }
+      toast(e.target.checked ? '默认显示弹幕' : '默认关闭弹幕', 'success');
+    });
+    var subDefault = document.getElementById('subtitleDefault');
+    if (subDefault) subDefault.addEventListener('change', function (e) {
+      store.set({ subtitleOnDefault: e.target.checked });
+      try { window.BiliNestPlayer.applySubtitleDefault(); } catch (err) { /* ignore */ }
+      toast(e.target.checked ? '默认开启字幕' : '默认关闭字幕', 'success');
+    });
+    var subSizeSel = document.getElementById('subSizeSelect');
+    if (subSizeSel) subSizeSel.addEventListener('change', function (e) {
+      try { window.BiliNestPlayer.setSubSettings({ size: e.target.value }); } catch (err) { /* ignore */ }
+    });
+    var subPosSel = document.getElementById('subPosSelect');
+    if (subPosSel) subPosSel.addEventListener('change', function (e) {
+      try { window.BiliNestPlayer.setSubSettings({ pos: Number(e.target.value) }); } catch (err) { /* ignore */ }
     });
     document.getElementById('btnClearData').addEventListener('click', onClearData);
     var restoreBtn = document.getElementById('btnRestoreBackup');
