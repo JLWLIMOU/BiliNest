@@ -18,6 +18,10 @@
 
 ### 修复
 
+- **自定义标签页变多后，选中的标签"看不见"/ 绿色滑块跑到别处**：两个原因叠在一起 ——
+  - **布局变化不会重新对齐**：滚动区的宽度会因为"整页出现或消失滚动条""窗口变化""内容多寡不同"而变，标签位置随之移动，但这些都**不触发 scroll 事件**；原来只在 scroll 里同步，于是滑块停在旧位置、选中的标签被右侧贴住的「＋」盖住。现在用一个 `ResizeObserver` 盯住滚动区，尺寸一变就在下一帧重新把当前标签滚进视野并对齐滑块。
+  - **滑块会画到不该在的地方**：手动横向滚动、选中标签滚出视野时，滑块原本按标签位置照画，结果跑出滚动区、压在「＋」上（截图里只剩一截绿块）。现在自定义标签的滑块会被夹在滚动区可视范围内（右侧给「＋」留位），完全看不见就干脆隐藏，不再出现"悬空绿块"。
+  - 实测（9 个自定义标签、1440→1100→1440 改宽度、长短内容来回切、手动滚到最右）：切换后标签都完整可见、滑块与标签重合；手动滚走时滑块隐藏、不压「＋」。
 - **刚加入视频库的视频，第一次打开时右侧选集"一集都没高亮"**：库条目里可能没存 `cid`（从内容源加进来的、或者还没看过），播放时传进选集面板的是空值，和高亮用的 `cid` 比不中，于是整列都没有选中态。现在 `loadEpisodes()` 在"传入的 cid 不在列表里"时会兜底选中一集 —— **优先沿用观看记录里最近看过的，其次第一条**，并把结果回传给播放流程，保证"播放的那一集"和"高亮的那一集"是同一集。实测：一个 8 集视频（清掉 cid 与观看记录，模拟刚入库）打开后第 1 集正确高亮。
 
 ### 新增
@@ -35,6 +39,7 @@
 ### 涉及文件 / 技术细节
 
 - `public/app.js`：`loadEpisodes()` 增加兜底选中并返回生效的 `{bvid,cid,page}`（`playVideo()` 据此播放）；`tabMembers()` 支持新的标签页条目类型 `kind:'bili'`（内联视频，未入库），`inlineVideoObject()` / `tabInlineVideo()` 负责两种形态互转；`starControl()` 多带 `data-tab`、`setStars()` 新增 `tabvideo` 分支（星级写回标签页条目）；新增 `openFolderMenu()` / `askCreateTabFromFolder()` / `fetchAllFolderVideos()` / `createTabFromFolder()` / `addInlineToLibrary()` / `tabLibraryVideos()`，`deleteCustomTab()` 与 `removeFromTab()` 按"是否在库"分别处理；`renderDashHead()` 给自定义标签页加排序下拉（存 `tab.sort`），`renderCustomTab()` 按它排序；新增 `openProgressToast()` / `closeProgressToast()` 给耗时操作当常驻提示。
+- `public/app.js`：标签栏拆出 `ensureActiveTabVisible()`，新增 `bindTabsResizeObserver()`（单个 `ResizeObserver` 每帧重新对齐一次，切换渲染时改观察对象、不重复创建）；`syncTabIndicator()` 对自定义标签做可视区夹取 / 隐藏。
 - `public/styles.css`：`.inline-hint`（未入库说明，与星级同一行）。
 
 ---

@@ -1145,16 +1145,57 @@
     sc.classList.toggle('scrolled', sc.scrollLeft > 4);
     sc.classList.toggle('overflowing', sc.scrollWidth > sc.clientWidth);
     syncTabIndicator();
+    ensureActiveTabVisible(sc);
+    bindTabsResizeObserver(sc);
+  }
+
+  /**
+   * 保证当前自定义标签在滚动区的可视范围内（系统标签是固定列，不参与）。
+   * 自己算滚动量：scrollIntoView 不知道右侧贴住的「＋」会盖住内容。
+   */
+  function ensureActiveTabVisible(sc) {
+    if (!sc) return;
     var active = sc.querySelector('.dash-tab.active');
     if (!active) return;
     var newBtn = sc.querySelector('.dash-tab-new');
     var reserve = newBtn ? newBtn.getBoundingClientRect().width : 0;
     var sr = sc.getBoundingClientRect();
     var ar = active.getBoundingClientRect();
-    // 自己算滚动量：scrollIntoView 不知道右侧贴住的「＋」会盖住内容
     var rightLimit = sr.right - reserve;
     if (ar.left < sr.left) sc.scrollLeft -= (sr.left - ar.left) + 8;
     else if (ar.right > rightLimit) sc.scrollLeft += (ar.right - rightLimit) + 8;
+  }
+
+  /*
+   * 标签栏尺寸/布局变化时重新对齐。
+   * 为什么必须有这个：滚动区的宽度会因为**整页出现或消失滚动条**而变（标签页内容多寡不同、
+   * 卡片加载、窗口变化…），内容也会因为字体/重命名而变化 —— 这些都不会触发 scroll 事件，
+   * 结果就是"指示条停在旧位置""选中的标签滑到贴住的 ＋ 后面看不见"。
+   * 用一个 observer 盯住滚动区，变化后下一帧重新算一次即可。
+   */
+  var tabsRO = null;
+  var tabsROEl = null;
+  var tabsRaf = 0;
+
+  function bindTabsResizeObserver(sc) {
+    if (!window.ResizeObserver) return;
+    if (!tabsRO) {
+      tabsRO = new ResizeObserver(function () {
+        if (tabsRaf) return;
+        tabsRaf = requestAnimationFrame(function () {
+          tabsRaf = 0;
+          var cur = els.dashboard.querySelector('.dash-tabs-scroll');
+          if (!cur) return;
+          ensureActiveTabVisible(cur);
+          syncTabIndicator();
+        });
+      });
+    }
+    if (tabsROEl !== sc) {
+      if (tabsROEl) { try { tabsRO.unobserve(tabsROEl); } catch (e) { /* ignore */ } }
+      tabsROEl = sc;
+      tabsRO.observe(sc);
+    }
   }
 
   /* 标签栏横向滚动位置：重建后要瞬时还原，见 syncTabsScroll */
@@ -1204,6 +1245,26 @@
     // （不用 scaleX 拉伸，是因为拉伸会把圆角一起拉变形。）
     var x = Math.round(ar.left - br.left);
     var w = Math.round(ar.width);
+
+    /*
+     * 滑块只负责"当前页"这件事，所以不许画到不该在的地方：
+     * 自定义标签可能被用户手动横向滚出可视区，这时滑块会跑到滚动区外面、
+     * 甚至压在右侧贴住的「＋」上（用户反馈过：选中标签看不见、只剩一截绿块）。
+     * 这里把它夹在滚动区的可视范围内（右侧给「＋」留位）；实在看不见就干脆藏起来。
+     */
+    if (tone === 'custom') {
+      var sc = bar.querySelector('.dash-tabs-scroll');
+      if (sc) {
+        var scr = sc.getBoundingClientRect();
+        var newBtn = sc.querySelector('.dash-tab-new');
+        var reserve = newBtn ? newBtn.getBoundingClientRect().width : 0;
+        var left = Math.max(ar.left, scr.left);
+        var right = Math.min(ar.right, scr.right - reserve);
+        if (right - left < 8) { ind.classList.remove('ready'); return; }
+        x = Math.round(left - br.left);
+        w = Math.round(right - left);
+      }
+    }
 
     if (ind.dataset.synced === '1') {
       // 同一个节点（例如横向滚动中反复调用）：正常补间即可，
