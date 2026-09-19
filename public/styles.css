@@ -750,9 +750,26 @@ main { max-width: 1200px; margin: 0 auto; padding: 24px 22px 64px; }
   -webkit-mask-image: linear-gradient(to right, transparent 0, #000 24px);
   mask-image: linear-gradient(to right, transparent 0, #000 24px);
 }
-/* 溢出时「＋」会贴住右侧，用一点左侧阴影说明有内容从下面滑过 */
+/*
+ * 溢出时「＋」贴住右侧，并且充当一块遮罩：
+ * 滑到它下面的标签要"干净地消失"，而不是在边上露出半个字（那种半截的标签看着像坏了）。
+ * 做法：和标签栏同一层材质（半透明 + 模糊）打底，左侧再接一段渐变淡出，
+ * 标签是"淡出到按钮底下"，而不是被硬边裁断。不溢出时这块遮罩不生效。
+ */
 .dash-tabs-scroll.overflowing .dash-tab-new {
-  box-shadow: -8px 0 10px -8px rgba(0, 0, 0, 0.28);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  backdrop-filter: blur(14px) saturate(1.6);
+  -webkit-backdrop-filter: blur(14px) saturate(1.6);
+}
+.dash-tabs-scroll.overflowing .dash-tab-new::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -22px;
+  width: 22px;   /* 淡出得长一点：文字是"渐隐进按钮底下"，而不是被一刀切断 */
+  background: linear-gradient(to right, transparent, color-mix(in srgb, var(--surface) 88%, transparent));
+  pointer-events: none;
 }
 .dash-tab {
   /* 分段控件里的一段：文字在滑块之上 */

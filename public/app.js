@@ -1248,9 +1248,10 @@
 
     /*
      * 滑块只负责"当前页"这件事，所以不许画到不该在的地方：
-     * 自定义标签可能被用户手动横向滚出可视区，这时滑块会跑到滚动区外面、
-     * 甚至压在右侧贴住的「＋」上（用户反馈过：选中标签看不见、只剩一截绿块）。
-     * 这里把它夹在滚动区的可视范围内（右侧给「＋」留位）；实在看不见就干脆藏起来。
+     * 自定义标签可能被用户手动横向滚出可视区，这时滑块如果照画，就会跑到滚动区外面、
+     * 或者压在右侧贴住的「＋」上（用户反馈过：只剩一截绿块，看不出选中了谁）。
+     * 所以规则改成"**只有活动标签完整可见时才画**"，否则直接隐藏 ——
+     * 反正标签自己都在遮罩底下了，再挂一块空绿块只会让人误会。
      */
     if (tone === 'custom') {
       var sc = bar.querySelector('.dash-tabs-scroll');
@@ -1258,13 +1259,12 @@
         var scr = sc.getBoundingClientRect();
         var newBtn = sc.querySelector('.dash-tab-new');
         var reserve = newBtn ? newBtn.getBoundingClientRect().width : 0;
-        var left = Math.max(ar.left, scr.left);
-        var right = Math.min(ar.right, scr.right - reserve);
-        if (right - left < 8) { ind.classList.remove('ready'); return; }
-        x = Math.round(left - br.left);
-        w = Math.round(right - left);
+        var visible = ar.left >= scr.left - 0.5 && ar.right <= scr.right - reserve + 0.5;
+        if (!visible) { ind.classList.remove('ready'); return; }
       }
     }
+    // 正在内联改名的标签：里面是输入框，滑块挂在背后只会显示成一块空绿块
+    if (active.dataset.renaming === '1') { ind.classList.remove('ready'); return; }
 
     if (ind.dataset.synced === '1') {
       // 同一个节点（例如横向滚动中反复调用）：正常补间即可，
@@ -6319,7 +6319,8 @@
     var btn = els.dashboard.querySelector('.dash-tab[data-tab-custom="' + tabId + '"]');
     if (!tab || !btn) return;
     closeActionMenu();
-    btn.innerHTML = '<input class="dash-tab-input" type="text" maxlength="20" value="' + esc(tab.name) + '">';
+    btn.dataset.renaming = '1';   // 改名期间隐藏滑块（见 syncTabIndicator）
+    btn.innerHTML = '<input class="dash-tab-input" type="text" maxlength="20" placeholder="标签页名称" value="' + esc(tab.name) + '">';
     var input = btn.querySelector('input');
     input.focus();
     input.select();
