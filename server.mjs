@@ -835,8 +835,18 @@ async function handleVideoProxy(req, res, url) {
     });
   }
 
+  /*
+   * 客户端断开时中止上游请求 —— 但必须挂在 **res** 上，不能挂 req。
+   * Node 16+ 里 IncomingMessage 的 'close' 表示"这个请求读完了"，
+   * 挂在它上面会在正常传输途中就把上游 fetch 掐断：片段被剪短，
+   * 浏览器报 ERR_CONTENT_LENGTH_MISMATCH，dash.js 那一片段失败 →
+   * 播放卡住一直转圈，手动拖一下进度条（重新请求该片段）才好。
+   * res 的 'close' 才是"连接真的没了"。
+   */
   const ac = new AbortController();
-  req.on('close', function () { ac.abort(); });
+  res.on('close', function () {
+    if (!res.writableEnded) ac.abort();
+  });
 
   let upstream = null;
   let chosenHost = parsed.hostname;

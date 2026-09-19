@@ -2111,6 +2111,10 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
 }
 .confirm-check input { margin: 0; accent-color: var(--accent); }
 
+/* 「粘贴链接」分区：一行输入框 + 按钮 */
+.picker-link { display: flex; gap: 8px; align-items: center; }
+.picker-link .search-input { flex: 1; }
+
 /* ---------- 使用引导 ---------- */
 .steps {
   margin: 0 0 4px;

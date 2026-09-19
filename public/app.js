@@ -871,6 +871,7 @@
     showView('dashboard');
     state.episodes = [];
     renderDashboard();
+    syncActiveFolderTab();   // 打开主页时若停在收藏夹标签页，也补一次新增视频
   }
 
   /* ---------------- 主页标签页（系统标签 + 自定义标签） ---------------- */
@@ -5933,6 +5934,7 @@
       state.activeDashTab = tabKey;
       store.set({ activeDashTab: tabKey });
       renderDashboard();
+      syncActiveFolderTab();   // 收藏夹标签页：切过去时补一次新增视频（只加不删）
       return;
     }
     var histRm = e.target.closest('[data-history-remove]');
@@ -6647,6 +6649,90 @@
       : '已创建「★ ' + name + '」（未加入视频库）', 'success');
   }
 
+  /* ---------------- 收藏夹标签页：切过去时做一次增量同步 ---------------- */
+
+  /** 每个标签页上次同步的时间（内存里记着就够，不必进状态） */
+  var folderTabSyncedAt = {};
+
+  /**
+   * 收藏夹标签页 ↔ 源收藏夹的同步（切到这个标签页时跑一次）。
+   *
+   * 规则（按需求定的）：
+   *   · **收藏夹来的条目镜像源收藏夹**：源里新增就补进来，源里删掉就跟着移除
+   *     （这类条目的 kind 是 `bili`，即"从收藏夹带过来的内联视频"）；
+   *   · **用户自己加进这个标签页的内容一律不动**（从选择器加的、粘贴链接加的，
+   *     都是 `video` 条目 = 指向视频库），不覆盖、也不因为收藏夹变化而消失；
+   *   · 去重按 bvid：同一个视频不会因为"库里也有"而多出一张卡；
+   *   · 收藏夹列表是**新→旧**排的，所以一旦翻到"整页都是已知视频"就可以停，
+   *     不必为了 200 多集的收藏夹每次都翻十几页；
+   *   · 查询失败就当作"没检测到"，静默跳过（不能因为网络问题打断用户浏览）；
+   *   · 5 分钟内不重复查同一个标签页（切换来切换去不该反复打 B 站接口）。
+   */
+  async function syncFolderTab(tab) {
+    if (!tab || !tab.fromFolder) return;
+    var key = String(tab.id);
+    var now = Date.now();
+    if (folderTabSyncedAt[key] && now - folderTabSyncedAt[key] < 5 * 60 * 1000) return;
+    folderTabSyncedAt[key] = now;
+    var known = {};      // 页里已有的 bvid（含用户自己加的）
+    (tab.items || []).forEach(function (it) { if (it.bvid) known[String(it.bvid)] = 1; });
+    var inFolder = {};   // 源收藏夹当前的 bvid
+    var added = [];
+    try {
+      for (var pn = 1; pn <= 20; pn++) {
+        var page = await api.folderVideos(tab.fromFolder, pn, creds());
+        var medias = (page.medias || []).filter(function (m) { return !m.type || m.type === 2; });
+        var unknownOnPage = 0;
+        medias.forEach(function (m) {
+          var bvid = m.bvid || m.bv_id;
+          if (!bvid) return;
+          inFolder[String(bvid)] = 1;
+          if (known[String(bvid)]) return;
+          known[String(bvid)] = 1;
+          unknownOnPage++;
+          added.push(tabInlineVideo(m));
+        });
+        if (!page.hasMore || !unknownOnPage) break;   // 整页都是已知内容 → 后面的更老，收工
+      }
+    } catch (e) {
+      return;   // 查不到就当无事发生
+    }
+    var list = customTabs();
+    var t = list.find(function (x) { return String(x.id) === key; });
+    if (!t) return;
+    var before = (t.items || []).length;
+    /*
+     * 先按"镜像"过滤：只动 kind==='bili'（收藏夹带过来的）那些 ——
+     * 它们的 bvid 已经不在源收藏夹里了，说明源里删掉了这个视频；
+     * kind==='video'（用户自己加的）原样保留。
+     */
+    t.items = (t.items || []).filter(function (it) {
+      if (it.kind !== 'bili') return true;
+      return !!inFolder[String(it.bvid)];
+    });
+    var removed = before - t.items.length;
+    // 再按 id 去一次重，防止两次查询之间用户刚加过同一个视频
+    var have = {};
+    t.items.forEach(function (it) { if (it.id) have[String(it.id)] = 1; });
+    var finalAdd = added.filter(function (it) { return !have[String(it.id)]; });
+    if (!removed && !finalAdd.length) return;
+    t.items = t.items.concat(finalAdd);
+    store.set({ customTabs: list });
+    if (state.currentView === 'dashboard' && String(state.activeDashTab) === key) {
+      renderDashboard();
+      var parts = [];
+      if (finalAdd.length) parts.push('新增 ' + finalAdd.length + ' 个');
+      if (removed) parts.push('移除 ' + removed + ' 个');
+      toast('收藏夹已更新：' + parts.join('、'), 'success');
+    }
+  }
+
+  /** 当前自定义标签页如果是"收藏夹标签页"，就跑一次增量同步 */
+  function syncActiveFolderTab() {
+    var tab = findCustomTab(state.activeDashTab);
+    if (tab) syncFolderTab(tab);
+  }
+
   /**
    * 把收藏夹里的视频加入指定自定义标签页。
    * 规则同前：先入库（视频库）再入页；已在库/已在页都不会重复写。
@@ -6848,7 +6934,8 @@
     { key: 'folder', label: '源收藏夹' },
     { key: 'video', label: '视频库' },
     { key: 'folderLib', label: '收藏夹库' },
-    { key: 'up', label: '学习 UP主' }
+    { key: 'up', label: '学习 UP主' },
+    { key: 'link', label: '粘贴链接' }
   ];
 
   var pickerState = null;
@@ -6902,6 +6989,20 @@
     // 复用上次状态时把搜索框的内容也还原（否则列表按旧关键词过滤、输入框却是空的）
     var qEl = document.getElementById('pickerSearch');
     if (qEl) qEl.value = pickerState.query || '';
+  }
+
+  /** 「粘贴链接」表单的事件（渲染后立刻绑，见 renderPickerList） */
+  function bindPickerLinkForm() {
+    var linkBtn = document.getElementById('btnPickerLink');
+    if (!linkBtn) return;
+    linkBtn.addEventListener('click', function () { addLinkToTabFromPicker(); });
+    var linkInput = document.getElementById('pickerLinkInput');
+    if (linkInput) {
+      linkInput.focus();
+      linkInput.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); addLinkToTabFromPicker(); }
+      });
+    }
   }
 
   function bindPickerEvents() {
@@ -7105,6 +7206,29 @@
   function renderPickerList() {
     var list = document.getElementById('pickerList');
     if (!list || !pickerState) return;
+    /*
+     * 「粘贴链接」不是一份可选列表，而是一个小表单：
+     * 粘贴 B 站链接 / BV / av 号 → 拉一次视频信息 → 同时加入视频库和这个标签页。
+     */
+    if (pickerState.section === 'link') {
+      var tabName = '';
+      var t0 = findCustomTab(pickerState.tabId);
+      if (t0) tabName = t0.name;
+      list.innerHTML =
+        '<div class="picker-link">' +
+          '<input id="pickerLinkInput" class="search-input" type="text" autocomplete="off" ' +
+            'placeholder="粘贴 B 站视频链接 / BV 号 / av 号">' +
+          '<button type="button" class="btn primary" id="btnPickerLink">加入「' + esc(tabName) + '」</button>' +
+        '</div>' +
+        '<p class="muted small">会同时加入视频库，方便以后在别处也能找到它。</p>';
+      // 事件必须在这里绑：这个表单是"切到链接分区"时才渲染出来的，
+      // 而 bindPickerEvents() 只在打开选择器那一次跑（原来绑在那儿，点了没反应）。
+      bindPickerLinkForm();
+      var hintEl = document.getElementById('pickerHint');
+      if (hintEl) hintEl.textContent = '';
+      updatePickerCount();
+      return;
+    }
     var res = pickerRows();
     var hintEl = document.getElementById('pickerHint');
     if (hintEl) hintEl.textContent = res.hint || '';
@@ -7143,6 +7267,55 @@
     el.textContent = '已选 ' + n + ' 项';
     var btn = document.getElementById('btnPickerAdd');
     if (btn) btn.disabled = n === 0;
+  }
+
+  /**
+   * 「粘贴链接」：解析 → 拉视频信息 → 同时入库 + 入页。
+   * 加的是一份完整的库条目（有封面 / 标题 / UP主），所以走 ensureVideoInLibrary，
+   * 而不是像收藏夹快照那样存内联条目。
+   */
+  async function addLinkToTabFromPicker() {
+    var input = document.getElementById('pickerLinkInput');
+    var btn = document.getElementById('btnPickerLink');
+    var tab = pickerState && findCustomTab(pickerState.tabId);
+    if (!input || !tab) return;
+    var ref = api.parseVideoRef(input.value);
+    if (!ref) {
+      toast('无法识别：请粘贴 bilibili.com/video/ 完整链接、BV 号或 av 号', 'error');
+      return;
+    }
+    if (btn) { btn.disabled = true; btn.textContent = '解析中…'; }
+    try {
+      var info = await api.videoInfo(ref.id, creds());
+      var bvid = info.bvid || ref.id;
+      var media = {
+        bvid: bvid,
+        title: info.title || '未命名视频',
+        cover: info.pic || '',
+        upper: (info.owner && info.owner.name) || '',
+        duration: info.duration || 0,
+        pubtime: info.pubdate || 0,
+        play: (info.stat && info.stat.view) || 0,
+        page: ref.page || 1,
+        data: { cid: info.pages && info.pages[0] ? info.pages[0].cid : 0, page: ref.page || 1 }
+      };
+      var id = await ensureVideoInLibrary(bvid, media);
+      if (!id) throw new Error('加入视频库失败');
+      var list = customTabs();
+      var t = list.find(function (x) { return String(x.id) === String(tab.id); });
+      if (t && !tabHasItem(t, 'video', id)) {
+        t.items = (t.items || []).concat([{ kind: 'video', id: String(id) }]);
+        store.set({ customTabs: list });
+        toast('已加入视频库和「' + t.name + '」', 'success');
+      } else {
+        toast('这个视频已经在这个标签页里了', 'info');
+      }
+      if (input) { input.value = ''; input.focus(); }
+    } catch (e) {
+      toast('添加失败：' + (e.message || '未知错误'), 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '加入「' + tab.name + '」'; }
+    }
   }
 
   /**

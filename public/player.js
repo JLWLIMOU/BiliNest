@@ -80,6 +80,7 @@ window.BiliNestPlayer = (function () {
     loadAttempts: 0,        // 当前播放地址的连续失败次数
     freshTries: 0,          // 因地址失效重新请求播放地址的次数
     qualityTries: 0,        // 因文件缺失自动尝试其他清晰度的次数
+    pendingQuality: null,   // 待切换的清晰度（等开始播放后再切，避免初始化阶段切流卡住首帧）
     retryTimer: null,       // “重试同地址”的挂起定时器
     fallbackHandler: null,  // 全部方案失败后的兜底（切官方播放器）
     episodeNavHandler: null, // 上一集 / 下一集点击回调（由应用层提供）
@@ -304,6 +305,23 @@ window.BiliNestPlayer = (function () {
               if (mySeq !== mpdSeq) return;             // 已经切到别的视频
               mpdBlobUrl = URL.createObjectURL(new Blob([xml], { type: 'application/dash+xml' }));
               art.mpdBlobUrl = mpdBlobUrl;
+              /*
+               * 关键一步：在把 MPD 交给 dash.js **之前**，先按设置里的默认清晰度
+               * 把 initialBitrate 定下来。这样它一开始就选对档位，
+               * 不需要在初始化阶段切流 —— 那正是"刚打开视频卡在 0 秒一直转圈、
+               * 要手动拖一下进度条才动"的原因（实测：改成固定档位后必现）。
+               */
+              var reps = parseMpdVideoReps(xml);
+              var wantBw = preferredInitialBandwidth(reps);
+              if (wantBw) {
+                try {
+                  player.updateSettings({
+                    streaming: { abr: { autoSwitchBitrate: { video: false }, initialBitrate: { video: wantBw } } }
+                  });
+                } catch (e) {
+                  console.warn('[bilinest][dash] 设置初始码率失败：', e && e.message);
+                }
+              }
               bindEvents();
               try {
                 player.initialize(art.video, mpdBlobUrl, false);
@@ -358,6 +376,8 @@ window.BiliNestPlayer = (function () {
       // 视频刚开始播放（currentTime 仍为 0）时会误判为 false，
       // 导致弹幕动画永远不启动。这里统一用我们自己维护的 state.playing。
       state.playing = true;
+      // 默认清晰度如果需要在开播后纠正一次，就趁现在（避开初始化阶段切流）
+      if (state.pendingQuality != null) setTimeout(applyPendingQuality, 800);
       hideEndOverlay(); // 用户重新播放时隐藏结束浮层
     });
     art.on('video:pause', function () {
@@ -473,6 +493,69 @@ window.BiliNestPlayer = (function () {
   }
 
   /* 鼠标位于视频窗口时滚轮调节音量；提示使用 ArtPlayer 内置 notice（全屏可见） */
+  /* ---------------- 进度卡住兜底 ---------------- */
+  /*
+   * 症状（用户报过、也实测复现过）：刚打开一个视频，进度条停在某个位置一直转圈，
+   * 手动拖一下进度条就正常了 —— 说明是"这一下没续上"，而不是地址或解码有问题。
+   * dash.js 遇到这种情况不会抛 error（所以现有的 handleLoadError 兜不到），
+   * 于是这里自己盯着：明明处于播放中、进度却连续 8 秒纹丝不动，就替用户"轻推一下"；
+   * 推两次还不动，就重新取一次播放地址（签名 / 线路可能失效）。
+   *
+   * 静默恢复：不弹提示，用户看到的只是"卡了一下又自己好了"。
+   */
+  var stallTimer = null;
+  var stallLastT = -1;
+  var stallQuiet = 0;
+  var stallNudges = 0;
+
+  function stopStallWatch() {
+    if (stallTimer) { clearInterval(stallTimer); stallTimer = null; }
+  }
+
+  function startStallWatch() {
+    stopStallWatch();
+    stallLastT = -1;
+    stallQuiet = 0;
+    stallNudges = 0;
+    stallTimer = setInterval(function () {
+      var art = state.art;
+      if (!art || state.kind !== 'bili') return;
+      var v = art.template && art.template.$video;
+      if (!v) return;
+      // 暂停 / 拖动中 / 播完：不算卡住
+      if (v.paused || v.seeking || v.ended) {
+        stallLastT = v.currentTime;
+        stallQuiet = 0;
+        return;
+      }
+      if (stallLastT >= 0 && Math.abs(v.currentTime - stallLastT) < 0.05) {
+        stallQuiet++;
+        if (stallQuiet >= 4) {            // 2 秒一次 × 4 ≈ 8 秒没动
+          stallQuiet = 0;
+          stallNudges++;
+          recoverFromStall(art, v);
+        }
+      } else {
+        stallQuiet = 0;
+        if (v.currentTime > 1) stallNudges = 0;   // 正常播放中，计数归零
+      }
+      stallLastT = v.currentTime;
+    }, 2000);
+  }
+
+  function recoverFromStall(art, v) {
+    if (stallNudges > 3) return;   // 别没完没了地折腾，交给用户手动处理
+    console.warn('[bilinest][play] 进度卡在 ' + (Math.round(v.currentTime * 10) / 10) + 's，第 ' + stallNudges + ' 次自动恢复');
+    if (stallNudges <= 2) {
+      // 轻推：等价于用户"手动拖一下进度条"，绝大多数情况这一下就续上了
+      try { v.currentTime = Math.max(0.1, v.currentTime + 0.1); } catch (e) { /* ignore */ }
+      return;
+    }
+    // 推两次仍不动：重新取一次播放地址（可能签名过期 / 线路问题）
+    state.playurlAt = 0;
+    try { art.url = dashMpdUrl(state.bvid, state.cid, 80); } catch (e) { /* ignore */ }
+  }
+
   function bindWheel() {
     if (!els.player) return;
     els.player.addEventListener('wheel', function (e) {
@@ -747,6 +830,7 @@ window.BiliNestPlayer = (function () {
     state.art.url = state.mpdUrl;
 
     armHotkeys();   // 进播放页即可用快捷键，不必先点一下（详见 armHotkeys 注释）
+    startStallWatch();   // 首帧/中途卡住时自动恢复（见 startStallWatch 注释）
 
     // 弹幕与字幕异步加载，失败不阻塞播放
     loadDanmaku(cid);
@@ -1023,19 +1107,70 @@ window.BiliNestPlayer = (function () {
      * 下拉条目是 ArtPlayer 渲染时就生成的，不需要先把菜单展开。
      */
     var item = ctl && ctl.querySelector ? ctl.querySelector('.art-selector-item[data-value="' + value + '"]') : null;
-    if (item && item.click) {
-      item.click();
+    /*
+     * 已经就是这个档位：什么都不做（最重要的一条）。
+     * MPD 交给 dash.js 之前我们已经按设置给了 initialBitrate，
+     * 所以正常情况下这里"本来就对"，不需要任何切换 ——
+     * 而初始化阶段切流正是"刚打开视频卡在 0 秒一直加载"的元凶（实测复现过）。
+     */
+    var target = idx >= 0 ? list[idx] : null;
+    var cur = null;
+    try { cur = art.dash.getQualityFor('video'); } catch (e) { cur = null; }
+    if (target && cur === target.qualityIndex) {
+      if (item && item.click) item.click();
       return;
     }
-    // 兜底：列表里找不到这一档（或控件还没渲染）时自己设，控件文字保持原样
+    /*
+     * 需要切（说明 initialBitrate 没选中我们想要的那档，或者用户刚在设置里改了）：
+     * 不在这里立刻切，而是记下来，等视频真正开始播之后再切 —— 初始化阶段切流
+     * 会让首帧一直转圈（要手动拖一下进度条才好）。
+     */
+    state.pendingQuality = idx >= 0 ? list[idx].qualityIndex : null;
+    if (state.pendingQuality != null && state.playing) applyPendingQuality();
+  }
+
+  /** 把"待切换的清晰度"真正落实到 dash 上（只在开始播放后调用） */
+  function applyPendingQuality() {
+    var art = state.art;
+    var q = state.pendingQuality;
+    if (!art || q == null || !art.dash) return;
+    state.pendingQuality = null;
+    var ctl = art.controls && art.controls['dash-quality'];
+    var item = ctl && ctl.querySelector ? ctl.querySelector('.art-selector-item[data-value="' + q + '"]') : null;
+    if (item && item.click) { item.click(); return; }   // 走插件自己的切换逻辑
     try {
-      if (idx >= 0) {
-        art.dash.updateSettings({ streaming: { abr: { autoSwitchBitrate: { video: false } } } });
-        art.dash.setQualityFor('video', list[idx].qualityIndex);
-      } else {
-        art.dash.updateSettings({ streaming: { abr: { autoSwitchBitrate: { video: true } } } });
-      }
-    } catch (e) { /* 选档失败就维持自适应，别打断播放 */ }
+      art.dash.updateSettings({ streaming: { abr: { autoSwitchBitrate: { video: false } } } });
+      art.dash.setQualityFor('video', q);
+    } catch (e) { /* ignore */ }
+  }
+
+  /**
+   * 从 MPD 文本里抠出视频档位（height / bandwidth）。
+   * MPD 是我们自己的服务端生成的，视频 Representation 带 mimeType="video/mp4" ✓，
+   * 所以这里正则一下就够了 —— 目的是**在交给 dash.js 之前**就知道有哪些档，
+   * 好把"默认清晰度"写进 initialBitrate（见 customType.dash）。
+   */
+  function parseMpdVideoReps(xml) {
+    var out = [];
+    var re = /<Representation\b[^>]*>/g;
+    var m;
+    while ((m = re.exec(xml))) {
+      var tag = m[0];
+      if (tag.indexOf('mimeType="video/mp4"') < 0) continue;
+      var h = /height="(\d+)"/.exec(tag);
+      var bw = /bandwidth="(\d+)"/.exec(tag);
+      if (!h || !bw) continue;
+      out.push({ height: Number(h[1]), bandwidth: Number(bw[1]), bitrate: Number(bw[1]) });
+    }
+    return out;
+  }
+
+  /** 按设置算出的"初始码率"：交给 dash.js 之前用，避免初始化阶段切流 */
+  function preferredInitialBandwidth(reps) {
+    var pref = (store && store.get && store.get('defaultQuality')) || 'auto';
+    if (pref === 'auto' || !reps || !reps.length) return 0;
+    var idx = pickBitrateIndex(reps, pref);
+    return idx >= 0 ? reps[idx].bandwidth : 0;
   }
 
   /** 读上次用的倍速；值不在档位里（或旧数据）就回到 1.0 */
@@ -1326,6 +1461,7 @@ window.BiliNestPlayer = (function () {
   /* ---------------- 停止 ---------------- */
   function reset() {
     state.playing = false;
+    stopStallWatch();
     clearPendingRetry();
     subtitleSeq++; // 使尚未完成的字幕请求失效，避免旧视频字幕覆盖新视频
     danmakuSeq++;  // 同理，使尚未完成的弹幕请求失效
@@ -1353,6 +1489,7 @@ window.BiliNestPlayer = (function () {
     state.loadAttempts = 0;
     state.freshTries = 0;
     state.qualityTries = 0;
+    state.pendingQuality = null;
     if (state.art) {
       try { state.art.pause(); } catch (e) { /* ignore */ }
       if (state.art.mpdBlobUrl) {

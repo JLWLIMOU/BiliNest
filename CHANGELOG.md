@@ -27,11 +27,25 @@
   - **字幕字号 / 位置**：小 / 中 / 大 / 特大 + 贴底 / 中间 / 最高 —— 和播放页控制条上的「Aa」是**同一份设置**（`subSettings`）。
   - 顺手修了一个一直没生效的老配置：弹幕插件的开关选项名是 **`visible`**，而代码里写的是 `display` —— 插件根本不认这个字段，所以"默认是否显示弹幕"以前从配置里根本控制不了。现在按设置传入，并且程序化 `show()/hide()` 时还会同步控制条上那枚按钮的开/关图标（插件只改弹幕层透明度和提示词，图标是靠 `[data-danmuku-visible]` 属性切的）。
   - 实测（用一个有 893 条 AI 字幕的视频）：默认状态弹幕开、字幕关；播放中改成"关弹幕 / 开字幕 / 大 / 贴底"，弹幕层透明度立刻变 0、字幕层变可见、样式变成 29px/2%；重新打开视频，这四条默认值全部生效。
+- **自定义标签页的「添加内容」多了「粘贴链接」**：粘贴 B 站链接 / BV 号 / av 号即可，视频会**同时加入视频库**（这样它在别处也找得到），并出现在这个标签页里。
+- **收藏夹标签页改成"镜像"源收藏夹**：切到这个标签页时做一次查询 ——
+  - 源收藏夹**新增**了视频 → 自动补进来；源收藏夹**删掉**了视频 → 标签页里跟着移除；
+  - **用户自己加进这个标签页的内容一律不动**（从选择器加的、粘贴链接加的，都不受收藏夹变化影响，也不会被覆盖）；
+  - 只动"从收藏夹带过来的"那部分（条目 kind 为 `bili`），去重按 bvid；
+  - 收藏夹列表是新→旧排的，所以翻到"整页都是已知视频"就停，200 多集的收藏夹也不会每次翻十几页；查询失败当"没检测到"静默跳过，5 分钟内不重复查同一个标签页。
+
+### 修复
+
+- **刚打开的视频卡在某个进度一直转圈、要手动拖一下进度条才播（严重）**：根因在本地视频代理 —— 它用 `req.on('close')` 判断"客户端断开"，但 Node 16+ 里 IncomingStream 的 close 表示**这个请求读完了**（不是连接断了），于是正常传输途中就把上游 fetch 给 abort 了：片段被剪短、浏览器报 `ERR_CONTENT_LENGTH_MISMATCH`、dash.js 那一片段失败 → 播放停在那儿转圈，手动拖进度条（重新请求该片段）才恢复。改成挂在 `res.on('close')` 上、且只在 `!res.writableEnded` 时中止。实测（清空观看记录 = 每个视频都是"第一次打开"，连播 5 个）：修前固定清晰度下必现卡住并伴随 `ERR_CONTENT_LENGTH_MISMATCH`，修后 5 个全部正常、控制台零报错。
+  - 另加一层**卡住兜底**：明明处于播放中、进度却连续 8 秒纹丝不动，就自动"轻推一下"（等价于用户手动拖进度条）；推两次仍不动就重新取一次播放地址。静默恢复，不弹提示。
+  - **默认清晰度不再在初始化阶段切流**：改成在把 MPD 交给 dash.js 之前就把设置写进 `initialBitrate`（dash.js 一开始就选对档位）；万一还需要纠正，推迟到真正开始播放之后再切 —— 初始化时切流本身也会卡首帧。
 
 ### 涉及文件 / 技术细节
 
 - `public/app.js`：`SETTINGS_TABS` 增加 `play`；设置面板新增 `#qualitySelect`（`defaultQuality`）、`#danmakuDefault`（`danmakuOn`）、`#subtitleDefault`（`subtitleOnDefault`）、`#subSizeSelect` / `#subPosSelect`（写入同一份 `subSettings`）。
-- `public/player.js`：新增 `pickBitrateIndex()` / `applyDefaultQuality()`（在 `STREAM_INITIALIZED`、插件 `update()` 之后执行）、`loadDanmakuOnDefault()` / `loadSubtitleOnDefault()` / `applyDanmakuDefault()`（走插件 show/hide + 同步 `[data-danmuku-visible]`）/ `applySubtitleDefault()`；插件选项里那个无效的 `display` 改成 `visible`。
+- `public/app.js`：`PICKER_SECTIONS` 增加 `link` + `addLinkToTabFromPicker()` / `bindPickerLinkForm()`（注意事件在 `renderPickerList()` 里绑 —— 表单是切到该分区才渲染的）；新增 `syncFolderTab()` / `syncActiveFolderTab()`（镜像同步 + 5 分钟节流），并在切标签、打开主页时调用。
+- `public/player.js`：新增 `pickBitrateIndex()` / `applyDefaultQuality()`（在 `STREAM_INITIALIZED`、插件 `update()` 之后执行）、`parseMpdVideoReps()` / `preferredInitialBandwidth()`（交给 dash.js 之前先定 initialBitrate）、`applyPendingQuality()`（需要纠正时推迟到开播后）、`loadDanmakuOnDefault()` / `loadSubtitleOnDefault()` / `applyDanmakuDefault()`（走插件 show/hide + 同步 `[data-danmuku-visible]`）/ `applySubtitleDefault()`、`startStallWatch()` / `recoverFromStall()`（进度卡住兜底）；插件选项里那个无效的 `display` 改成 `visible`。
+- `server.mjs`：`handleVideoProxy()` 的客户端断开判断从 `req.on('close')` 改成 `res.on('close')`（见上面"卡住"那条）。
 - `public/storage.js`：新增 `defaultQuality`（`'auto'`）、`danmakuOn`（`true`）、`subtitleOnDefault`（`false`）。
 
 ---
