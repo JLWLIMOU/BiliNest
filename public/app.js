@@ -1247,11 +1247,11 @@
     var w = Math.round(ar.width);
 
     /*
-     * 滑块只负责"当前页"这件事，所以不许画到不该在的地方：
-     * 自定义标签可能被用户手动横向滚出可视区，这时滑块如果照画，就会跑到滚动区外面、
-     * 或者压在右侧贴住的「＋」上（用户反馈过：只剩一截绿块，看不出选中了谁）。
-     * 所以规则改成"**只有活动标签完整可见时才画**"，否则直接隐藏 ——
-     * 反正标签自己都在遮罩底下了，再挂一块空绿块只会让人误会。
+     * 自定义标签的滑块要夹在滚动区的可视范围内（右侧给贴住的「＋」留位）：
+     *   · 标签完整可见 → 就是它自己的位置；
+     *   · 标签滑到「＋」遮罩下面 / 被滚出去一点 → 只画露出来的那一段，
+     *     而不是整块消失（用户反馈过："滑到 ＋ 处绿块直接没了，滑回来也不再出现"）；
+     *   · 几乎完全看不见（< 8px）才隐藏。
      */
     if (tone === 'custom') {
       var sc = bar.querySelector('.dash-tabs-scroll');
@@ -1259,8 +1259,11 @@
         var scr = sc.getBoundingClientRect();
         var newBtn = sc.querySelector('.dash-tab-new');
         var reserve = newBtn ? newBtn.getBoundingClientRect().width : 0;
-        var visible = ar.left >= scr.left - 0.5 && ar.right <= scr.right - reserve + 0.5;
-        if (!visible) { ind.classList.remove('ready'); return; }
+        var lo = Math.max(ar.left, scr.left);
+        var hi = Math.min(ar.right, scr.right - reserve);
+        if (hi - lo < 8) { ind.classList.remove('ready'); return; }
+        x = Math.round(lo - br.left);
+        w = Math.round(hi - lo);
       }
     }
     // 正在内联改名的标签：里面是输入框，滑块挂在背后只会显示成一块空绿块
@@ -1269,6 +1272,9 @@
     if (ind.dataset.synced === '1') {
       // 同一个节点（例如横向滚动中反复调用）：正常补间即可，
       // 滚动期间由 .scrolling 关掉过渡，让指示条 1:1 跟着标签走。
+      // 注意必须在这里把 ready 加回来：上面几种"先隐藏"的分支会摘掉它，
+      // 而这条快速路径原来不加 —— 一旦因滚动被隐藏过，回到可见状态就再也不显示了。
+      ind.classList.add('ready');
       ind.style.transform = 'translateX(' + x + 'px)';
       ind.style.width = w + 'px';
       ind.dataset.tone = tone;
