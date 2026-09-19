@@ -129,6 +129,17 @@
     return h ? h + ':' + mm + ':' + ss : mm + ':' + ss;
   }
 
+  /**
+   * 确认框里引用的名称：太长就截断。
+   * B 站标题动辄五六十个字，原样塞进弹窗会把整段变成一堵文字墙，
+   * 用户根本看不到"到底会发生什么"那句真正重要的说明。
+   */
+  function shortName(text, max) {
+    var t = String(text == null ? '' : text).replace(/\s+/g, ' ').trim();
+    max = max || 24;
+    return t.length > max ? t.slice(0, max) + '…' : t;
+  }
+
   function fmtDate(ts) {
     if (!ts) return '';
     try {
@@ -1860,7 +1871,7 @@
     meta += fmtDuration(h.progress) + ' / ' + fmtDuration(h.duration);
     return (
       '<article class="hcard" data-history="' + esc(h.key) + '" title="' + esc(title) + '">' +
-        '<button type="button" class="hcard-remove" data-history-remove="' + esc(h.key) + '" title="删除此卡片" aria-label="删除">✕</button>' +
+        '<button type="button" class="hcard-remove" data-history-remove="' + esc(h.key) + '" title="移除卡片" aria-label="移除">✕</button>' +
         '<div class="hcard-cover">' +
           (cover ? '<img src="' + esc(cover) + '" alt="" loading="lazy" referrerpolicy="no-referrer">' : '') +
           '<span class="hcard-label">' + (isSeries ? '继续学习 · 剧集' : '继续学习') + '</span>' +
@@ -2401,7 +2412,7 @@
         stars: 0
       });
       store.set({ studyFolders: folders });
-      toast('已加入收藏夹库', 'success');
+      toast('已加入收藏夹库「' + name + '」', 'success');
     }
     if (document.getElementById('folderList')) loadFoldersIntoModal();
     if (state.currentView === 'dashboard') renderDashboard();
@@ -3119,7 +3130,7 @@
       if (ctxTab) {
         var inCtxTab = tabHasItem(ctxTab, 'video', libId);
         var addTabBtn = '<button type="button" class="card-add card-add-tab" data-video-add-tab="' + esc(v.bvid) +
-          '" title="添加到「' + esc(ctxTab.name) + '」标签页（同时加入视频库）">+</button>';
+          '" title="添加到「' + esc(ctxTab.name) + '」标签页">+</button>';
         if (!added && !inCtxTab) {
           flags += addTabBtn;
         } else {
@@ -3158,7 +3169,7 @@
         '<button type="button" class="card-menu" data-card-menu="' + esc(cardId) +
         '" data-card-menu-kind="video"' +
         (ctx && ctx.tab ? ' data-tab-id="' + esc(ctx.tab) + '" data-tab-kind="video"' : '') +
-        ' title="更多操作（重命名 / 删除）" aria-label="更多操作">' + menuDotsIcon() + '</button>';
+        ' title="更多操作" aria-label="更多操作">' + menuDotsIcon() + '</button>';
     }
     var title = titleOf(v);
     var ph = !cover;
@@ -3253,7 +3264,7 @@
         if (tryLocateJumpTarget()) return;
       }
       if (state.jumpToBvid) {
-        toast('未在当前收藏夹中找到该视频（可能已失效或已删除）', 'error');
+        toast('当前收藏夹里没有这个视频', 'error');
         state.jumpToBvid = null;
       }
     } finally {
@@ -4167,7 +4178,7 @@
       store.set({ customVideos: list, source: { kind: 'mine', name: '我的视频' } });
       closeModal();
       await loadDashboard();
-      toast(exists ? '该视频已在列表中' : '已添加：' + item.title, 'success');
+      toast(exists ? '该视频已在视频库' : '已加入视频库「' + item.title + '」', 'success');
     } catch (err) {
       toast('添加失败：' + err.message, 'error');
     } finally {
@@ -4195,7 +4206,7 @@
 
   function addLocalEntries(entries) {
     if (!entries || !entries.length) {
-      toast('这个文件浏览器放不了（支持 mp4 / m4v / mov / webm / mkv）', 'error', 6000);
+      toast('浏览器放不了这个文件（支持 mp4 / m4v / mov / webm / mkv）', 'error', 6000);
       return;
     }
     var list = store.get('customVideos') || [];
@@ -4241,7 +4252,7 @@
   async function onPickFolder() {
     var res = null;
     try {
-      toast('正在读取文件夹…（会逐个确认能不能播）', 'info', 6000);
+      toast('正在读取文件夹…', 'info', 6000);
       res = await local.pickDirectory();
     } catch (e) {
       if (e && e.name === 'AbortError') return;
@@ -4258,7 +4269,7 @@
 
   async function onDirInputChange() {
     if (!els.dirInput.files || !els.dirInput.files.length) return;
-    toast('正在读取文件夹…（会逐个确认能不能播）', 'info', 6000);
+    toast('正在读取文件夹…', 'info', 6000);
     var res = await local.entriesFromDirFiles(els.dirInput.files);
     els.dirInput.value = '';
     addLocalFolder(res);
@@ -4276,9 +4287,10 @@
     if (!item) return;
     var scopeKey = item.seriesKey || (item.bvid ? 'b:' + item.bvid : 'id:' + item.id);
     var isSeries = !!item.seriesKey;
+    var epN = item.episodeCount || 0;
     confirmAction(
-      '确定删除「' + esc(item.title || item.name || '未命名') + '」？' +
-      (isSeries ? '<br>将删除整个列表（含所有分 P / 合集），不会遗漏。' : ''),
+      '删除「' + esc(shortName(item.title || item.name || '未命名')) + '」？' +
+      (isSeries ? '<br><span class="muted small">这是列表' + (epN ? '（共 ' + epN + ' 集）' : '') + '，会一起删掉。</span>' : ''),
       function () { doRemoveCustomVideo(item, scopeKey); }
     );
   }
@@ -4329,9 +4341,9 @@
     var isSeries = !!h.seriesKey;
     var title = isSeries ? (h.seriesTitle || h.title) : h.title;
     confirmAction(
-      '确定移除「' + esc(title) + '」的继续学习卡片？' +
-      (isSeries ? '<br>将移除整个系列的卡片，不会遗漏。' : '') +
-      '<label class="confirm-check"><input type="checkbox" id="chkPurgeHistory"> 同时清理历史记录（不可恢复）</label>',
+      '移除「' + esc(shortName(title)) + '」的继续学习卡片？' +
+      (isSeries ? '<br><span class="muted small">这是整个系列的卡片。</span>' : '') +
+      '<label class="confirm-check"><input type="checkbox" id="chkPurgeHistory"> 同时清理观看记录（不可恢复）</label>',
       function (purge) {
         var hidden = store.get('hiddenHistoryKeys') || [];
         hidden = hidden.filter(function (k) { return k !== mergeKey; });
@@ -4346,7 +4358,7 @@
           hidden = hidden.concat([mergeKey]);
         }
         store.set({ watchHistory: hlist, hiddenHistoryKeys: hidden });
-        toast(purge ? '已移除卡片并清理历史记录' : '已移除卡片（历史记录已保留）', 'success');
+        toast(purge ? '已移除卡片并清理观看记录' : '已移除卡片', 'success');
         if (state.currentView === 'dashboard') renderDashboard();
         else if (state.currentView === 'browse' && state.browse && state.browse.kind === 'continue') {
           state.browse.items = mergedHistoryList();
@@ -4365,7 +4377,7 @@
     var folders = store.get('studyFolders') || [];
     var f = folders.find(function (s) { return String(s.id) === String(folderId); });
     var name = (f && (f.title || f.name)) || '该收藏夹';
-    confirmAction('确定从收藏夹库中移除「' + esc(name) + '」？', function () {
+    confirmAction('从收藏夹库移除「' + esc(name) + '」？', function () {
       var next = folders.filter(function (s) { return String(s.id) !== String(folderId); });
       store.set({ studyFolders: next });
       toast('已从收藏夹库移除', 'success');
@@ -4796,8 +4808,8 @@
       confirmAction(
         urgentLead(d) +
         '发现新版本：v' + d.current + ' → <b>v' + d.latest + '</b>。<br>' +
-        '<span class="muted small">将执行 git pull，然后重启本地服务并重新打开页面（约几秒，期间页面会短暂断开）。' +
-        '本地有未提交的改动时会中止，不会动你的工作区。</span>',
+        '<span class="muted small">将执行 git pull 并重启本地服务，几秒后页面会自动刷新。' +
+        '工作区有未提交的改动时会中止。</span>',
         async function () {
           var st = document.getElementById('updateStatus');
           if (st) st.textContent = '正在拉取新代码并重启服务…';
@@ -4831,8 +4843,7 @@
       confirmAction(
         urgentLead(d) +
         '发现新版本：v' + d.current + ' → <b>v' + d.latest + '</b>。<br>' +
-        '<span class="muted small">现在直接更新？本地服务会下载新版本、替换程序文件并重启' +
-        '（约几秒，页面会短暂断开，数据与登录状态都不受影响）。</span>',
+        '<span class="muted small">本地服务会下载新版本、替换程序文件并重启，几秒后页面自动刷新。</span>',
         function () {
           applyUpdateInApp(d);
         }
@@ -4846,12 +4857,12 @@
       confirmAction(
         urgentLead(d) +
         '发现新版本：v' + d.current + ' → <b>v' + d.latest + '</b>。<br>' +
-        '<span class="muted small">这次发布没有附带可自动更新的压缩包，需要下载安装包（' + fmtMB(setup.size) +
-        '）手动运行 —— 安装程序会停掉旧服务并重启，数据不会动。</span>',
+        '<span class="muted small">这次发布没有可自动更新的压缩包，需要下载安装包（' + fmtMB(setup.size) +
+        '）手动运行。</span>',
         function () {
           window.open(setup.url, '_blank', 'noopener');
           var st = document.getElementById('updateStatus');
-          if (st) st.textContent = '已开始下载安装包。运行它即可更新到 v' + d.latest + '（数据不受影响）。';
+          if (st) st.textContent = '已开始下载安装包。运行它即可更新到 v' + d.latest + '。';
         }
       );
       return;
@@ -4980,7 +4991,7 @@
       ? '<button id="btnOAuth" type="button" class="btn ghost">使用 OAuth 登录</button>'
       : '';
     return '<details class="help auth-more">' +
-        '<summary>其他登录方式（手动粘贴 Cookie）</summary>' +
+        '<summary>其他登录方式（手动粘贴 SESSDATA）</summary>' +
         '<label class="field-label" for="cookieInput">SESSDATA / Cookie</label>' +
         '<input id="cookieInput" class="text-input" type="password" placeholder="粘贴 SESSDATA 或完整 Cookie" autocomplete="off">' +
         '<label class="check"><input id="persistCookie" type="checkbox" checked> 保存到本地浏览器</label>' +
@@ -5190,7 +5201,7 @@
       points: [
         '「继续学习」自动接着上次的位置播；下面依次是视频库、收藏夹库、学习 UP主；',
         '标签栏末尾的「＋」新建自定义标签页（双击改名、按住拖动排序）；',
-        '纯标签页只放引用：删标签页不会删内容，卡片 ✕ 移除时还能选择是否连库里一起删。'
+        '标签页只是分类：删掉标签页不会删内容，需要时可以在删除时勾选一起删。'
       ]
     },
     {
@@ -5208,9 +5219,8 @@
       title: '学习记录',
       lead: '「继续学习」标题旁边就是你一共学了多久。',
       points: [
-        '点进去看累计时长、最长连续、打卡日历，以及 7 / 14 / 30 天的趋势；',
-        '只统计真正播放的时间：拖进度条、暂停、切集都不算；',
-        '不足 1 分钟时入口不显示，不会拿「0 分钟」来烦你。'
+        '点进去看累计时长、最长连续、打卡日历，以及 7 / 14 / 30 天或全部的趋势；',
+        '只统计真正播放的时间：拖进度条、暂停、切集都不算。'
       ]
     },
     {
@@ -5442,7 +5452,7 @@
   }
 
   async function onShutdown() {
-    if (!window.confirm('确定停止本地 BiliNest 服务吗？停止后请双击桌面快捷方式重新启动。')) return;
+    if (!window.confirm('停止本地服务？停止后双击桌面快捷方式即可重新启动。')) return;
     var base = state.backend && state.backend.base ? state.backend.base : '';
     try {
       await fetch(base + '/api/shutdown');
@@ -5508,7 +5518,7 @@
   }
 
   async function onClearData() {
-    if (!window.confirm('确定清除全部本地数据吗？将移除登录凭据、收藏夹选择与自定义视频列表。')) return;
+    if (!window.confirm('清除全部本地数据？将移除登录凭据、视频库、收藏夹库与自定义标签页。')) return;
     var items = store.get('customVideos') || [];
     for (var i = 0; i < items.length; i++) {
       if (items[i].kind === 'local') {
@@ -5526,7 +5536,7 @@
 
   /** 设置 →「从备份恢复」：用服务端保存的备份覆盖本地 */
   async function onRestoreBackup() {
-    if (!window.confirm('用本机保存的备份覆盖当前数据吗？页面会刷新一次。')) return;
+    if (!window.confirm('用本机备份覆盖当前数据？页面会刷新一次。')) return;
     var ok = await store.restoreFromBackup();
     if (!ok) {
       toast('没有可用的备份（或本地服务未运行）', 'error');
@@ -6149,7 +6159,7 @@
           '</div>' +
         '</div>' +
         (ctx && ctx.tab
-          ? '<button type="button" class="card-remove" data-tab-remove="' + esc(String(up.mid)) + '" data-tab-id="' + esc(ctx.tab) + '" data-tab-kind="up" title="从本标签页移除（不会移出学习 UP主）" aria-label="从本标签页移除">✕</button>'
+          ? '<button type="button" class="card-remove" data-tab-remove="' + esc(String(up.mid)) + '" data-tab-id="' + esc(ctx.tab) + '" data-tab-kind="up" title="从本标签页移除" aria-label="从本标签页移除">✕</button>'
           : '<button type="button" class="card-remove" data-up-remove="' + esc(String(up.mid)) + '" title="移除 UP主" aria-label="移除">✕</button>') +
       '</div>'
     );
@@ -6187,10 +6197,10 @@
     if (!mid) return;
     var ups = store.get('studyUps') || [];
     if (ups.some(function (u) { return String(u.mid) === String(mid); })) {
-      toast('该 UP主 已在「学习 UP主」里');
+      toast('该 UP主已在「学习 UP主」里');
       return;
     }
-    toast('正在获取 UP主 信息…');
+      toast('正在获取 UP主信息…');
     try {
       var data = await api.userCard(mid, { creds: creds() });
       var card = (data && data.card) || {};
@@ -6207,10 +6217,10 @@
       };
       ups.push(up);
       store.set({ studyUps: ups });
-      toast('已添加：' + up.name, 'success');
+      toast('已添加 UP主「' + up.name + '」', 'success');
       if (state.currentView === 'dashboard') renderDashboard();
     } catch (e) {
-      toast('获取 UP主 信息失败：' + e.message, 'error');
+      toast('获取 UP主信息失败：' + e.message, 'error');
     }
   }
 
@@ -6219,10 +6229,10 @@
     var ups = store.get('studyUps') || [];
     var u = ups.find(function (s) { return String(s.mid) === String(mid); });
     var name = (u && u.name) || '该 UP主';
-    confirmAction('确定从学习 UP主中移除「' + esc(name) + '」？', function () {
+    confirmAction('从学习 UP主移除「' + esc(name) + '」？', function () {
       var next = ups.filter(function (s) { return String(s.mid) !== String(mid); });
       store.set({ studyUps: next });
-      toast('已移除 ' + name, 'success');
+      toast('已移除「' + name + '」', 'success');
       if (state.currentView === 'dashboard') renderDashboard();
     });
   }
@@ -6371,11 +6381,12 @@
     var n = (tab.items || []).length;
     var libVideos = tabLibraryVideos(tab);
     var extra = libVideos.length
-      ? '<br><label class="check"><input type="checkbox" id="alsoDeleteTabVideos"> ' +
-        '同时删除视频库里的这些视频（' + libVideos.length + ' 个；只在本页、没入库的视频不受影响）</label>'
-      : '<br><span class="muted small">这个标签页里没有已入库的视频，删掉它不会动视频库。</span>';
+      ? '<label class="confirm-check"><input type="checkbox" id="alsoDeleteTabVideos"> ' +
+        '同时删除视频库里的这些视频（' + libVideos.length + ' 个）</label>'
+      : '';
     confirmAction(
-      '删除标签页「' + esc(tab.name) + '」？<br><span class="muted small">其中 ' + n + ' 项内容默认仍保留在各自的栏目里。</span>' + extra,
+      '删除标签页「' + esc(tab.name) + '」？' +
+      (n ? '<br><span class="muted small">只删这个标签页，里面的内容留在各自的栏目里。</span>' : '') + extra,
       function (alsoDeleteVideos) {
         store.set({ customTabs: customTabs().filter(function (t) { return String(t.id) !== String(tabId); }) });
         delete state.tabQuery[tabId];
@@ -6390,7 +6401,7 @@
           });
         }
         renderDashboard();
-        toast(removed ? '已删除标签页，并从视频库删除 ' + removed + ' 个视频' : '已删除标签页', 'success');
+        toast(removed ? '已删除标签页和 ' + removed + ' 个视频' : '已删除标签页', 'success');
       },
       function () {
         var cb = document.getElementById('alsoDeleteTabVideos');
@@ -6484,10 +6495,9 @@
     var name = folder.title || folder.name || '收藏夹';
     confirmAction(
       '以「' + esc(name) + '」创建新标签页？<br>' +
-      '<span class="muted small">会把收藏夹里的视频装进一个以「★ ' + esc(name) + '」命名的新标签页；' +
-      '之后这个收藏夹有更新，标签页里的内容不会自动跟着变。</span><br>' +
-      '<label class="check"><input type="checkbox" id="alsoAddToLibrary"> ' +
-      '同时把收藏夹内的视频加入视频库（默认不勾选）</label>',
+      '<span class="muted small">会把收藏夹里的视频装进新标签页「★ ' + esc(name) + '」，内容不随收藏夹更新。</span>' +
+      '<label class="confirm-check"><input type="checkbox" id="alsoAddToLibrary"> ' +
+      '同时把收藏夹内的视频加入视频库</label>',
       function (also) { createTabFromFolder(folderId, also); },
       function () {
         var cb = document.getElementById('alsoAddToLibrary');
@@ -6577,7 +6587,7 @@
     var media = state.videos.find(function (x) { return String(x.bvid || x.bv_id) === String(bvid); });
     var id = await ensureVideoInLibrary(bvid, media);
     if (!id) {
-      toast('无法添加该视频', 'error');
+      toast('加入视频库失败', 'error');
       return;
     }
     var list = customTabs();
@@ -6738,11 +6748,11 @@
     var name = (entry && (entry.title || entry.name)) || (inlineIt && inlineIt.title) || libraryItemName(libKind, id) || '该项';
     var libName = { video: '视频库', folder: '收藏夹库', up: '学习 UP主' }[libKind] || '库';
     confirmAction(
-      '从「' + esc(tab.name) + '」标签页移除「' + esc(name) + '」？' +
+      '从「' + esc(tab.name) + '」移除「' + esc(shortName(name)) + '」？' +
         (entry
-          ? '<br><label class="check"><input type="checkbox" id="alsoDeleteFromLib"> ' +
-            '同时从库中删除（从「' + libName + '」里一并删掉，其它标签页里的它也会消失）</label>'
-          : '<br><span class="muted small">这个视频不在视频库里，只从本标签页移除就好。</span>'),
+          ? '<label class="confirm-check"><input type="checkbox" id="alsoDeleteFromLib"> ' +
+            '同时从「' + libName + '」删除（其它标签页里的也会一并移除）</label>'
+          : ''),
       function (alsoDelete) {
         var list = customTabs();
         var t = list.find(function (x) { return String(x.id) === String(tabId); });
@@ -6753,7 +6763,7 @@
         }
         var deleted = (alsoDelete && entry) ? deleteFromLibrary(libKind, id) : false;
         if (state.currentView === 'dashboard') renderDashboard();
-        toast(deleted ? '已从标签页和库中删除' : '已从本标签页移除');
+        toast(deleted ? '已从标签页和「' + libName + '」删除' : '已从本标签页移除');
       },
       function () {
         var cb = document.getElementById('alsoDeleteFromLib');
