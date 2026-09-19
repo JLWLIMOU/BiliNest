@@ -4413,6 +4413,7 @@
   var SETTINGS_TABS = [
     { key: 'login', label: '登录与授权' },
     { key: 'general', label: '外观' },
+    { key: 'play', label: '播放' },
     { key: 'data', label: '数据' },
     { key: 'about', label: '关于' }
   ];
@@ -4442,6 +4443,7 @@
     var hasCookie = !!store.getCookie();
     var hasSid = !!store.get('sid');
     var theme = store.get('theme') || 'auto';
+    var quality = store.get('defaultQuality') || 'auto';
     var statusHtml;
     if (login) statusHtml = '<span class="ok">已登录 · ' + esc(login.uname) + '</span>';
     else if (hasCookie || hasSid) statusHtml = '<span class="warn">已保存凭据，但校验未通过（可能已过期）</span>';
@@ -4508,6 +4510,20 @@
             '<option value="light"' + (theme === 'light' ? ' selected' : '') + '>浅色</option>' +
             '<option value="dark"' + (theme === 'dark' ? ' selected' : '') + '>深色</option>' +
           '</select>' +
+        '</section>' +
+        '<section class="settings-panel' + (tab === 'play' ? ' active' : '') + '" data-settings-panel="play">' +
+          '<h3>播放</h3>' +
+          '<label class="field-label" for="qualitySelect">默认清晰度</label>' +
+          '<select id="qualitySelect" class="select">' +
+            '<option value="auto"' + (quality === 'auto' ? ' selected' : '') + '>自动（推荐）</option>' +
+            '<option value="high"' + (quality === 'high' ? ' selected' : '') + '>高</option>' +
+            '<option value="mid"' + (quality === 'mid' ? ' selected' : '') + '>中</option>' +
+            '<option value="low"' + (quality === 'low' ? ' selected' : '') + '>低</option>' +
+          '</select>' +
+          '<p class="muted small">每个视频<b>打开时</b>按这里选一档：<b>高</b> = 最高可用画质（大会员 / 高码率的视频会更高）；' +
+            '<b>中</b> = 最接近 480P 的那一档（没有就取最接近的，并列时取低的一档）；<b>低</b> = 最低那一档；' +
+            '<b>自动</b> = 交给播放器按网速实时决定。</p>' +
+          '<p class="muted small">播放页控制条上的「画质」随时可以手动改，改的是这一个视频、不会影响这里的默认值。</p>' +
         '</section>' +
         '<section class="settings-panel' + (tab === 'data' ? ' active' : '') + '" data-settings-panel="data">' +
           '<h3>数据</h3>' +
@@ -4903,6 +4919,11 @@
     document.getElementById('themeSelect').addEventListener('change', function (e) {
       store.set({ theme: e.target.value });
       applyTheme();
+    });
+    var qSel = document.getElementById('qualitySelect');
+    if (qSel) qSel.addEventListener('change', function (e) {
+      store.set({ defaultQuality: e.target.value });
+      toast('默认清晰度：' + ({ auto: '自动', high: '高', mid: '中', low: '低' })[e.target.value], 'success');
     });
     document.getElementById('btnClearData').addEventListener('click', onClearData);
     var restoreBtn = document.getElementById('btnRestoreBackup');

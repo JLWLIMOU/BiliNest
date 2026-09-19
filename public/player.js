@@ -275,6 +275,8 @@ window.BiliNestPlayer = (function () {
               console.log('[bilinest][dash] STREAM_INITIALIZED');
               var p = art.plugins && art.plugins.artplayerPluginDashControl;
               if (p && p.update) p.update();
+              // 插件重建完码率下拉之后，再按设置里的"默认清晰度"选一档
+              applyDefaultQuality();
               if (art.loading && art.loading.hide) art.loading.hide();
             });
             player.on(errEv, function (e) {
@@ -896,6 +898,81 @@ window.BiliNestPlayer = (function () {
   }
 
   /* ---------------- 播放倍速 ---------------- */
+
+  /* ---------------- 默认清晰度 ---------------- */
+
+  /**
+   * 按设置里的"默认清晰度"在当前 dash 实例上选一档。
+   *
+   * 为什么要自己挑：dash.js 默认开 ABR（自适应），控制条上的「画质」就永远显示 Auto。
+   * 设置里给了三档固定值，打开每个视频时按它选一次，并关掉 ABR，
+   * 让这一档稳定地播下去（想换回来在控制条里点「Auto」即可）。
+   *
+   * 档位怎么定：
+   *   - 高：可用档位里分辨率最高的那一档（并列取码率高的）；
+   *   - 低：最低那一档；
+   *   - 中：**最接近 480P** 的那一档 —— B 站自己把 480P 当默认清晰度，
+   *     而各视频的档位不连续（可能只有 1080P / 720P / 360P），"正中间"会随视频变，
+   *     取"离 480P 最近"最可预期；并列时取低的那一档（省流量）。
+   */
+  function pickBitrateIndex(list, pref) {
+    if (!list || !list.length) return -1;
+    var h = function (it) { return Number(it.height || 0); };
+    var br = function (it) { return Number(it.bitrate || 0); };
+    var i;
+    if (pref === 'high') {
+      var hi = 0;
+      for (i = 1; i < list.length; i++) {
+        if (h(list[i]) > h(list[hi]) || (h(list[i]) === h(list[hi]) && br(list[i]) > br(list[hi]))) hi = i;
+      }
+      return hi;
+    }
+    if (pref === 'low') {
+      var lo = 0;
+      for (i = 1; i < list.length; i++) {
+        if (h(list[i]) < h(list[lo]) || (h(list[i]) === h(list[lo]) && br(list[i]) < br(list[lo]))) lo = i;
+      }
+      return lo;
+    }
+    var best = 0;
+    for (i = 1; i < list.length; i++) {
+      var d = Math.abs(h(list[i]) - 480) - Math.abs(h(list[best]) - 480);
+      if (d < 0 || (d === 0 && h(list[i]) < h(list[best]))) best = i;
+    }
+    return best;
+  }
+
+  /** 把设置里的默认清晰度应用到当前 dash（auto 就打开 ABR，其余选固定档） */
+  function applyDefaultQuality() {
+    var art = state.art;
+    if (!art || !art.dash || typeof art.dash.getBitrateInfoListFor !== 'function') return;
+    var pref = (store && store.get && store.get('defaultQuality')) || 'auto';
+    var list = [];
+    try { list = art.dash.getBitrateInfoListFor('video') || []; } catch (e) { return; }
+    if (!list.length) return;
+    var ctl = art.controls && art.controls['dash-quality'];
+    var idx = pref === 'auto' ? -1 : pickBitrateIndex(list, pref);
+    var value = idx >= 0 ? String(list[idx].qualityIndex) : 'auto';
+    /*
+     * 优先"点"插件下拉里的那一项：切换画质、更新控件文字、弹一条「画质：720p」提示
+     * 全由插件自己完成，我们不用去猜它的 DOM 结构（直接改控件 innerHTML 会把下拉列表删掉）。
+     * 下拉条目是 ArtPlayer 渲染时就生成的，不需要先把菜单展开。
+     */
+    var item = ctl && ctl.querySelector ? ctl.querySelector('.art-selector-item[data-value="' + value + '"]') : null;
+    if (item && item.click) {
+      item.click();
+      return;
+    }
+    // 兜底：列表里找不到这一档（或控件还没渲染）时自己设，控件文字保持原样
+    try {
+      if (idx >= 0) {
+        art.dash.updateSettings({ streaming: { abr: { autoSwitchBitrate: { video: false } } } });
+        art.dash.setQualityFor('video', list[idx].qualityIndex);
+      } else {
+        art.dash.updateSettings({ streaming: { abr: { autoSwitchBitrate: { video: true } } } });
+      }
+    } catch (e) { /* 选档失败就维持自适应，别打断播放 */ }
+  }
 
   /** 读上次用的倍速；值不在档位里（或旧数据）就回到 1.0 */
   function loadPlayRate() {
