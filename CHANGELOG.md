@@ -29,11 +29,13 @@
   - 标签页是**当时内容的快照**：收藏夹之后新增视频不会自动同步进来。
 - **收藏夹卡片的 ✕ 改成「⋯」菜单**（和视频卡片一致）：菜单里是「以此收藏夹创建标签页」+「从收藏夹库移除」；在自定义标签页里时，第二项变成「从本标签页移除」。收藏夹卡片依旧不参与重命名。
 - **删除标签页时可以一并删掉库里的视频**：删除确认框新增勾选项「同时删除视频库里的这些视频（N 个）」，**默认不勾选**。勾选后只删"既在本标签页、又在视频库"的视频（程序按 `bvid` / 库内 id 逐条判断），只在本页、没入库的视频不受影响；库里没有对应视频时这一项不出现，只提示"不会动视频库"。
+- **未入库的视频也能打星级**：收藏夹标签页里"没加入视频库"的视频，星级照常可点 —— 分数记在**标签页条目**上（不写视频库）。卡片右下角同时标着「未加入视频库」，需要的话在「⋯」里一键入库。
+- **自定义标签页也有排序（筛选）**：标签页标题行加了下拉框，选项是**添加顺序（默认，即条目在页里的先后）/ 发布时间 / 星级 / 播放量**，每个标签页各记各的。选"星级"就按你打的星排（未入库的内联视频按它自己存的星级/播放量参与排序）。
 
 ### 涉及文件 / 技术细节
 
-- `public/app.js`：`loadEpisodes()` 增加兜底选中并返回生效的 `{bvid,cid,page}`（`playVideo()` 据此播放）；`tabMembers()` 支持新的标签页条目类型 `kind:'bili'`（内联视频，未入库），`inlineVideoObject()` / `tabInlineVideo()` 负责两种形态互转；新增 `openFolderMenu()` / `askCreateTabFromFolder()` / `fetchAllFolderVideos()` / `createTabFromFolder()` / `addInlineToLibrary()` / `tabLibraryVideos()`，`deleteCustomTab()` 与 `removeFromTab()` 按"是否在库"分别处理；新增 `openProgressToast()` / `closeProgressToast()` 给耗时操作当常驻提示。
-- `public/styles.css`：新增 `.inline-hint`（未入库占位，与星级行等高）。
+- `public/app.js`：`loadEpisodes()` 增加兜底选中并返回生效的 `{bvid,cid,page}`（`playVideo()` 据此播放）；`tabMembers()` 支持新的标签页条目类型 `kind:'bili'`（内联视频，未入库），`inlineVideoObject()` / `tabInlineVideo()` 负责两种形态互转；`starControl()` 多带 `data-tab`、`setStars()` 新增 `tabvideo` 分支（星级写回标签页条目）；新增 `openFolderMenu()` / `askCreateTabFromFolder()` / `fetchAllFolderVideos()` / `createTabFromFolder()` / `addInlineToLibrary()` / `tabLibraryVideos()`，`deleteCustomTab()` 与 `removeFromTab()` 按"是否在库"分别处理；`renderDashHead()` 给自定义标签页加排序下拉（存 `tab.sort`），`renderCustomTab()` 按它排序；新增 `openProgressToast()` / `closeProgressToast()` 给耗时操作当常驻提示。
+- `public/styles.css`：`.inline-hint`（未入库说明，与星级同一行）。
 
 ---
 

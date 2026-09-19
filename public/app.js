@@ -894,10 +894,18 @@
     return 'continue';
   }
 
-  /** 排序下拉的选项（视频库 / 展开全部页共用同一套语义） */
-  function sortOptionsHtml() {
-    var cur = store.get('sort') || 'add';
-    return [['add', '添加时间'], ['pub', '发布时间'], ['star', '星级'], ['play', '播放量']]
+  /**
+   * 排序下拉的选项。
+   *   视频库 / 展开全部页：添加时间 / 发布时间 / 星级 / 播放量；
+   *   自定义标签页：添加顺序（= 条目在页里的先后，默认）/ 发布时间 / 星级 / 播放量。
+   * 标签页用"顺序"而不是"时间"，是因为它的内容有先后但没有统一的时间戳。
+   */
+  function sortOptionsHtml(cur, forTab) {
+    cur = cur || store.get('sort') || 'add';
+    var opts = forTab
+      ? [['add', '添加顺序'], ['pub', '发布时间'], ['star', '星级'], ['play', '播放量']]
+      : [['add', '添加时间'], ['pub', '发布时间'], ['star', '星级'], ['play', '播放量']];
+    return opts
       .map(function (o) {
         return '<option value="' + o[0] + '"' + (cur === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
       })
@@ -975,6 +983,11 @@
     if (custom) {
       searchPlaceholder = '在本标签页内搜索…';
       searchValue = state.tabQuery[custom.id] || '';
+      // 标签页也给排序（筛选）：默认"添加顺序"，就是条目在页里的先后
+      tools +=
+        '<label class="sort-wrap"><span class="muted small">排序</span>' +
+          '<select id="dashSort" class="select" data-tab-sort="' + esc(custom.id) + '">' +
+          sortOptionsHtml(custom.sort || 'add', true) + '</select></label>';
     } else if (tab === 'continue') {
       // 「继续学习」标题行右侧：累计学习时长 + 学习记录入口。
       // 做成入口而不是独立标签页 —— 它是附属功能，不该和「视频库 / 收藏夹库」抢位置。
@@ -1529,7 +1542,7 @@
            一旦这个视频后来进了视频库（用户勾了入库、或手动加过），就优先用库里的那份 ——
            这样星级、重命名、删除这些按库条目工作的功能自动接上，不用两套卡片。 */
         var inLib = videos.find(function (x) { return String(x.bvid) === String(it.bvid); });
-        out.videos.push(inLib || inlineVideoObject(it));
+        out.videos.push(inLib || inlineVideoObject(it, tab.id));
       } else if (it.kind === 'folder') {
         var f = folders.find(function (x) { return String(x.id) === id; });
         if (f) out.folders.push(f);
@@ -1542,7 +1555,7 @@
   }
 
   /** 把标签页里的内联视频条目（视频库里没有）变成卡片能用的视频对象 */
-  function inlineVideoObject(it) {
+  function inlineVideoObject(it, tabId) {
     return {
       id: it.id,
       kind: 'bili',
@@ -1554,6 +1567,9 @@
       upper: it.upper || '',
       duration: it.duration || 0,
       pubtime: it.pubtime || 0,
+      play: it.play || 0,
+      stars: it.stars || 0,     // 星级记在标签页条目上（不入库也能打分）
+      inlineTab: tabId || '',   // 打分时要知道是哪个标签页的哪一条
       inlineOnly: true          // 只在本标签页里存在，不在视频库
     };
   }
@@ -1571,7 +1587,10 @@
       cover: (media.cover || '').replace(/^http:\/\//i, 'https://'),
       upper: (media.upper && media.upper.name) || media.upper || '',
       duration: media.duration || (media.data && media.data.duration) || 0,
-      pubtime: media.pubtime || media.ctime || 0
+      pubtime: media.pubtime || media.ctime || 0,
+      // 收藏夹接口会给播放量（cnt_info.play），"播放量"排序用得上
+      play: (media.cnt_info && (media.cnt_info.play != null ? media.cnt_info.play : media.cnt_info.view)) || media.play || 0,
+      addedAt: Date.now()
     };
   }
 
@@ -1593,6 +1612,25 @@
     var videos = m.videos.filter(function (v) {
       return hit(v.title || v.name) || hit((v.upper && v.upper.name) || v.upper);
     });
+    /*
+     * 排序（筛选）：默认按条目顺序，不动；选了其它方式才排。
+     * 库里来的用真实时间 / 星级 / 播放量，"未入库"的内联条目用它自己存的那几个值。
+     */
+    var tsOf = function (v, key) { return Number(v[key] || 0); };
+    var sortBy = tab.sort || 'add';
+    if (sortBy === 'pub') {
+      videos.sort(function (a, b) { return tsOf(b, 'pubtime') - tsOf(a, 'pubtime'); });
+    } else if (sortBy === 'star') {
+      videos.sort(function (a, b) {
+        return (b.stars || 0) - (a.stars || 0) ||
+          (tsOf(b, 'pubtime') || tsOf(b, 'addedAt')) - (tsOf(a, 'pubtime') || tsOf(a, 'addedAt'));
+      });
+    } else if (sortBy === 'play') {
+      videos.sort(function (a, b) {
+        return (playCount(b) || b.play || 0) - (playCount(a) || a.play || 0) ||
+          (tsOf(b, 'pubtime') || tsOf(b, 'addedAt')) - (tsOf(a, 'pubtime') || tsOf(a, 'addedAt'));
+      });
+    }
     var folders = m.folders.filter(function (f) { return hit(f.title || f.name); });
     var ups = m.ups.filter(function (u) { return hit(u.name) || hit(u.sign); });
     var matched = videos.length + folders.length + ups.length;
@@ -2142,21 +2180,34 @@
   }
 
   /* ---------------- 星级评分 ---------------- */
-  function starControl(key, stars, scope) {
-    var html = '<span class="stars" data-scope="' + esc(scope) + '" data-key="' + esc(key) + '">';
+  /** 星级控件；scope='tabvideo' 时多带一个 data-tab（星级记在标签页条目上，不入库也能打分） */
+  function starControl(key, stars, scope, tabId) {
+    var html = '<span class="stars" data-scope="' + esc(scope) + '" data-key="' + esc(key) + '"' +
+      (tabId ? ' data-tab="' + esc(tabId) + '"' : '') + '>';
     for (var i = 1; i <= 5; i++) {
       html += '<span class="star' + (i <= (stars || 0) ? ' on' : '') + '" data-val="' + i + '" title="' + i + ' 星">★</span>';
     }
     return html + '</span>';
   }
 
-  function setStars(scope, key, val) {
+  function setStars(scope, key, val, tabId) {
     if (scope === 'video') {
       var list = store.get('customVideos') || [];
       var it = list.find(function (x) { return String(x.bvid || x.id) === String(key); });
       if (!it) return;
       it.stars = val;
       store.set({ customVideos: list });
+    } else if (scope === 'tabvideo') {
+      // 标签页里的内联视频（视频库里没有）：星级直接记在标签页条目上
+      var tabs = customTabs();
+      var tab = tabs.find(function (x) { return String(x.id) === String(tabId); });
+      if (!tab) return;
+      var item = (tab.items || []).find(function (x) {
+        return memberKey(x.kind, x.id) === memberKey('bili', key);
+      });
+      if (!item) return;
+      item.stars = val;
+      store.set({ customTabs: tabs });
     } else if (scope === 'folder' || scope === 'modal-folder') {
       var folders = store.get('studyFolders') || [];
       var f = folders.find(function (x) { return String(x.id) === String(key); });
@@ -3023,9 +3074,14 @@
     }
     var stars = isAdded
       ? '<div class="card-stars">' + starControl(v.bvid || v.id, v.stars || 0, 'video') + '</div>'
-      // 收藏夹标签页里"没入库"的视频：星级那行换成一句说明 —— 既解释为什么没有星级，
-      // 也让同一排卡片的高度和库内卡片保持一致（否则又是不齐）
-      : (v.inlineOnly ? '<div class="card-stars"><span class="inline-hint">未加入视频库</span></div>' : '');
+      /*
+       * 收藏夹标签页里"没入库"的视频：**照样能打星级**（星级记在标签页条目上），
+       * 右边多一句"未加入视频库"说明它还没进库（⋯ 菜单里有"加入视频库"）。
+       */
+      : (v.inlineOnly
+        ? '<div class="card-stars">' + starControl(v.id, v.stars || 0, 'tabvideo', v.inlineTab) +
+          '<span class="inline-hint">未加入视频库</span></div>'
+        : '');
     var cardId = v.id || v.bvid || v.bv_id || '';
     // 视频库的卡片：右下角“×”删除按钮（点击弹确认框；列表/剧集整季删除）
     // 右上角「⋯」：重命名 / 恢复原名 / 删除（自定义标签页里是"从本页移除"）
@@ -5588,6 +5644,17 @@
     });
     els.dashboard.addEventListener('change', function (e) {
       if (e.target && e.target.id === 'dashSort') {
+        // 自定义标签页的排序存在标签页自己身上（每个标签页各记各的）
+        if (e.target.dataset && e.target.dataset.tabSort) {
+          var list = customTabs();
+          var t = list.find(function (x) { return String(x.id) === String(e.target.dataset.tabSort); });
+          if (t) {
+            t.sort = e.target.value;
+            store.set({ customTabs: list });
+          }
+          renderDashboard();
+          return;
+        }
         store.set({ sort: e.target.value });
         renderDashboard();
       }
@@ -5787,7 +5854,7 @@
     var star = e.target.closest('.stars .star');
     if (star) {
       var wrap = star.closest('.stars');
-      setStars(wrap.dataset.scope, wrap.dataset.key, parseInt(star.dataset.val, 10));
+      setStars(wrap.dataset.scope, wrap.dataset.key, parseInt(star.dataset.val, 10), wrap.dataset.tab);
       return;
     }
     // UP主 卡片 → 跳转 B站主页
@@ -6419,7 +6486,8 @@
       name: '★ ' + name,
       createdAt: Date.now(),
       fromFolder: String(folderId),
-      items: items.map(function (it) { return { kind: 'bili', id: it.id, bvid: it.bvid, cid: it.cid, page: it.page, title: it.title, cover: it.cover, upper: it.upper, duration: it.duration, pubtime: it.pubtime }; })
+      // 整条存下来：star（星级）、play（播放量）、addedAt 都要留着，供打分与排序用
+      items: items
     });
     store.set({ customTabs: list });
     state.activeDashTab = tabId;
@@ -6930,9 +6998,11 @@
   }
 
   /**
-   * 确认添加。规则：来源内容先入库、再入页（标签页的成员一定都在库里）——
+   * 确认添加。规则：**从选择器加的**来源内容先入库、再入页 ——
    * 「源收藏夹」的收藏夹写入 studyFolders；「源收藏夹」里的单个视频写入 customVideos；
    * 其余三个分区的内容本来就在库里，只建立引用。
+   * （标签页里还可能有"没入库"的内联视频，那是「以收藏夹创建标签页」且未勾入库时的形态，
+   *   走的是另一条路 —— 不影响这里的规则。）
    */
   async function commitPicker() {
     if (!pickerState) return;

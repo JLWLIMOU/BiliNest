@@ -672,8 +672,9 @@ main { max-width: 1200px; margin: 0 auto; padding: 24px 22px 64px; }
 .card-meta > span:not(.up) { flex: none; }
 .card-stars { margin-top: 9px; }
 
-/* 收藏夹标签页里"未加入视频库"的视频：星级那行放一句说明（占位 + 提示） */
-.inline-hint { font-size: 11.5px; color: var(--text-2); }
+/* 收藏夹标签页里"未加入视频库"的视频：星级照常给，右边补一句说明 */
+.card-stars:has(.inline-hint) { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.inline-hint { font-size: 11.5px; color: var(--text-2); white-space: nowrap; }
 
 /* 空状态 */
 .empty {
