@@ -1343,6 +1343,8 @@ window.BiliNestPlayer = (function () {
       return Promise.resolve(true);
     },
     setEpisodeNavHandler: function (fn) { state.episodeNavHandler = fn; },
+    /** 设置里改了"默认清晰度"：正在播的话立刻切过去（详见 applyDefaultQuality） */
+    applyDefaultQuality: function () { applyDefaultQuality(); },
     /** 应用层根据选集列表更新上一集/下一集按钮：{ visible, prev, next } */
     updateEpisodeNav: function (nav) {
       var art = state.art;

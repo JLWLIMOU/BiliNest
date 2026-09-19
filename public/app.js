@@ -4923,6 +4923,8 @@
     var qSel = document.getElementById('qualitySelect');
     if (qSel) qSel.addEventListener('change', function (e) {
       store.set({ defaultQuality: e.target.value });
+      // 正在播的话立刻切过去：否则用户改了设置却看不到任何变化，会以为没生效
+      try { window.BiliNestPlayer.applyDefaultQuality(); } catch (err) { /* 播放器还没初始化就算了 */ }
       toast('默认清晰度：' + ({ auto: '自动', high: '高', mid: '中', low: '低' })[e.target.value], 'success');
     });
     document.getElementById('btnClearData').addEventListener('click', onClearData);
