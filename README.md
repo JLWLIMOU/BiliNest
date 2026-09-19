@@ -14,6 +14,10 @@
 
 [下载](#-下载) · [功能](#-功能) · [快速开始](#-快速开始) · [更新](#-更新) · [常见问题](#-常见问题) · [English](#english)
 
+[![下载 Windows 安装包](https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD-Windows%20%E5%AE%89%E8%A3%85%E5%8C%85-2f6fed?style=for-the-badge)](https://github.com/JLWLIMOU/BiliNest/releases/latest/download/BiliNest-Setup.exe) [![下载便携版](https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD-%E4%BE%BF%E6%90%BA%E7%89%88-34c759?style=for-the-badge)](https://github.com/JLWLIMOU/BiliNest/releases/latest/download/BiliNest-portable.zip)
+
+<sub>Windows 10 / 11 · 不需要管理员权限 · 装过一次之后再运行新安装包会自动按"更新"处理</sub>
+
 </div>
 
 ![BiliNest 主页：继续学习 / 视频库 / 自定义标签页](docs/img/dashboard.png)
