@@ -167,6 +167,30 @@
     }, duration);
   }
 
+  /*
+   * 常驻提示条：给"拉收藏夹 / 逐个入库"这种要跑十几秒的操作用。
+   * 复用 .toast 的样式（不另做一套视觉），只是不自动消失，由 closeProgressToast 收掉。
+   */
+  var progressToastEl = null;
+
+  function openProgressToast(msg) {
+    if (!progressToastEl) {
+      progressToastEl = document.createElement('div');
+      progressToastEl.className = 'toast info progress';
+      els.toastRoot.appendChild(progressToastEl);
+      requestAnimationFrame(function () { progressToastEl.classList.add('show'); });
+    }
+    progressToastEl.textContent = msg;
+  }
+
+  function closeProgressToast() {
+    var el = progressToastEl;
+    progressToastEl = null;
+    if (!el) return;
+    el.classList.remove('show');
+    setTimeout(function () { el.remove(); }, 250);
+  }
+
   function creds() {
     return { cookie: store.getCookie() || '', sid: store.get('sid') || '' };
   }
@@ -1500,6 +1524,12 @@
       if (it.kind === 'video') {
         var v = videos.find(function (x) { return String(x.id || x.bvid) === id; });
         if (v) out.videos.push(v);
+      } else if (it.kind === 'bili') {
+        /* 收藏夹标签页里"没入库"的视频：数据直接存在条目里。
+           一旦这个视频后来进了视频库（用户勾了入库、或手动加过），就优先用库里的那份 ——
+           这样星级、重命名、删除这些按库条目工作的功能自动接上，不用两套卡片。 */
+        var inLib = videos.find(function (x) { return String(x.bvid) === String(it.bvid); });
+        out.videos.push(inLib || inlineVideoObject(it));
       } else if (it.kind === 'folder') {
         var f = folders.find(function (x) { return String(x.id) === id; });
         if (f) out.folders.push(f);
@@ -1509,6 +1539,40 @@
       }
     });
     return out;
+  }
+
+  /** 把标签页里的内联视频条目（视频库里没有）变成卡片能用的视频对象 */
+  function inlineVideoObject(it) {
+    return {
+      id: it.id,
+      kind: 'bili',
+      bvid: it.bvid,
+      cid: it.cid || 0,
+      page: it.page || 1,
+      title: it.title || '未命名视频',
+      cover: it.cover || '',
+      upper: it.upper || '',
+      duration: it.duration || 0,
+      pubtime: it.pubtime || 0,
+      inlineOnly: true          // 只在本标签页里存在，不在视频库
+    };
+  }
+
+  /** 库里的媒体条目 → 标签页内联条目（收藏夹建标签页时默认走这条，不入库） */
+  function tabInlineVideo(media) {
+    var bvid = media.bvid || media.bv_id || '';
+    return {
+      kind: 'bili',
+      id: 'bili-' + bvid,
+      bvid: bvid,
+      cid: (media.data && media.data.cid) || media.cid || 0,
+      page: (media.data && media.data.page) || media.page || 1,
+      title: media.title || '未命名视频',
+      cover: (media.cover || '').replace(/^http:\/\//i, 'https://'),
+      upper: (media.upper && media.upper.name) || media.upper || '',
+      duration: media.duration || (media.data && media.data.duration) || 0,
+      pubtime: media.pubtime || media.ctime || 0
+    };
   }
 
   function memberKey(kind, id) {
@@ -1764,11 +1828,16 @@
 
   function folderCard(f, ctx) {
     var cover = (f.cover || '').replace(/^http:\/\//i, 'https://');
-    // ctx.tab 存在时表示卡片渲染在自定义标签页内：✕ 只把成员移出本页，不动库
-    // 收藏夹卡片不参与改名，保持原来的 ✕（从收藏夹库移除 / 从本页移除）
-    var removeBtn = ctx && ctx.tab
-      ? '<button type="button" class="card-remove" data-tab-remove="' + esc(f.id) + '" data-tab-id="' + esc(ctx.tab) + '" data-tab-kind="folder" title="从本标签页移除（不会移出收藏夹库）" aria-label="从本标签页移除">✕</button>'
-      : '<button type="button" class="card-remove" data-card-remove="' + esc(f.id) + '" title="从收藏夹库移除" aria-label="移除">✕</button>';
+    /*
+     * 收藏夹卡片的右上角改成「⋯」菜单（和视频卡片一致）：
+     *   · 以此收藏夹创建标签页（把收藏夹里的视频装进一个 ★ 开头的标签页）
+     *   · 在标签页里 → 从本标签页移除；在收藏夹库里 → 从收藏夹库移除
+     * ctx.tab 存在时表示卡片渲染在自定义标签页内，移除只作用于本页、不动库。
+     */
+    var menuBtn =
+      '<button type="button" class="card-menu" data-folder-menu="' + esc(f.id) + '"' +
+      (ctx && ctx.tab ? ' data-tab-id="' + esc(ctx.tab) + '"' : '') +
+      ' title="更多操作" aria-label="更多操作">' + menuDotsIcon() + '</button>';
     return (
       '<article class="card folder-card' + (cover ? '' : ' card--flat') +
       '" data-folder="' + esc(f.id) + '" title="' + esc(f.title) + '">' +
@@ -1782,7 +1851,7 @@
             starControl(f.id, f.stars || 0, 'folder') +
           '</div>' +
           '<div class="card-foot">' +
-            removeBtn +
+            menuBtn +
           '</div>' +
         '</div>' +
       '</article>'
@@ -2827,7 +2896,25 @@
     if (kind !== 'video') return;
     ctx = ctx || {};
     var entry = findLibraryEntry(kind, id);
-    if (!entry) return;
+    if (!entry) {
+      /* 收藏夹标签页里"没入库"的内联视频：库里查不到，但本页有 ——
+         给它一个能用的菜单（加入视频库 / 从本页移除）。 */
+      if (ctx.tabId && (ctx.tabKind || kind) === 'video') {
+        openActionMenu(anchor, [
+          {
+            label: '加入视频库',
+            note: true,
+            onClick: function () { addInlineToLibrary(ctx.tabId, id); }
+          },
+          {
+            label: '从本标签页移除',
+            danger: true,
+            onClick: function () { removeFromTab(ctx.tabId, 'bili', id); }
+          }
+        ]);
+      }
+      return;
+    }
     var items = [{ label: '重命名', onClick: function () { startCardRename(anchor, kind, id); } }];
     if (entry.customTitle) {
       items.push({
@@ -2876,7 +2963,8 @@
     var cover = (v.cover || v.pic || '').replace(/^http:\/\//i, 'https://');
     var upName = (v.upper && v.upper.name) || v.upper || '';
     var isFolder = !!state.activeFolder && !v.kind;
-    var isAdded = !!(v.kind || v.addedAt);
+    // inlineOnly：收藏夹标签页里"没入库"的视频 —— 它不是库条目，星级这类按库条目工作的东西不给它
+    var isAdded = !!((v.kind || v.addedAt) && !v.inlineOnly);
     var epCount = (v.episodes && v.episodes.length) || v.episodeCount || 0;
     var localSeries = v.kind === 'local' && v.isSeries && epCount > 0;
     // 本地文件现在也能读到时长（添加时用 <video> 探过），有就照常显示。
@@ -2935,7 +3023,9 @@
     }
     var stars = isAdded
       ? '<div class="card-stars">' + starControl(v.bvid || v.id, v.stars || 0, 'video') + '</div>'
-      : '';
+      // 收藏夹标签页里"没入库"的视频：星级那行换成一句说明 —— 既解释为什么没有星级，
+      // 也让同一排卡片的高度和库内卡片保持一致（否则又是不齐）
+      : (v.inlineOnly ? '<div class="card-stars"><span class="inline-hint">未加入视频库</span></div>' : '');
     var cardId = v.id || v.bvid || v.bv_id || '';
     // 视频库的卡片：右下角“×”删除按钮（点击弹确认框；列表/剧集整季删除）
     // 右上角「⋯」：重命名 / 恢复原名 / 删除（自定义标签页里是"从本页移除"）
@@ -2971,7 +3061,8 @@
             '<span class="up">' + esc(upName) + '</span>' +
             '<span>' + esc(timeLabel) + '</span>' +
           '</div>' +
-          (isAdded
+          // 未入库的内联视频也要这一行（放"未加入视频库"占位），否则同排卡片又差一行
+          (isAdded || v.inlineOnly
             ? '<div class="card-foot">' + stars + '</div>'
             : '') +
         '</div>' +
@@ -3216,7 +3307,14 @@
     // 先加载系列/选集信息（失败不阻塞播放），确保进度上下文带正确的 seriesKey：
     // 避免首播、从收藏夹播放系列集时把进度写成独立单条记录（无法归并到整季）
     try {
-      await loadEpisodes(bvid, cid, page);
+      // loadEpisodes 会在"传入的 cid 不在列表里"时兜底选中一集（刚入库、没看过时
+      // 库里那条没存 cid），并把最终选中的那一集回传 —— 播放和高亮必须是同一集。
+      var picked = await loadEpisodes(bvid, cid, page);
+      if (picked) {
+        bvid = picked.bvid;
+        cid = picked.cid;
+        page = picked.page;
+      }
     } catch (e) {
       /* 选集加载失败不阻塞播放 */
     }
@@ -3406,8 +3504,34 @@
     els.episodePanel.hidden = false;
     els.playerLayout.classList.add('has-episodes');
     sizeEpisodePanel();
-    renderEpisodeList(cid, page, true);
+    /*
+     * 当前 cid/page 对不上列表时要**兜底选中一集**，否则右侧选集会出现
+     * "一集都没高亮"（用户报过：视频刚加入视频库、还没看过时，第一次打开就是这种情况
+     * —— 库里那条记录没存 cid，传进来的是空串）。
+     * 优先沿用观看记录里最近看过的某一集，其次列表第一条；并且把结果回传给调用方，
+     * 让"播放的那一集"和"高亮的那一集"是同一集。
+     */
+    var matched = episodes.find(function (ep) {
+      return String(ep.cid) === String(cid) && String(ep.page || 1) === String(page || 1);
+    });
+    var pick = matched || null;
+    if (!pick) {
+      var bestIdx = 0;
+      var bestAt = -1;
+      episodes.forEach(function (ep, i) {
+        var h = findHistory(String(ep.bvid) + ':' + String(ep.cid));
+        if (h && (h.watchedAt || 0) > bestAt) {
+          bestAt = h.watchedAt || 0;
+          bestIdx = i;
+        }
+      });
+      pick = episodes[bestIdx];
+    }
+    var pickPage = pick.page || 1;
+    state.activeEpisode = { bvid: pick.bvid, cid: pick.cid, page: pickPage };
+    renderEpisodeList(pick.cid, pickPage, true);
     updateEpisodeNav();
+    return { bvid: pick.bvid, cid: pick.cid, page: pickPage };
   }
 
   /** 播放指定索引的剧集（上一集 / 下一集 / 点击选集共用） */
@@ -5679,18 +5803,34 @@
       if (entry) playHistoryEntry(entry);
       return;
     }
+    // 收藏夹卡片右上角「⋯」（创建标签页 / 从本页或收藏夹库移除）
+    var fMenuBtn = e.target.closest('[data-folder-menu]');
+    if (fMenuBtn) {
+      e.stopPropagation();
+      openFolderMenu(fMenuBtn, fMenuBtn.dataset.folderMenu,
+        fMenuBtn.dataset.tabId ? { tabId: fMenuBtn.dataset.tabId } : null);
+      return;
+    }
     // 收藏夹库卡片
     var fcard = e.target.closest('[data-folder]');
     if (fcard) {
       openFolder(fcard.dataset.folder);
       return;
     }
-   // 视频库卡片
+    // 视频库卡片
     var vcard = e.target.closest('.grid .card[data-id]');
     if (vcard) {
       var v = (store.get('customVideos') || []).find(function (x) {
         return String(x.id || x.bvid || x.bv_id) === String(vcard.dataset.id);
       });
+      // 收藏夹标签页里没入库的视频：库里查不到，但本页的条目里有它
+      if (!v) {
+        var tb = findCustomTab(state.activeDashTab);
+        var it = tb && (tb.items || []).find(function (x) {
+          return memberKey(x.kind, x.id) === memberKey('bili', vcard.dataset.id);
+        });
+        if (it) v = inlineVideoObject(it);
+      }
       if (v) playVideo(v, v.kind === 'local' ? 'local' : 'mine');
       return;
     }
@@ -6085,22 +6225,41 @@
     syncTabIndicator();
   }
 
-  /** 删除标签页（只删容器，库内容不动） */
+  /**
+   * 删除标签页。
+   * 默认只删这个容器（内容留在各自的库里）；勾选「同时删除视频库里的这些视频」
+   * 才会把"既在本页、又在视频库"的视频一并删掉 —— 只在本页、没入库的不受影响。
+   */
   function deleteCustomTab(tabId) {
     var tab = findCustomTab(tabId);
     if (!tab) return;
     var n = (tab.items || []).length;
+    var libVideos = tabLibraryVideos(tab);
+    var extra = libVideos.length
+      ? '<br><label class="check"><input type="checkbox" id="alsoDeleteTabVideos"> ' +
+        '同时删除视频库里的这些视频（' + libVideos.length + ' 个；只在本页、没入库的视频不受影响）</label>'
+      : '<br><span class="muted small">这个标签页里没有已入库的视频，删掉它不会动视频库。</span>';
     confirmAction(
-      '删除标签页「' + esc(tab.name) + '」？<br><span class="muted small">只删除这个标签页；其中 ' + n + ' 项内容仍保留在各自的栏目里。</span>',
-      function () {
+      '删除标签页「' + esc(tab.name) + '」？<br><span class="muted small">其中 ' + n + ' 项内容默认仍保留在各自的栏目里。</span>' + extra,
+      function (alsoDeleteVideos) {
         store.set({ customTabs: customTabs().filter(function (t) { return String(t.id) !== String(tabId); }) });
         delete state.tabQuery[tabId];
         if (String(state.activeDashTab) === String(tabId)) {
           state.activeDashTab = 'continue';
           store.set({ activeDashTab: 'continue' });
         }
+        var removed = 0;
+        if (alsoDeleteVideos) {
+          libVideos.forEach(function (v) {
+            if (deleteFromLibrary('video', v.id)) removed++;
+          });
+        }
         renderDashboard();
-        toast('已删除标签页', 'success');
+        toast(removed ? '已删除标签页，并从视频库删除 ' + removed + ' 个视频' : '已删除标签页', 'success');
+      },
+      function () {
+        var cb = document.getElementById('alsoDeleteTabVideos');
+        return !!(cb && cb.checked);
       }
     );
   }
@@ -6155,6 +6314,121 @@
       { label: '重命名', onClick: function () { startTabRename(tabId); } },
       { label: '删除标签页', danger: true, onClick: function () { deleteCustomTab(tabId); } }
     ]);
+  }
+
+  /* ---------------- 以收藏夹创建标签页 ---------------- */
+
+  /** 收藏夹卡片右上角「⋯」的菜单 */
+  function openFolderMenu(anchor, folderId, ctx) {
+    ctx = ctx || {};
+    var items = [{
+      label: '以此收藏夹创建标签页',
+      note: true,
+      onClick: function () { askCreateTabFromFolder(folderId); }
+    }];
+    if (ctx.tabId) {
+      items.push({
+        label: '从本标签页移除',
+        note: true,
+        onClick: function () { removeFromTab(ctx.tabId, 'folder', folderId); }
+      });
+    } else {
+      items.push({
+        label: '从收藏夹库移除',
+        danger: true,
+        onClick: function () { removeStudyFolder(folderId); }
+      });
+    }
+    openActionMenu(anchor, items);
+  }
+
+  /** 确认框：是否同时把收藏夹内的视频加入视频库（默认不勾） */
+  function askCreateTabFromFolder(folderId) {
+    var folder = findLibraryItem('folder', folderId) ||
+      (state.folders || []).find(function (f) { return String(f.id) === String(folderId); }) || {};
+    var name = folder.title || folder.name || '收藏夹';
+    confirmAction(
+      '以「' + esc(name) + '」创建新标签页？<br>' +
+      '<span class="muted small">会把收藏夹里的视频装进一个以「★ ' + esc(name) + '」命名的新标签页；' +
+      '之后这个收藏夹有更新，标签页里的内容不会自动跟着变。</span><br>' +
+      '<label class="check"><input type="checkbox" id="alsoAddToLibrary"> ' +
+      '同时把收藏夹内的视频加入视频库（默认不勾选）</label>',
+      function (also) { createTabFromFolder(folderId, also); },
+      function () {
+        var cb = document.getElementById('alsoAddToLibrary');
+        return !!(cb && cb.checked);
+      }
+    );
+  }
+
+  /** 拉取收藏夹里的全部视频（分页拉完；上限 20 页，避免超大收藏夹把界面卡住） */
+  async function fetchAllFolderVideos(folderId) {
+    var out = [];
+    for (var pn = 1; pn <= 20; pn++) {
+      var page = await api.folderVideos(folderId, pn, creds());
+      (page.medias || []).forEach(function (m) {
+        if (!m.type || m.type === 2) out.push(m);
+      });
+      if (!page.hasMore) break;
+    }
+    return out;
+  }
+
+  /**
+   * 以收藏夹创建标签页：
+   *   - 默认**不入库**：条目里直接带视频信息（kind:'bili'），标签页自给自足；
+   *   - 勾选"同时加入视频库"才逐个入库（会走一次视频信息接口，收藏夹大时要等一会儿）。
+   * 名称统一带 ★ 前缀，表明它是从收藏夹建出来的。
+   */
+  async function createTabFromFolder(folderId, alsoAddToLibrary) {
+    var folder = findLibraryItem('folder', folderId) ||
+      (state.folders || []).find(function (f) { return String(f.id) === String(folderId); }) || {};
+    var name = folder.title || folder.name || '收藏夹';
+    openProgressToast(alsoAddToLibrary ? '正在读取收藏夹并加入视频库…' : '正在读取收藏夹…');
+    var medias;
+    try {
+      medias = await fetchAllFolderVideos(folderId);
+    } catch (e) {
+      closeProgressToast();
+      toast('读取收藏夹失败：' + (e.message || '未知错误'), 'error');
+      return;
+    }
+    if (!medias.length) {
+      closeProgressToast();
+      toast('这个收藏夹里没有可添加的视频', 'error');
+      return;
+    }
+    var items = medias.map(tabInlineVideo).filter(function (it) { return it.bvid; })
+      .map(function (it) { return Object.assign({}, it); });
+    if (alsoAddToLibrary) {
+      var added = 0;
+      for (var i = 0; i < medias.length; i++) {
+        var m = medias[i];
+        var bvid = m.bvid || m.bv_id;
+        if (!bvid) continue;
+        var id = await ensureVideoInLibrary(bvid, m);
+        if (id) added++;
+        openProgressToast('正在加入视频库 ' + (i + 1) + ' / ' + medias.length + '…');
+      }
+      items = items.filter(function (it) { return !!it.bvid; });
+    }
+    var list = customTabs();
+    var tabId = 'tab-' + Date.now();
+    list.push({
+      id: tabId,
+      name: '★ ' + name,
+      createdAt: Date.now(),
+      fromFolder: String(folderId),
+      items: items.map(function (it) { return { kind: 'bili', id: it.id, bvid: it.bvid, cid: it.cid, page: it.page, title: it.title, cover: it.cover, upper: it.upper, duration: it.duration, pubtime: it.pubtime }; })
+    });
+    store.set({ customTabs: list });
+    state.activeDashTab = tabId;
+    store.set({ activeDashTab: tabId });
+    closeProgressToast();
+    await loadDashboard();
+    toast(alsoAddToLibrary
+      ? '已创建「★ ' + name + '」，并加入视频库'
+      : '已创建「★ ' + name + '」（未加入视频库）', 'success');
   }
 
   /**
@@ -6237,6 +6511,53 @@
     if (changed) store.set({ customTabs: list });
   }
 
+  /** 把标签页里的内联视频（未入库）加进视频库：加完盒子里的引用自动指向库条目 */
+  async function addInlineToLibrary(tabId, id) {
+    var tab = findCustomTab(tabId);
+    if (!tab) return;
+    var it = (tab.items || []).find(function (x) { return memberKey(x.kind, x.id) === memberKey('bili', id); });
+    if (!it || !it.bvid) return;
+    openProgressToast('正在加入视频库…');
+    var media = {
+      bvid: it.bvid,
+      title: it.title,
+      cover: it.cover,
+      upper: { name: it.upper || '' },
+      duration: it.duration || 0,
+      pubtime: it.pubtime || 0,
+      cid: it.cid || 0,
+      page: it.page || 1,
+      data: { cid: it.cid || 0, page: it.page || 1, duration: it.duration || 0 }
+    };
+    var libId = await ensureVideoInLibrary(it.bvid, media);
+    closeProgressToast();
+    if (!libId) {
+      toast('加入视频库失败', 'error');
+      return;
+    }
+    if (state.currentView === 'dashboard') renderDashboard();
+    toast('已加入视频库', 'success');
+  }
+
+  /**
+   * 标签页里"既在本页、又在视频库"的视频 —— 删除标签页时勾选"同时删除视频库视频"要删的就是这些。
+   * 只在本页、没入库的视频不参与（按需求：无需任何操作）。
+   */
+  function tabLibraryVideos(tab) {
+    var lib = store.get('customVideos') || [];
+    var out = [];
+    (tab.items || []).forEach(function (it) {
+      var v = null;
+      if (it.kind === 'video') {
+        v = lib.find(function (x) { return String(x.id || x.bvid) === String(it.id); });
+      } else if (it.kind === 'bili') {
+        v = lib.find(function (x) { return String(x.bvid) === String(it.bvid); });
+      }
+      if (v && !out.some(function (x) { return String(x.id) === String(v.id); })) out.push(v);
+    });
+    return out;
+  }
+
   /** 直接从库中删除（不弹确认，确认由调用方负责）；返回是否真的删掉了 */
   function deleteFromLibrary(kind, id) {
     if (kind === 'video') {
@@ -6272,12 +6593,20 @@
   function removeFromTab(tabId, kind, id) {
     var tab = findCustomTab(tabId);
     if (!tab) return;
-    var name = libraryItemName(kind, id) || '该项';
-    var libName = { video: '视频库', folder: '收藏夹库', up: '学习 UP主' }[kind] || '库';
+    // 'bili' = 标签页里的内联视频（可能还没入库）：库里有同名视频时才给"同时删除"勾选项
+    var libKind = kind === 'bili' ? 'video' : kind;
+    var entry = findLibraryItem(libKind, kind === 'bili' ? id : id);
+    var inlineIt = kind === 'bili'
+      ? (tab.items || []).find(function (x) { return memberKey(x.kind, x.id) === memberKey('bili', id); })
+      : null;
+    var name = (entry && (entry.title || entry.name)) || (inlineIt && inlineIt.title) || libraryItemName(libKind, id) || '该项';
+    var libName = { video: '视频库', folder: '收藏夹库', up: '学习 UP主' }[libKind] || '库';
     confirmAction(
       '从「' + esc(tab.name) + '」标签页移除「' + esc(name) + '」？' +
-        '<br><label class="check"><input type="checkbox" id="alsoDeleteFromLib"> ' +
-        '同时从库中删除（从「' + libName + '」里一并删掉，其它标签页里的它也会消失）</label>',
+        (entry
+          ? '<br><label class="check"><input type="checkbox" id="alsoDeleteFromLib"> ' +
+            '同时从库中删除（从「' + libName + '」里一并删掉，其它标签页里的它也会消失）</label>'
+          : '<br><span class="muted small">这个视频不在视频库里，只从本标签页移除就好。</span>'),
       function (alsoDelete) {
         var list = customTabs();
         var t = list.find(function (x) { return String(x.id) === String(tabId); });
@@ -6286,7 +6615,7 @@
           t.items = (t.items || []).filter(function (it) { return memberKey(it.kind, it.id) !== k; });
           store.set({ customTabs: list });
         }
-        var deleted = alsoDelete ? deleteFromLibrary(kind, id) : false;
+        var deleted = (alsoDelete && entry) ? deleteFromLibrary(libKind, id) : false;
         if (state.currentView === 'dashboard') renderDashboard();
         toast(deleted ? '已从标签页和库中删除' : '已从本标签页移除');
       },

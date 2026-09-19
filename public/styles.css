@@ -672,6 +672,9 @@ main { max-width: 1200px; margin: 0 auto; padding: 24px 22px 64px; }
 .card-meta > span:not(.up) { flex: none; }
 .card-stars { margin-top: 9px; }
 
+/* 收藏夹标签页里"未加入视频库"的视频：星级那行放一句说明（占位 + 提示） */
+.inline-hint { font-size: 11.5px; color: var(--text-2); }
+
 /* 空状态 */
 .empty {
   grid-column: 1 / -1;
