@@ -7,8 +7,8 @@
 
 1. 把 `[Unreleased]` 改名为 `[x.y.z] - 日期`（按语义化版本决定升几位）；
 2. 同步更新 `package.json` 的 `version`；
-3. 每个条目**本身就是面向使用者的描述**，可直接整理成 GitHub Release 的「新增 / 修复 / 变更」列表；
-4. 条目下方的「涉及文件 / 技术细节」供核对用，**不要粘贴进 GitHub Release**；
+3. GitHub Release 描述按 [`docs/release-notes.md`](docs/release-notes.md) 的结构写：**一句话结论 → 🏅 本次重点 → ✨ 新增 / 🩹 修复 → ⬇️ 下载（含 SHA-256）→ ⬆️ 升级 → 完整改动 compare 链接**。本文件里的条目本身就是面向使用者的描述，压到"一条一件事、最多两行"即可，超出两行的解释折进 `<details>`；
+4. 条目下方的「涉及文件 / 技术细节」供核对用，**不要粘贴进 GitHub Release**；结尾的 compare 链接用 `git log --oneline v上一版..v本版` 生成；
 5. 发布前建议快速验证：`npm start`（或双击 `launcher.vbs`）→ 登录 → 播放一个收藏夹视频（弹幕/字幕/画质）→ 设置里确认版本号；
 6. 若涉及配置/存储键/端口文件（见各条「技术细节」），在 Release 描述里提示旧数据会自动迁移，无需用户手动操作。
 7. **上传资产时，除了带版本号的两个文件，再传一份不带版本号的副本**（`BiliNest-Setup.exe` / `BiliNest-portable.zip`）——

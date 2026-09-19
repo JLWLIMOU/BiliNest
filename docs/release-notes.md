@@ -1,0 +1,111 @@
+# 发布说明怎么写
+
+面向**使用者的 GitHub Release 描述**。`CHANGELOG.md` 是给发布者核对改动用的工作日志，这份文档说明怎么把它写成用户读得下去、看得明白的发布说明。
+
+## 参考了谁、采纳了什么
+
+| 项目 | 它的做法 | 我们采纳的部分 |
+| :--- | :--- | :--- |
+| [localsend/localsend](https://github.com/localsend/localsend/releases) | 开头 1–2 句"这版修了什么"，下面平铺 `feat:` / `fix(scope):` 短条目 | **开头一句话结论** + 每条一行 |
+| [sharkdp/bat](https://github.com/sharkdp/bat/releases) | `## Features` / `## Bugfixes` / `## Other` 固定分组，条目带 issue / PR 引用 | 固定的分组顺序与命名 |
+| [keepassxreboot/keepassxc](https://github.com/keepassxreboot/keepassxc/releases) | `### Changes` / `### Fixes`，一条一句话，PR 号跟在句尾 | 一条只说一件事，不做长铺垫 |
+| [the1812/Bilibili-Evolved](https://github.com/the1812/Bilibili-Evolved/releases)（同类项目、中文） | emoji 分组（✨新增 / 🐛修复 / ☕开发者相关）；条目长就整段塞进 `<details>` 默认折叠 | emoji 分组 + **长解释折叠** |
+| [microsoft/PowerToys](https://github.com/microsoft/PowerToys/releases) | Highlights 段落把最重要的事先讲；校验值用表格 | **重点先行** + 校验值表格化 |
+| [BewlyBewly](https://github.com/BewlyBewly/BewlyBewly/releases)、bat | 结尾给 `View changes on GitHub` / compare 链接 | 结尾的**完整改动链接** |
+
+被否掉的做法：BiliRoaming 式的"下载地址 + 一串短语"（没有结论也没有影响说明）；纯自动生成的 commit 列表（我们直接推 main，没有 PR，生成出来只有一行 compare 链接）。
+
+## 结构（固定顺序，没有内容的小节整段省略）
+
+1. **一句话结论** —— 这版最要紧的一件事是什么、谁会受影响。不要"本次更新内容如下"这种空话。
+2. **⚠️ 紧急提示**（只在需要时）—— 谁必须手动更新、不做会怎样。
+3. **🏅 本次重点** —— 2–4 条，按"对用户的影响"排，不是按改动量排。
+4. **✨ 新增 / 🩹 修复 / ⚡ 优化 / 🧹 其他** —— 有就写，没有就省略整节。
+5. **⬇️ 下载** —— 表格：文件、适合谁、说明；校验值折叠或放表格。
+6. **⬆️ 升级** —— 应用内更新怎么走、哪些旧版本要手动装、数据会不会动。
+7. **完整改动** —— `v上一版...v本版` 的 compare 链接（提交列表可选折叠）。
+
+## 写法规则
+
+- **一条 = 一个用户能感知的变化。** 先写现象与影响（"刚打开的视频会卡在某个进度"），再写现在怎样（"现在会正常起播"）。根因、实现细节放子条目或 `<details>`。
+- **一条最多两行**，超过就折叠。发布说明是索引，不是文档。
+- 不写"默认状态""不受影响""无需任何操作"这类免责铺垫，但**数据安全**必须讲清楚（更新不动数据、备份在哪）。
+- 同一件事只说一次：合并同类条目，别在同一句里重复"修复了""现在"。
+- 严重问题放最前，标 ⚠️，并写清"谁受影响 + 要做什么"。
+- 文件名、体积、SHA-256 必须和实际上传的资产逐字一致；带版本号的那个是主推，不带版本号的副本只说一句用途（README 直链）。
+- 不把 `CHANGELOG.md` 里的「涉及文件 / 技术细节」搬进来。
+- 措辞标准与 `CHANGELOG.md` 一致：确认框式句子不进发布说明；引用超长标题时截断。
+
+## 模板
+
+```markdown
+<一句话结论：这版最重要的一件事 + 谁会受影响>
+
+<details>
+<summary>⚠️ 1.4.4 及更早版本请先手动更新一次（更新通道 1.4.5 才修好）</summary>
+
+<谁会受影响、为什么、要做什么>
+
+</details>
+
+## 🏅 本次重点
+
+- **<重点 1>**：<一句话，用户视角>
+- **<重点 2>**：<一句话>
+
+## ✨ 新增
+
+- **<功能名>**：<做了什么，用户怎么用>。
+  - <需要展开的细节>
+
+## 🩹 修复
+
+- **<现象>**：<原来会怎样 → 现在怎样>。
+  <details>
+  <summary>根因</summary>
+
+  <技术解释，给想深究的人>
+
+  </details>
+
+## ⬇️ 下载
+
+| 下载 | 适合谁 | 说明 |
+| :--- | :--- | :--- |
+| `BiliNest-x.y.z-Setup.exe` | 大多数人 | 双击安装，自动建桌面快捷方式；再运行新安装包会按"更新"处理 |
+| `BiliNest-x.y.z-portable.zip` | 不想安装 / 安装包被杀软误报 | 解压即用 |
+
+<details>
+<summary>SHA-256（可自行核对）</summary>
+
+```
+<hash>  BiliNest-x.y.z-Setup.exe
+<hash>  BiliNest-x.y.z-portable.zip
+```
+
+</details>
+
+## ⬆️ 升级
+
+- **1.4.5 及以后**：`设置 → 关于 → 更新` 点一下即可。
+- **1.4.4 及更早**：在本页下载安装包手动更新一次。
+- **源码版**：`git pull` 后重启服务。
+- 数据不受影响：登录态、视频库、收藏夹库、标签页、观看记录都在本机（`%APPDATA%\BiliNest\`）。
+
+**完整改动**：[v上一版...v本版](https://github.com/JLWLIMOU/BiliNest/compare/v上一版...v本版)（N 个提交）
+
+<details>
+<summary>逐条提交</summary>
+
+- <commit 标题>
+
+</details>
+```
+
+## 生成"完整改动"那一节
+
+```bash
+git log --oneline v1.4.7..v1.4.8
+```
+
+提交标题已经是"改了什么"的中文句子，直接贴进折叠块即可。上面那行 compare 链接的地址就按 `v上一版...v本版` 拼。
