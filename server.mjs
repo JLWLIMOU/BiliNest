@@ -309,7 +309,33 @@ function extractUrgent(body) {
   const text = String(body || '');
   const cut = text.search(/^##\s/m);
   const head = (cut >= 0 ? text.slice(0, cut) : text).trim();
-  return head.includes('⚠') ? head : '';
+  /* 正文最上面那一两句结论是给 GitHub 页面看的，紧急提醒从 ⚠ 开始取 */
+  const at = head.indexOf('⚠');
+  return at >= 0 ? head.slice(at).trim() : '';
+}
+
+/**
+ * 应用内「这次更新了什么」是纯文本（直接 textContent），所以要把只给 GitHub 页面
+ * 看的排版去掉：下载 / 升级两节整段不要，<details> 折叠块整块不要（根因、逐条提交
+ * 这些深究内容），markdown 标记也去掉。⚠ 那段已经单独提出来摆在提示框里，这里去掉
+ * 免得重复。
+ */
+function notesForApp(body) {
+  let text = String(body || '');
+  const stop = text.search(/^##[^\n]*(下载|升级)/m);
+  if (stop >= 0) text = text.slice(0, stop);
+  text = text.replace(/<details[\s\S]*?<\/details>/gi, '');
+  return text
+    .split('\n')
+    .filter((line) => !/^\s*>?\s*⚠/.test(line))
+    .join('\n')
+    .replace(/^\s*>\s?/gm, '')
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/^#{1,6}\s*/gm, '')
+    .replace(/[ \t]+$/gm, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 async function checkUpdate(force) {
@@ -347,7 +373,7 @@ async function checkUpdate(force) {
     latest,
     hasUpdate: compareVersion(latest, APP_VERSION) > 0,
     publishedAt: rel.published_at || rel.created_at || '',
-    notes: rel.body || '',
+    notes: notesForApp(rel.body),
     urgent: extractUrgent(rel.body),
     htmlUrl: rel.html_url || `https://github.com/${UPDATE_REPO}/releases`,
     assets,
