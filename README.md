@@ -4,7 +4,7 @@
 
 **无干扰的 B 站学习播放器：只留你要学的内容，其它全删掉。**
 
-本地优先 · 零依赖（纯 Node 内置模块）· Windows / macOS / Linux · 永不跳转官网
+本地优先 · 零依赖（纯 Node 内置模块）· Windows / macOS / Linux · 没有推荐流，也没有广告
 
 [![最新版本](https://img.shields.io/github/v/release/JLWLIMOU/BiliNest?label=release&color=2f6fed)](https://github.com/JLWLIMOU/BiliNest/releases/latest)
 [![许可证](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
@@ -12,7 +12,7 @@
 [![零依赖](https://img.shields.io/badge/dependencies-zero-success)](#-技术架构)
 [![平台](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](#-快速开始)
 
-[下载](#-下载) · [功能](#-功能) · [快速开始](#-快速开始) · [更新](#-更新) · [常见问题](#-常见问题) · [English](#english)
+[下载](#-下载) · [它解决什么](#-它解决什么问题) · [快速开始](#-快速开始) · [更新](#-更新) · [常见问题](#-常见问题) · [English](#english)
 
 [![下载 Windows 安装包](https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD-Windows%20%E5%AE%89%E8%A3%85%E5%8C%85-2f6fed?style=for-the-badge)](https://github.com/JLWLIMOU/BiliNest/releases/latest/download/BiliNest-Setup.exe) [![下载便携版](https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD-%E4%BE%BF%E6%90%BA%E7%89%88-34c759?style=for-the-badge)](https://github.com/JLWLIMOU/BiliNest/releases/latest/download/BiliNest-portable.zip)
 
@@ -41,40 +41,41 @@
 
 ---
 
-## ✨ 功能
+## ✨ 它解决什么问题
 
-### 内容：只看你挑的东西
+下面每一组，都是"想用 B 站学点东西"时最容易卡住的那一步。
 
-- **收藏夹锁定**：从自己创建的收藏夹里选一个作为内容源，没有任何推荐、首页、动态、评论。
-- **收藏夹库 / 视频库**：整个收藏夹可以一键入库，收藏夹里的单个视频也可以单独加进视频库；单个视频还支持粘贴链接 / BV 号 / av 号添加。
-- **本地视频与文件夹**：选文件就是单个视频，选文件夹会**自动解析成一个列表**（按文件名排序、可当合集选集播）。只收浏览器原生能播的格式（mp4 / m4v / mov / webm / mkv）。
-- **学习 UP主**：输入 UID 收藏 UP 主（头像 / 昵称 / 简介 / 粉丝数 / 星级），点卡片跳他的 B 站主页。
-- **自定义标签页**：标签栏末尾「＋」新建；双击改名、按住拖动排序；标签过多时横向滚动，系统标签固定在左侧。内容可从源收藏夹 / 视频库 / 收藏夹库 / 学习 UP主 里挑，也可以直接粘贴链接。
-  - **以收藏夹创建标签页**：收藏夹卡片「⋯」→「以此收藏夹创建标签页」，会生成一个以「★ 收藏夹名」命名的标签页；创建时可选是否同时把视频加入视频库（默认不勾）。这类标签页会**镜像源收藏夹**：源里新增自动补进来、源里删掉跟着移除，**你自己加进去的内容不受影响**。
-  - 删除标签页时可勾选「同时删除视频库里的这些视频」（默认不勾）。
+### 😵‍💫 打开 B 站想看收藏的课，先被推荐流抓走半小时
 
-### 播放：画质 / 弹幕 / 字幕都在页内
+这个页面里**没有首页、没有推荐流、没有动态、没有热榜、没有评论、没有点赞投币，也没有广告位** —— 打开就是你自己挑的那一个收藏夹。
 
-- **纯页面内播放**：用应用内登录态取官方 DASH 自适应码率流，**清晰度切换由 dash.js 完成，永不跳转 B 站官网**；播放地址取不到时自动降级为官方嵌入播放器。
-- **播放倍速**：控制条直接选档（0.5× – 2.0×），不是 1.0× 时按钮亮成蓝色胶囊；选择会被记住，换集、切清晰度、下次打开都还是这个速度。
-- **默认清晰度 / 弹幕 / 字幕**：`设置 → 播放` 里可以定默认清晰度（高 / 中 / 低 / 自动）、默认是否显示弹幕、默认是否开启字幕，以及字幕字号与位置 —— 和播放页控制条是同一份设置，改完立刻生效。
-- **弹幕与 CC 字幕**：弹幕用官方网页端同款分段接口（完整度高于旧版接口），Canvas 渲染，**只显示不能发送**；字幕转 WebVTT，用手写胶囊样式（和弹幕一眼区分）。
-- **快捷键**：空格播放 / 暂停、←→ 快退快进、↑↓ 音量、F 全屏、滚轮调音量；进播放页即可用，不必先点一下播放器。
-- **选集与连播**：多 P / 合集在右侧有选集面板，播完自动连播下一集。
+- **收藏夹锁定**：把某个自己创建的收藏夹设为内容源，进去之后只有它的内容。
+- **视频库 / 收藏夹库**：整个收藏夹可以一键入库，夹子里的单个视频也能单独加进视频库；单个视频还支持粘贴链接 / BV 号 / av 号添加。
+- **本地视频与文件夹**：选文件是单个视频，选文件夹会**自动解析成一个列表**（按文件名排序，可当合集选集播）。本地文件和 B 站视频用同一个库、同一个播放器。只收浏览器原生能播的格式（mp4 / m4v / mov / webm / mkv）。
+- **学习 UP主**：输入 UID 把 UP 主收藏成"追更入口"（头像 / 昵称 / 简介 / 粉丝数 / 星级），点卡片直接去他的主页。
 
-### 整理：卡片 + 星级 + 排序
+### 🔁 一集看完了，下一集得自己回去找；看着看着还被弹去官网
 
-- **星级评分**：视频和收藏夹都能打 1–5 星（5 星最优先）；自定义标签页里"还没入库"的视频也能打分（分数记在标签页里）。
-- **排序**：视频库、收藏夹库、自定义标签页都支持排序（添加时间 / 发布时间 / 星级 / 播放量）。
-- **搜索**：大标题行里实时筛选当前栏目；内容源里还能搜收藏夹**里面的视频**。
-- **卡片设计**：封面、时长、UP 主、进度一目了然；没有封面的条目会按名字生成同色系海报；视频卡片右上角「⋯」里可以重命名 / 删除（只改本地显示）。
+- **页内播放**：用你自己的登录态取官方自适应码率流，选集面板就在右侧，**播完自动连播下一集**；清晰度切换、弹幕、字幕都在同一个页面里完成，中途不会跳走。播放地址取不到时会自动降级成官方嵌入播放器，而不是给你一个死链。
+- **倍速**：控制条直接选档（0.5× – 2.0×），不是 1.0× 时按钮亮成蓝色胶囊；选择会被记住 —— 换集、切清晰度、下次打开还是这个速度。
+- **默认值一次设好**：`设置 → 播放` 里定默认清晰度（高 / 中 / 低 / 自动）、默认是否显示弹幕、默认是否开启字幕，以及字幕字号与位置 —— 和播放页控制条是同一份设置，改完立刻生效。
+- **弹幕与 CC 字幕**：弹幕用网页端同款的分段接口（比旧接口完整），Canvas 渲染，**只显示不能发送**；字幕是另一套胶囊样式，和弹幕一眼分得开。
+- **快捷键**：空格播放 / 暂停、←→ 快退快进、↑↓ 音量、F 全屏、滚轮调音量；进播放页就能用，不必先点一下播放器。
 
-### 数据：都在你自己的机器上
+### 🗂️ 收藏夹越攒越乱，想找一集要翻半天
 
-- **零依赖**：本地服务只用 Node 内置模块，前端是手写 HTML/CSS/JS，**不需要 npm install**。
-- **隐私优先**：凭据只存在你自己的浏览器与本机文件里，请求只发给本机代理，不经过任何第三方服务器。
-- **自动备份**：状态自动备份到 `%APPDATA%\BiliNest\state-backup.json`（macOS / Linux 为 `~/.config/BiliNest/`），换浏览器、换端口、清过缓存后打开会**自动取回**。
-- **学习记录**：累计时长、连续天数、打卡热力图、每日/每周/每月趋势、最常看的内容；`设置 → 播放` 之外的东西都收在「继续学习」旁边的入口里。
+- **卡片**：封面、时长、UP 主、进度、星级一眼看完；没有封面的条目（比如本地文件）会按名字生成一张同色系海报。
+- **星级 + 排序 + 搜索**：视频和收藏夹都能打 1–5 星（5 星优先，**还没入库的视频也能打分**）；按添加时间 / 发布时间 / 星级 / 播放量排序；标题行里实时筛选，内容源里还能搜到收藏夹**里面的视频**。
+- **自定义标签页**：按主题分组（"线性代数""英语听力"…）。标签栏末尾「＋」新建，双击改名、按住拖动排序，标签多了横向滚动（系统标签固定在左侧）；内容可以从源收藏夹 / 视频库 / 收藏夹库 / 学习 UP主里挑，也可以直接粘贴链接。
+- **以收藏夹创建标签页**：收藏夹卡片「⋯」→「以此收藏夹创建标签页」，生成一个「★ 收藏夹名」标签页。它会**跟着源收藏夹走**：源里新增自动补进来、源里删掉跟着移除，而**你自己加进去的内容不受影响**。
+- **删除时自己决定动多少**：删标签页、删标签页里的卡片，都可以顺手把视频库里的对应视频一起删掉（不勾就只删这一处）。
+
+### 💾 换台电脑、清一次浏览器，攒的数据就没了
+
+- **数据就在你自己的机器上**：本地服务只监听 `127.0.0.1`，凭据只存在你的浏览器和本机文件里，请求不经过任何第三方服务器。
+- **自动备份**：状态会自动备份到 `%APPDATA%\BiliNest\state-backup.json`（macOS / Linux 为 `~/.config/BiliNest/`）；换浏览器、换端口、清过缓存后再打开会**自动取回**，两边都有数据时以较新的那份为准。
+- **学习记录**：累计看了多久、连续多少天、打卡热力图、每日 / 每周 / 每月趋势、最常看的内容 —— 入口挂在「继续学习」旁边，不占主界面。
+- **不用维护依赖**：本地服务只用 Node 内置模块，前端是手写 HTML/CSS/JS，**不需要 npm install**，也没有隔三差五要升级的依赖树。
 
 ---
 
@@ -344,7 +345,7 @@ Codex 是开发工具，**不是本项目的贡献者、维护者或责任人**�
 
 ## English
 
-**BiliNest** is a distraction-free **Bilibili** study player. It shows only the content you choose — a specific favourite folder, videos you add by link, or local files — with **no home feed, no recommendations, no comments, no like/coin buttons, no ads**. Playback, danmaku and CC subtitles all happen inside the page; quality switching never leaves the app.
+**BiliNest** is a distraction-free **Bilibili** study player. It shows only the content you choose — a specific favourite folder, videos you add by link, or local files — with **no home feed, no recommendations, no comments, no like/coin buttons, no ads**. Playback, danmaku and CC subtitles all happen inside the page, and the next episode is already queued up, so nothing pulls you away mid-session.
 
 - **Local-first & private** — a tiny zero-dependency Node proxy on `127.0.0.1` forwards only whitelisted read-only Bilibili APIs. Credentials stay in your own browser and never touch a third-party server.
 - **No dependencies** — pure Node 18+ built-ins plus a hand-written frontend: no `npm install` needed.
