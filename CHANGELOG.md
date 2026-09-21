@@ -23,9 +23,9 @@
 
 - **播放页多了分享链接（默认折叠）**：UP 名字后面是「› 分享链接」和一个「复制」按钮 —— 点「复制」一步就把当前这一集的 B 站地址送进剪贴板（多 P 自动带 `?p=`），**不必先展开**；想核对链接本身再点「分享链接」展开。只复制，不弹任何官方分享面板。本地视频没有这一组。
   - 不走 b23.tv 短链：那要调 `x/share/click` 接口（等于替用户在账号上记一次"分享"，返回的还是不透明短码），而下载工具认的是带 BV 号的完整地址（实测该接口参数不全直接返回 -400）。
-  - 提示条只说一句话：「已复制分享链接，可粘进 BBDown / yt-dlp 等下载工具」。
+  - 复制按钮**只放图标不放字**（两个叠放的方框，Apple doc.on.doc 那一类，大家都认识），鼠标悬停才用 tooltip 说明；点下按钮本身就有按压反馈，复制成功后图标原地换成对勾停 1.2 秒 —— 反馈落在被点的东西上，不用去别处找。提示条另说一句「已复制分享链接，可粘进 BBDown / yt-dlp 等下载工具」。
   - 涉及文件：`public/index.html`（#playerShare / #btnShareToggle / #btnShareCopy / #shareUrlBox）、`public/styles.css`（.player-share / .share-url-box）、`public/app.js`（shareUrlOf / renderPlayerShare / setShareExpanded / copyPlayerShare / copyText）。
-  - 验证：折叠态点「复制」剪贴板即为正确地址（110 分 P 视频切到第 3、第 5 集分别是 `?p=3`、`?p=5`）；展开后链接与剪贴板一致，**点链接文字不会复制**（剪贴板保持原样）；收起、换集后回到折叠态；播放页正文搜不到 `bilibili.com/video`；全程无控制台报错。
+  - 验证：折叠态点复制图标，剪贴板即为正确地址（110 分 P 视频切到第 3、第 5 集分别是 `?p=3`、`?p=5`）；按钮文字为空、`aria-label` 与 tooltip 都在、命中区 37×27；点击后 `.copied` 生效（方框淡出、对勾淡入，1.2 秒后自动还原）；`prefers-reduced-motion: reduce` 下同样能复制且不报错；展开后链接与剪贴板一致，**点链接文字不会复制**；收起、换集后回到折叠态；播放页正文搜不到 `bilibili.com/video`；全程无控制台报错。
 
 ### 变更
 

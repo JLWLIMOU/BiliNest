@@ -3370,14 +3370,27 @@
     setShareExpanded(els.btnShareToggle && els.btnShareToggle.getAttribute('aria-expanded') !== 'true');
   }
 
-  /** 「复制」：只做复制到剪贴板（不走 B 站任何分享接口、也不弹官方分享面板） */
+  var shareCopiedTimer = null;
+
+  /**
+   * 复制按钮：只做复制到剪贴板（不走 B 站任何分享接口、也不弹官方分享面板）。
+   * 复制成功后按钮自己的图标换成对勾停一下 —— 反馈落在被点的东西上，
+   * 而不是只飘一条远处的提示（两者都留着：对勾是"按到了"，提示条说"能拿去干嘛"）。
+   */
   function copyPlayerShare() {
     if (!playerShareUrl) return;
-    copyText(playerShareUrl, '已复制分享链接，可粘进 BBDown / yt-dlp 等下载工具');
+    copyText(playerShareUrl, '已复制分享链接，可粘进 BBDown / yt-dlp 等下载工具', function (ok) {
+      if (!ok || !els.btnShareCopy) return;
+      els.btnShareCopy.classList.add('copied');
+      clearTimeout(shareCopiedTimer);
+      shareCopiedTimer = setTimeout(function () {
+        if (els.btnShareCopy) els.btnShareCopy.classList.remove('copied');
+      }, 1200);
+    });
   }
 
-  /** 复制文本：优先 Clipboard API，不可用时退回临时 textarea + execCommand */
-  function copyText(text, okMsg) {
+  /** 复制文本：优先 Clipboard API，不可用时退回临时 textarea + execCommand；onDone(ok) 可选 */
+  function copyText(text, okMsg, onDone) {
     function fallback() {
       try {
         var ta = document.createElement('textarea');
@@ -3395,6 +3408,7 @@
     }
     function done(ok) {
       toast(ok ? (okMsg || '已复制') : '复制失败，请手动选中复制', ok ? 'success' : 'error');
+      if (typeof onDone === 'function') onDone(ok);
     }
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(text).then(

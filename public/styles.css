@@ -1630,6 +1630,30 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
 }
 .share-toggle[aria-expanded="true"] .share-caret { transform: rotate(90deg); }
 
+/*
+ * 复制按钮：**只放图标不放字**。用大家都认识的"两个叠放的方框"（Apple 的
+ * doc.on.doc 那一类），占了最小的地方；点下去按钮本身按 .btn 缩放（按下就有反馈），
+ * 复制成功后图标原地换成对勾停 1.2 秒 —— 反馈发生在被点的东西上，不用去别处找。
+ * 图标靠 opacity + scale 交换（不加位移、不加弹性），符合"点按不是甩动"的物理直觉。
+ */
+.share-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 9px;
+}
+.share-copy .share-copy-icons { position: relative; width: 15px; height: 15px; flex: none; }
+.share-copy svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transition: opacity var(--dur-2) var(--ease-state), transform var(--dur-2) var(--ease-out);
+}
+.share-copy .icon-check { opacity: 0; transform: scale(0.6); color: var(--ok); }
+.share-copy.copied .icon-copy { opacity: 0; transform: scale(0.6); }
+.share-copy.copied .icon-check { opacity: 1; transform: none; }
+
 .share-url-box {
   margin-top: 10px;
   padding: 10px 12px;
@@ -2722,13 +2746,15 @@ body:has(#playerView:not([hidden])) main { max-width: 1360px; }
   .btn, .icon-btn, .card, .hcard, .end-btn, .fv-play, .hcard-remove, .stars .star,
   .overlay, .modal, .toast, .dash-tab, .folder-row, .episode-row, .picker-row,
   .tab-menu-item, .settings-nav-item, .up-card, .select, .bilinest-ctl, .card-add,
-  .card-add-tab, .card-add-pick, .card-remove, .card-menu {
+  .card-add-tab, .card-add-pick, .card-remove, .card-menu, .share-toggle, .share-copy,
+  .share-copy svg {
     transition-property: opacity, background-color, border-color, color, box-shadow, filter;
   }
   .btn:active, .icon-btn:active, .card:active, .hcard:active, .dash-tab:active,
   .card-add:active, .card-add-tab:active, .card-add-pick:active, .card-remove:active,
-  .dash-tab-more:active, .dash-tab-new:active, .stars .star:active,
-  .stars .star:hover, .end-btn:hover, .hcard-remove:hover, .fv-play:hover {
+    .dash-tab-more:active, .dash-tab-new:active, .stars .star:active,
+    .stars .star:hover, .end-btn:hover, .hcard-remove:hover, .fv-play:hover,
+    .share-toggle[aria-expanded="true"] .share-caret {
     transform: none;
   }
   /* 指示条不滑行，直接就位 */

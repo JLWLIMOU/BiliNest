@@ -185,8 +185,21 @@
                     </svg>
                     <span>分享链接</span>
                   </button>
-                  <button id="btnShareCopy" class="btn ghost small" type="button"
-                          title="复制这一集的 B 站链接（可粘进 BBDown / yt-dlp 等下载工具）">复制</button>
+                  <button id="btnShareCopy" class="btn ghost small share-copy" type="button"
+                          aria-label="复制分享链接"
+                          title="复制这一集的 B 站链接（可粘进 BBDown / yt-dlp 等下载工具）">
+                    <span class="share-copy-icons" aria-hidden="true">
+                      <svg class="icon-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                           stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="9" y="9" width="12" height="12" rx="3"/>
+                        <path d="M5.5 15H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v.5"/>
+                      </svg>
+                      <svg class="icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                           stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M20 6.5 9.5 17 4 11.5"/>
+                      </svg>
+                    </span>
+                  </button>
                 </span>
               </div>
               <div id="shareUrlBox" class="share-url-box" hidden></div>
