@@ -53,6 +53,9 @@
     playerTitle: document.getElementById('playerTitle'),
     playerUp: document.getElementById('playerUp'),
     favBadge: document.getElementById('favBadge'),
+    playerShare: document.getElementById('playerShare'),
+    shareUrl: document.getElementById('shareUrl'),
+    btnShareCopy: document.getElementById('btnShareCopy'),
     episodePanel: document.getElementById('episodePanel'),
     episodeList: document.getElementById('episodeList'),
     fileInput: document.getElementById('fileInput'),
@@ -3321,6 +3324,76 @@
   }
 
   /**
+   * 视频分享链接：B 站官方网页地址，多 P 带 ?p=。
+   *
+   * 不用 b23.tv 短链：那要调 x/share/click 接口（等于替用户在账号上记一次"分享"，
+   * 返回的还是不透明短码）。而"拿去下载"要的是带 BV 号的完整地址 —— BBDown、yt-dlp
+   * 这类工具认的就是它（实测：接口不带完整参数直接 -400）。
+   */
+  function shareUrlOf(bvid, page) {
+    if (!bvid) return '';
+    var n = Number(page) || 1;
+    return 'https://www.bilibili.com/video/' + bvid + (n > 1 ? '?p=' + n : '');
+  }
+
+  /** 播放页显示当前视频的分享链接（本地视频没有，整行隐藏） */
+  function renderPlayerShare(bvid, page) {
+    if (!els.playerShare) return;
+    var url = shareUrlOf(bvid, page);
+    if (!url) {
+      hidePlayerShare();
+      return;
+    }
+    els.shareUrl.textContent = url;
+    els.shareUrl.title = '点击复制：' + url;
+    els.playerShare.hidden = false;
+  }
+
+  function hidePlayerShare() {
+    if (!els.playerShare) return;
+    els.playerShare.hidden = true;
+    if (els.shareUrl) els.shareUrl.textContent = '';
+  }
+
+  /** 复制文本：优先 Clipboard API，不可用时退回临时 textarea + execCommand */
+  function copyText(text, okMsg) {
+    function fallback() {
+      try {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.cssText = 'position:fixed;top:-1000px;opacity:0';
+        document.body.appendChild(ta);
+        ta.select();
+        var ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        return ok;
+      } catch (e) {
+        return false;
+      }
+    }
+    function done(ok) {
+      toast(ok ? (okMsg || '已复制') : '复制失败，请手动选中复制', ok ? 'success' : 'error');
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(
+        function () { done(true); },
+        function () { done(fallback()); }
+      );
+    } else {
+      done(fallback());
+    }
+  }
+
+  /** 复制播放页当前视频的分享链接 */
+  function copyPlayerShare() {
+    var url = els.shareUrl ? els.shareUrl.textContent : '';
+    if (!url) return;
+    // 只做"复制到剪贴板"，不走 B 站任何分享接口、也不弹官方的分享面板
+    copyText(url, '已复制到剪贴板：' + url);
+  }
+
+  /**
    * 播放一个本地条目（单视频 / 本地列表里的一集）。
    * @param {object} entry {id, name, kind:'local', ...}
    * @param {boolean} keepEpisodes 是否保留当前选集面板（本地列表切集时用）
@@ -3345,6 +3418,7 @@
         : 0;
     els.playerTitle.textContent = entry.name || '本地视频';
     els.playerTitle.title = els.playerTitle.textContent;
+    hidePlayerShare();   // 本地视频没有 B 站分享链接
     if (!keepEpisodes) {
       els.episodePanel.hidden = true;
       els.playerLayout.classList.remove('has-episodes');
@@ -3472,6 +3546,8 @@
         if (state.activeEpisode) state.activeEpisode.cid = cid;
       }
     }
+    // 分享链接跟着"当前正在播的这一 P"走（多 P 带 ?p=）
+    renderPlayerShare(bvid, page);
     // 切换剧集前，先保存上一集的进度（旧上下文 + 旧视频）
     saveProgressNow(true);
     var av = state.activeVideo || {};
@@ -5670,6 +5746,9 @@
 
   /* ---------------- 事件绑定 ---------------- */
   function bindEvents() {
+    // 播放页的分享链接：点按钮或点链接本身都只做"复制到剪贴板"
+    if (els.btnShareCopy) els.btnShareCopy.addEventListener('click', copyPlayerShare);
+    if (els.shareUrl) els.shareUrl.addEventListener('click', copyPlayerShare);
     els.btnTheme.addEventListener('click', function () {
       store.set({ theme: effectiveTheme() === 'dark' ? 'light' : 'dark' });
       applyTheme();
@@ -7409,8 +7488,6 @@
     applyTheme();
     // 旧版历史记录迁移：系列/分P 归并为整季一条，避免继续学习栏重复
     normalizeHistory();
-    // 后台尝试为旧版“无系列信息”的单集记录补齐系列归属（限量、静默，不阻塞启动）
-    backfillOrphanSeries().catch(function () { /* 静默 */ });
     bindEvents();
     bindEpisodeTooltip();
     // 自研播放器错误提示接入应用的 toast
@@ -7441,6 +7518,12 @@
     state.activeDashTab = normalizeDashTab(store.get('activeDashTab'));
     await checkLogin();
     syncAccountButton();
+    /*
+     * 后台尝试为旧版“无系列信息”的单集记录补齐系列归属（限量、静默，不阻塞启动）。
+     * 必须放在 api.init() 之后：本地代理地址还没探测到时，请求会直连 api.bilibili.com，
+     * 被 CORS 拦掉（冷启动实测必现），这次迁移就等于没做。
+     */
+    backfillOrphanSeries().catch(function () { /* 静默 */ });
     await loadDashboard();
     // 打开页面时自动检查更新（设置里可切成"仅手动"）。检查结果只体现在设置图标的小圆点上，
     // 不弹任何东西；服务端有 10 分钟缓存，代价极低。

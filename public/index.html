@@ -176,6 +176,13 @@
                 <span id="playerUp" class="muted"></span>
                 <span id="favBadge" class="badge" hidden>已收藏（不可操作）</span>
               </div>
+              <!-- 分享链接：主要是给下载工具用的（复制后可直接粘进 BBDown / yt-dlp 等） -->
+              <div id="playerShare" class="player-share" hidden>
+                <span class="share-label">分享链接</span>
+                <code id="shareUrl" class="share-url" title="点击复制"></code>
+                <button id="btnShareCopy" class="btn ghost small" type="button"
+                        title="复制后可粘贴到下载工具（BBDown / yt-dlp 等）">复制分享链接</button>
+              </div>
             </div>
 
           </div>

@@ -1604,6 +1604,40 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
 }
 .meta-row .up-link:hover { color: var(--accent); }
 
+/* 播放页标题下的"分享链接"：一行放得下就一行，链接太长时省略，
+   整行不给视觉重量（它是给下载工具用的，不需要抢注意力）。 */
+.player-share {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.player-share .share-label { flex: none; color: var(--text-2); }
+.player-share .share-url {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  padding: 5px 10px;
+  border: 1px solid var(--separator);
+  border-radius: var(--r-2);
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  transition: border-color var(--dur-2) var(--ease-state), background var(--dur-2) var(--ease-state);
+}
+.player-share .share-url:hover { border-color: var(--accent); }
+.player-share .share-url:active { background: var(--fill); }
+.player-share .btn { flex: none; }
+.player-share.copied .share-url { border-color: var(--accent); }
+
 .badge {
   display: inline-block;
   padding: 3px 10px;

@@ -27,8 +27,10 @@ window.BiliNestPlayer = (function () {
   };
 
   // 视频画面区域的单击 / 双击判定（见 bindClick）
-  var clickTimer = null;
-  var lastVideoClick = 0;
+  var clickTimer = null;        // 挂起中的单击（双击窗口过去后才执行）
+  var lastVideoClick = 0;       // 上一"第一下"的时间
+  var lastToggle = null;        // 已经执行过的单击切换（迟到的双击用它回滚）
+  var DOUBLE_CLICK_MS = 300;    // 与 ArtPlayer 的 DBCLICK_TIME 对齐
   // 弹幕分段：官方网页端每 6 分钟一包、每包最多 6000 条。
   // 上限 250 包 ≈ 25 小时视频，防止异常视频无限拉取。
   var MAX_DANMAKU_SEGMENTS = 250;
@@ -610,6 +612,7 @@ window.BiliNestPlayer = (function () {
     clearTimeout(clickTimer);
     clickTimer = null;
     lastVideoClick = 0;
+    lastToggle = null;
     var nextBtn = els.endOverlay.querySelector('[data-end-next]');
     var nextText = els.endOverlay.querySelector('[data-end-next-text]');
     var replayText = els.endOverlay.querySelector('[data-end-replay-text]');
@@ -662,28 +665,66 @@ window.BiliNestPlayer = (function () {
 
   /**
    * 单击 / 双击手势（视频画面区域）。
-   * ArtPlayer 内置逻辑是“第一下单击立即切换播放，第二下才算双击全屏”，
-   * 这会让双击进出全屏时出现一次“暂停又恢复”的闪烁。
-   * 这里在捕获阶段拦截视频区域的 click，自己判定：
-   *   - 300ms 内出现第二下 → 只切换全屏，完全不碰播放状态；
-   *   - 超过 300ms 无第二下 → 才切换播放/暂停。
-   * 代价是单击视频的响应有约 300ms 延迟；控制条、中央播放按钮等仍由 ArtPlayer 即时处理。
+   *
+   * 为什么不用 ArtPlayer 自带的那套：它按 DBCLICK_TIME(300ms) 自己数点击 —— 第一下
+   * 立即切播放状态，第二下才切全屏。于是"双击进全屏"必然先暂停一下；再慢一点的双击
+   * 会被算成两次单击，最后停在暂停上。
+   *
+   * 这里在捕获阶段接管（stopImmediatePropagation 让事件到不了 ArtPlayer 的处理器）：
+   *   - 第一下：挂起 300ms，期间没有第二下才切播放状态（单击响应慢 300ms，换双击不碰播放状态）；
+   *   - 第二下在 300ms 内：取消挂起的动作，只切全屏；
+   *   - 第二下比 300ms 还慢（系统双击阈值默认 500ms）：那一下的切换已经执行了，回滚它再切全屏，
+   *     用户最多看到一闪，而不是"进了全屏还停着"。
+   *
+   * 触屏 / 手写笔保留 ArtPlayer 原生的手势（滑动调音量等）。
+   * 注意这里按 **pointerType** 判断而不是 navigator.maxTouchPoints：带触摸屏的笔记本
+   * maxTouchPoints 一直大于 0，用鼠标时也被整段跳过，就会退回上面那个"双击必暂停"的行为
+   * （实测：有触摸屏的机器上，双击 ≈200ms → 暂停 + 全屏，且保持暂停）。
+   *
+   * 控制条、中央播放按钮等仍由 ArtPlayer 即时处理。
    */
   function bindClick() {
     if (!els.player) return;
     els.player.addEventListener('click', function (e) {
       var art = state.art;
-      if (!art || e.target !== art.video) return;      // 只接管视频画面区域的点击
-      if (navigator.maxTouchPoints > 0) return;        // 触屏保留 ArtPlayer 原生手势
+      if (!art) return;
+      var pointer = e.pointerType;
+      if (pointer && pointer !== 'mouse' && pointer !== 'pen') return;  // 触屏保留 ArtPlayer 原生手势
+
+      var now = Date.now();
+      var onVideo = e.target === art.video;
+      // 第二下：挂起中的单击还没执行（够快），或者浏览器自己认定为双击（detail=2），
+      // 或者刚刚才执行过第一下的切换（慢一点的双击），都算双击
+      var isSecond = clickTimer !== null || e.detail >= 2 || (now - lastVideoClick <= DOUBLE_CLICK_MS);
+
+      /*
+       * 第二下没落在 <video> 上、而是落在画面中央那个播放按钮（.art-state）上 —— 这是
+       * 第一下的延迟切换把画面暂停、按钮冒出来接住了第二下。也算双击处理，否则观感是
+       * "暂停一下又自己播起来，还没进全屏"。控制条上的点击不接管：双击进度条是找位置，
+       * 不是要全屏。
+       */
+      if (!onVideo) {
+        if (!isSecond || !e.target.closest || !e.target.closest('.art-state')) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        clickTimer = null;
+        lastVideoClick = 0;
+        undoLastToggle();
+        if (typeof art.fullscreen === 'boolean') {
+          art.fullscreen = !art.fullscreen;
+        }
+        return;
+      }
+
       e.preventDefault();
       e.stopImmediatePropagation();                    // 阻止事件到达 ArtPlayer 的 click 处理
 
-      var now = Date.now();
-      if (now - lastVideoClick <= 300) {
-        // 双击：取消挂起的单击动作，仅切换全屏
+      if (isSecond) {
+        // 双击：取消挂起的单击动作 + 回滚已经执行过的那次切换，仅切换全屏
         clearTimeout(clickTimer);
         clickTimer = null;
         lastVideoClick = 0;
+        undoLastToggle();
         if (typeof art.fullscreen === 'boolean') {
           art.fullscreen = !art.fullscreen;
         }
@@ -701,11 +742,31 @@ window.BiliNestPlayer = (function () {
           lastVideoClick = 0;
           if (!state.art) return;
           if (isEndOverlayVisible()) return; // 浮层显示期间不执行播放切换
+          var v = state.art.video;
+          var wasPaused = !!(v && v.paused);
           var r = state.art.toggle();
+          lastToggle = { at: Date.now(), wasPaused: wasPaused };
           if (r && typeof r.catch === 'function') r.catch(function () { /* 自动播放可能被拦截 */ });
-        }, 300);
+        }, DOUBLE_CLICK_MS);
       }
     }, true);
+  }
+
+  /**
+   * 回滚刚刚由"单击"造成的播放状态切换（迟到的双击用）。
+   * 只在状态确实还停在"我们刚切到的那一边"时才回滚，避免推翻用户自己的操作；
+   * 超过 600ms 就当那次单击已经成立，不再回滚。
+   */
+  function undoLastToggle() {
+    var art = state.art;
+    if (!art || !lastToggle) return;
+    var pending = lastToggle;
+    lastToggle = null;
+    if (Date.now() - pending.at > 600) return;
+    var v = art.video;
+    if (!v || v.paused === pending.wasPaused) return;
+    var r = art.toggle();
+    if (r && typeof r.catch === 'function') r.catch(function () { /* ignore */ });
   }
 
   function isEndOverlayVisible() {
