@@ -1604,9 +1604,34 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
 }
 .meta-row .up-link:hover { color: var(--accent); }
 
-/* 分享链接弹窗：链接只在这里出现（播放页上只留一个按钮，避免页面臃肿） */
-.share-note { margin: 0 0 12px; font-size: var(--fs-sm); color: var(--text-2); }
+/* 分享链接：默认折叠成一行（「分享链接」+ 复制按钮），要看得展开；
+   复制不需要展开也能做，所以它在折叠态就是一个普通按钮。 */
+.player-share { display: inline-flex; align-items: center; gap: 8px; }
+.share-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin: 0;
+  padding: 2px 4px;
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  transition: color var(--dur-2) var(--ease-state);
+}
+.share-toggle:hover { color: var(--accent); }
+.share-caret {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  transition: transform var(--dur-3) var(--ease-out);
+}
+.share-toggle[aria-expanded="true"] .share-caret { transform: rotate(90deg); }
+
 .share-url-box {
+  margin-top: 10px;
   padding: 10px 12px;
   border: 1px solid var(--separator);
   border-radius: var(--r-2);
@@ -1617,11 +1642,9 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
   line-height: 1.6;
   word-break: break-all;
   user-select: all;
-  cursor: copy;
+  cursor: text;
   transition: border-color var(--dur-2) var(--ease-state);
 }
-.share-url-box:hover { border-color: var(--accent); }
-.share-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 
 .badge {
   display: inline-block;

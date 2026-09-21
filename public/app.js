@@ -53,7 +53,10 @@
     playerTitle: document.getElementById('playerTitle'),
     playerUp: document.getElementById('playerUp'),
     favBadge: document.getElementById('favBadge'),
+    playerShare: document.getElementById('playerShare'),
+    btnShareToggle: document.getElementById('btnShareToggle'),
     btnShareCopy: document.getElementById('btnShareCopy'),
+    shareUrlBox: document.getElementById('shareUrlBox'),
     episodePanel: document.getElementById('episodePanel'),
     episodeList: document.getElementById('episodeList'),
     fileInput: document.getElementById('fileInput'),
@@ -3335,56 +3338,42 @@
   }
 
   /*
-   * 当前这一集的分享链接。**不放页面上** —— 播放页只留一个「复制分享链接」按钮，
-   * 链接本身在点击后的弹窗里看，避免标题区堆一排东西。
+   * 当前这一集的分享链接。默认**折叠**：播放页只显示「› 分享链接」和「复制」两个小东西，
+   * 想核对链接再展开。复制不需要展开 —— 折叠状态点「复制」一步到位。
    */
   var playerShareUrl = '';
 
-  /** 播放页把「复制分享链接」按钮准备好（本地视频没有链接，按钮隐藏） */
+  /** 播放页准备好「分享链接」这一组（本地视频没有链接，整组隐藏；换集时回到折叠态） */
   function renderPlayerShare(bvid, page) {
     playerShareUrl = shareUrlOf(bvid, page);
-    if (els.btnShareCopy) els.btnShareCopy.hidden = !playerShareUrl;
+    if (els.playerShare) els.playerShare.hidden = !playerShareUrl;
+    setShareExpanded(false);
   }
 
   function hidePlayerShare() {
     playerShareUrl = '';
-    if (els.btnShareCopy) els.btnShareCopy.hidden = true;
+    if (els.playerShare) els.playerShare.hidden = true;
+    setShareExpanded(false);
   }
 
-  /**
-   * 点「复制分享链接」：复制到剪贴板，并弹一个小窗把链接显示出来。
-   * 只做复制，不走 B 站任何分享接口、也不弹官方的分享面板。
-   */
-  function openShareSheet() {
+  /** 展开 / 收起链接本身 */
+  function setShareExpanded(on) {
+    if (els.btnShareToggle) els.btnShareToggle.setAttribute('aria-expanded', on ? 'true' : 'false');
+    if (els.shareUrlBox) {
+      els.shareUrlBox.hidden = !on;
+      if (on) els.shareUrlBox.textContent = playerShareUrl;
+    }
+  }
+
+  function toggleShareExpanded() {
     if (!playerShareUrl) return;
-    copyText(playerShareUrl, '已复制到剪贴板：' + playerShareUrl);
-    openModal(
-      '<div class="sheet-head"><h2>分享链接</h2>' +
-        '<button type="button" class="icon-btn" data-close aria-label="关闭">×</button>' +
-      '</div>' +
-      '<div class="modal-body">' +
-        '<p class="share-note">已复制到剪贴板，可直接粘进 BBDown / yt-dlp 这类下载工具。</p>' +
-        '<div class="share-url-box" id="shareUrlBox" title="点击复制">' + esc(playerShareUrl) + '</div>' +
-        '<div class="share-actions">' +
-          '<button type="button" class="btn ghost" data-close>完成</button>' +
-          '<button type="button" class="btn" id="btnShareAgain">再复制一次</button>' +
-        '</div>' +
-      '</div>',
-      { cls: 'share-sheet' }
-    );
-    bindClose();
-    var again = document.getElementById('btnShareAgain');
-    if (again) {
-      again.addEventListener('click', function () {
-        copyText(playerShareUrl, '已复制到剪贴板：' + playerShareUrl);
-      });
-    }
-    var box = document.getElementById('shareUrlBox');
-    if (box) {
-      box.addEventListener('click', function () {
-        copyText(playerShareUrl, '已复制到剪贴板：' + playerShareUrl);
-      });
-    }
+    setShareExpanded(els.btnShareToggle && els.btnShareToggle.getAttribute('aria-expanded') !== 'true');
+  }
+
+  /** 「复制」：只做复制到剪贴板（不走 B 站任何分享接口、也不弹官方分享面板） */
+  function copyPlayerShare() {
+    if (!playerShareUrl) return;
+    copyText(playerShareUrl, '已复制分享链接，可粘进 BBDown / yt-dlp 等下载工具');
   }
 
   /** 复制文本：优先 Clipboard API，不可用时退回临时 textarea + execCommand */
@@ -5770,8 +5759,9 @@
 
   /* ---------------- 事件绑定 ---------------- */
   function bindEvents() {
-    // 播放页的「复制分享链接」：复制到剪贴板 + 弹窗展示链接本身
-    if (els.btnShareCopy) els.btnShareCopy.addEventListener('click', openShareSheet);
+    // 播放页的分享链接：展开看链接 / 点「复制」直接复制（折叠态也能复制）
+    if (els.btnShareToggle) els.btnShareToggle.addEventListener('click', toggleShareExpanded);
+    if (els.btnShareCopy) els.btnShareCopy.addEventListener('click', copyPlayerShare);
     els.btnTheme.addEventListener('click', function () {
       store.set({ theme: effectiveTheme() === 'dark' ? 'light' : 'dark' });
       applyTheme();

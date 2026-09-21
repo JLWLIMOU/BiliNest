@@ -175,10 +175,21 @@
               <div class="meta-row">
                 <span id="playerUp" class="muted"></span>
                 <span id="favBadge" class="badge" hidden>已收藏（不可操作）</span>
-                <!-- 分享链接不摆在页面上：点它才复制，链接本身在弹窗里看（保持播放页干净） -->
-                <button id="btnShareCopy" class="btn ghost small" type="button" hidden
-                        title="复制这一集的 B 站链接（可粘进 BBDown / yt-dlp 等下载工具）">复制分享链接</button>
+                <!-- 分享链接：默认折叠，点「复制」直接复制（不必展开）；链接本身按需展开查看 -->
+                <span id="playerShare" class="player-share" hidden>
+                  <button id="btnShareToggle" class="share-toggle" type="button" aria-expanded="false"
+                          title="展开查看链接">
+                    <svg class="share-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                         stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M9 6l6 6-6 6"/>
+                    </svg>
+                    <span>分享链接</span>
+                  </button>
+                  <button id="btnShareCopy" class="btn ghost small" type="button"
+                          title="复制这一集的 B 站链接（可粘进 BBDown / yt-dlp 等下载工具）">复制</button>
+                </span>
               </div>
+              <div id="shareUrlBox" class="share-url-box" hidden></div>
             </div>
 
           </div>

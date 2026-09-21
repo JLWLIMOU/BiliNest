@@ -21,10 +21,11 @@
 
 ### 新增
 
-- **播放页多了「复制分享链接」**：标题行 UP 名字后面一个小按钮，点一下就把当前正在播那一集的 B 站地址复制进剪贴板（多 P 自动带 `?p=`），并弹一个小窗把链接显示出来 —— **链接本身不摆在播放页上**，免得标题区堆一排东西；小窗里点链接或「再复制一次」都能再复制。本地视频没有这个按钮。
+- **播放页多了分享链接（默认折叠）**：UP 名字后面是「› 分享链接」和一个「复制」按钮 —— 点「复制」一步就把当前这一集的 B 站地址送进剪贴板（多 P 自动带 `?p=`），**不必先展开**；想核对链接本身再点「分享链接」展开。只复制，不弹任何官方分享面板。本地视频没有这一组。
   - 不走 b23.tv 短链：那要调 `x/share/click` 接口（等于替用户在账号上记一次"分享"，返回的还是不透明短码），而下载工具认的是带 BV 号的完整地址（实测该接口参数不全直接返回 -400）。
-  - 涉及文件：`public/index.html`（#btnShareCopy）、`public/styles.css`（.share-url-box 等）、`public/app.js`（shareUrlOf / renderPlayerShare / openShareSheet / copyText）。
-  - 验证：点按钮后剪贴板是正确地址（110 分 P 的视频切到第 3 集时是 `?p=3`）、弹窗里显示的链接与剪贴板一致、「再复制一次」有效、「完成」能关掉、播放页正文里搜不到 `bilibili.com/video`（链接确实没露在页面上）；全程无控制台报错。
+  - 提示条只说一句话：「已复制分享链接，可粘进 BBDown / yt-dlp 等下载工具」。
+  - 涉及文件：`public/index.html`（#playerShare / #btnShareToggle / #btnShareCopy / #shareUrlBox）、`public/styles.css`（.player-share / .share-url-box）、`public/app.js`（shareUrlOf / renderPlayerShare / setShareExpanded / copyPlayerShare / copyText）。
+  - 验证：折叠态点「复制」剪贴板即为正确地址（110 分 P 视频切到第 3、第 5 集分别是 `?p=3`、`?p=5`）；展开后链接与剪贴板一致，**点链接文字不会复制**（剪贴板保持原样）；收起、换集后回到折叠态；播放页正文搜不到 `bilibili.com/video`；全程无控制台报错。
 
 ### 变更
 
