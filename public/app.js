@@ -879,6 +879,56 @@
     refreshFolderCounts();   // 收藏夹库卡片上的数量：后台校准一次（见其注释）
   }
 
+  /* ------------------------------------------------------------------
+   * 浏览器返回键 ↔ 应用内视图
+   *
+   * 播放页 / 收藏夹 / 内容源都是应用内切换的"视图"，不是浏览器的页面。以前按浏览器的
+   * 返回键会**直接退出应用**（回到浏览器的起始页 / 搜索页），因为历史里根本没有这一层。
+   * 这里在进入这些子视图时压一条历史条目：
+   *   · 只在"从别的视图进来"时压，切集 / 换收藏夹不会越压越多；
+   *   · 应用自己的返回按钮走 history.back()，这样两种入口的历史始终一致；
+   *   · popstate 里只切视图、不再压栈。
+   * History API 不可用（老浏览器 / 隐私模式）时全部静默退化成原来的行为。
+   * ------------------------------------------------------------------ */
+  function pushViewHistory(view) {
+    try {
+      history.pushState({ bilinest: view || 'view' }, '', location.href);
+    } catch (e) { /* 忽略：返回键退回旧行为 */ }
+  }
+
+  /** 应用内的返回：能走浏览器返回就走（保持历史同步），否则直接切视图 */
+  function goBackView(fallback) {
+    var canGoBack = false;
+    try { canGoBack = !!(history.state && history.state.bilinest); } catch (e) { canGoBack = false; }
+    if (canGoBack) { try { history.back(); return; } catch (e) { /* 落到 fallback */ } }
+    fallback();
+  }
+
+  /**
+   * 从收藏夹 / 内容源视图退回主页。
+   * 从「添加内容 → 源收藏夹」钻进来的那次，"上一级"是那个选择器而不是首页：回到自定义
+   * 标签页并把选择器**原样打开**（分区 / 搜索词 / 勾选都还在），用户能接着挑别的收藏夹。
+   */
+  function backToDashboard() {
+    var ctxTabId = state.pendingTabId;
+    loadDashboard();                       // showView('dashboard') 会清掉 pendingTabId
+    if (ctxTabId) openContentPicker(ctxTabId, true);
+  }
+
+  /** 离开播放页：回到进来时的那一层（收藏夹 / 内容源 / 主页），并停在原来的滚动位置 */
+  function leavePlayerView() {
+    if (state.prevView === 'folder') {
+      showView('folder');
+    } else if (state.prevView === 'browse') {
+      showView('browse');
+      renderBrowse();
+    } else {
+      showView('dashboard');
+      renderDashboard();
+    }
+    restoreListScroll();
+  }
+
   /**
    * 收藏夹库卡片上的「N 个视频」是**加入时的快照**，用户在 B 站往收藏夹里加/删视频之后
    * 它不会变（实测：卡片 4 个，点进去 18 个）。这里用一次「我创建的收藏夹」列表把库里
@@ -2064,6 +2114,7 @@
     els.browseSort.value = state.browse.sort;
     els.browseSearch.value = state.browse.query;
     renderBrowse();
+    if (state.currentView !== 'browse') pushViewHistory('browse');   // 返回键退回主页
     showView('browse');
   }
 
@@ -2193,6 +2244,7 @@
 
   async function loadFolder(source) {
     state.videos = [];
+    if (state.currentView !== 'folder') pushViewHistory('folder');   // 返回键退回主页
     showView('folder');
     // 先把头部刷出来：返回键的文案取决于"是不是从添加内容钻进来的"，
     // 这一步不该等到接口成功之后（失败时头部就停在上一页的文案上，很误导）。
@@ -3507,6 +3559,7 @@
      */
     if (state.currentView !== 'player') {
       state.listReturn = { view: state.currentView, y: window.scrollY || 0 };
+      pushViewHistory('player');   // 让浏览器的返回键能退回列表，而不是直接退出应用
     }
     showView('player');
     els.playerTitle.textContent = titleOf(v);
@@ -5831,26 +5884,16 @@
         loadDashboard();
       }
     });
-    els.btnBackHome.addEventListener('click', function () {
-      // 从「添加内容 → 源收藏夹」钻进收藏夹时，"上一级"是那个选择器而不是首页：
-      // 回到自定义标签页并**把选择器原样打开**（分区 / 搜索词 / 勾选都还在），
-      // 用户可以接着挑别的收藏夹或切到视频库/UP主，不用从头点一遍。
-      var ctxTabId = state.pendingTabId;
-      loadDashboard();                       // showView('dashboard') 会清掉 pendingTabId
-      if (ctxTabId) openContentPicker(ctxTabId, true);
-    });
-    els.btnBack.addEventListener('click', function () {
-      if (state.prevView === 'folder') {
-        showView('folder');
-      } else if (state.prevView === 'browse') {
-        showView('browse');
-        renderBrowse();
-      } else {
-        showView('dashboard');
-        renderDashboard();
-      }
-      // 回到列表时停在原来的位置（进播放页之前看到哪儿，回来还是那儿）
-      restoreListScroll();
+    // 两个返回按钮都优先走浏览器的返回（历史里压过条目时），保持"按钮"和"返回键"一致
+    els.btnBackHome.addEventListener('click', function () { goBackView(backToDashboard); });
+    els.btnBack.addEventListener('click', function () { goBackView(leavePlayerView); });
+    /*
+     * 浏览器返回键：停在子视图（播放页 / 收藏夹 / 内容源）里就退回上一层；
+     * 已经在主页就直接交给浏览器 —— 那时"返回"本来就该离开应用。
+     */
+    window.addEventListener('popstate', function () {
+      if (state.currentView === 'player') { leavePlayerView(); return; }
+      if (state.currentView === 'folder' || state.currentView === 'browse') backToDashboard();
     });
     els.btnRetryBackend.addEventListener('click', onRetryBackend);
 
