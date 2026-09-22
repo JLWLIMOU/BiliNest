@@ -1607,6 +1607,10 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
 /* 分享链接：默认折叠成一行（「分享链接」+ 复制按钮），要看得展开；
    复制不需要展开也能做，所以它在折叠态就是一个普通按钮。 */
 .player-share { display: inline-flex; align-items: center; gap: 8px; }
+
+/* 章节刻度：ArtPlayer 默认 50% 白，压在"已加载"的那截浅色条上几乎看不见；
+   提到 0.9 保证进度条上这些分节一眼能找到（色调不变，避免抢注意力）。 */
+#customPlayer .art-video-player { --art-highlight-color: rgba(255, 255, 255, 0.9); }
 .share-toggle {
   display: inline-flex;
   align-items: center;
@@ -2542,6 +2546,9 @@ details.help .steps { margin-top: 4px; }
   position: fixed;
   z-index: 80;
   min-width: 132px;
+  max-width: min(340px, calc(100vw - 24px));
+  max-height: min(60vh, 420px);
+  overflow-y: auto;
   padding: 4px;
   background: var(--surface);
   border: 1px solid var(--border);

@@ -62,6 +62,7 @@ window.BiliNestPlayer = (function () {
     urlIdx: 0,
     danmaku: [],            // 解析后的弹幕（按时间排序）
     danmakuIdx: 0,
+    chapters: [],           // 章节（view_points）：进度条分节标记 + 控制条菜单
     active: [],             // 正在显示的弹幕
     lanes: [],              // 弹幕轨道占用
     pluginDanmaku: [],      // 适配 artplayer-plugin-danmuku 的弹幕数组
@@ -86,6 +87,7 @@ window.BiliNestPlayer = (function () {
     retryTimer: null,       // “重试同地址”的挂起定时器
     fallbackHandler: null,  // 全部方案失败后的兜底（切官方播放器）
     episodeNavHandler: null, // 上一集 / 下一集点击回调（由应用层提供）
+    chapterHandler: null,    // 「章节」按钮点击回调（由应用层提供，弹出章节菜单）
     endNav: { show: false, next: false }, // 播放结束浮层状态（应用层设置）
     endTimer: null,           // 播放结束自动连播倒计时
     lastDanmakuWidth: 0       // 弹幕容器宽度（用于全屏 resize 时修正速度）
@@ -187,6 +189,17 @@ window.BiliNestPlayer = (function () {
           html: '<span class="bilinest-ctl nav">›</span>',
           tooltip: '下一集',
           click: function () { if (state.episodeNavHandler) state.episodeNavHandler('next'); }
+        },
+        {
+          name: 'chapters',
+          position: 'right',
+          index: 10,
+          html: '<span class="bilinest-ctl">章节</span>',
+          tooltip: '章节',
+          click: function () {
+            if (!state.chapters.length || !state.chapterHandler) return;
+            state.chapterHandler(state.chapters.slice(), state.art.controls.chapters);
+          }
         },
         {
           name: 'subtitle',
@@ -413,6 +426,8 @@ window.BiliNestPlayer = (function () {
       applyPlayRate();
     });
     art.on('video:loadedmetadata', function () {
+      // 时长这时才确定：章节刻度按新的总时长重画（ArtPlayer 自己也会按 option.highlight 画一遍）
+      renderChapterMarks();
       // 自动从上次观看进度续播（跨重试保持：只要尚未成功 seek，就重新跳转）
       if (state.resumeTarget > 10 && !state.seekedResume) {
         if (state.reseekTries >= 5) {
@@ -931,6 +946,56 @@ window.BiliNestPlayer = (function () {
   }
 
   /* ---------------- 弹幕 ---------------- */
+  /* ---------------- 章节（view_points） ---------------- */
+
+  /**
+   * 章节：B 站把视频分成若干段（`x/player/wbi/v2` 的 `view_points`，from/to 单位是秒，
+   * 和字幕来自同一份响应，所以不额外多打一次接口）。
+   * 两处用到：进度条上的分节刻度、控制条「章节」菜单（菜单由应用层渲染，见 setChapterHandler）。
+   */
+  function applyChapters(list) {
+    state.chapters = (list || []).filter(function (c) { return c && c.from >= 0 && c.text; });
+    var art = state.art;
+    if (art) {
+      // 同步给 ArtPlayer：它会在 loadedmetadata 时按这份数据重建刻度（见 vendor 的 progress 模块）
+      try {
+        art.option.highlight = state.chapters.map(function (c) {
+          return { time: c.from, text: c.text };
+        });
+      } catch (e) { /* option 不可写就算了，下面自己画 */ }
+    }
+    renderChapterMarks();
+    updateChapterControl();
+  }
+
+  /** 把章节刻度画到进度条上（结构照 ArtPlayer 自己的那份：data-time / data-text + left%） */
+  function renderChapterMarks() {
+    var art = state.art;
+    if (!art || !els.player) return;
+    var box = els.player.querySelector('.art-progress-highlight');
+    if (!box) return;
+    box.textContent = '';
+    var dur = Number(art.duration) || (art.video && Number(art.video.duration)) || 0;
+    if (!dur || !state.chapters.length) return;
+    state.chapters.forEach(function (c) {
+      if (!(c.from > 0)) return;                 // 0 秒那根是起点，画上去只是噪音
+      var left = Math.max(0, Math.min(100, (c.from / dur) * 100));
+      var span = document.createElement('span');
+      span.setAttribute('data-time', String(c.from));
+      span.setAttribute('data-text', c.text);
+      span.style.left = left + '%';
+      box.appendChild(span);
+    });
+  }
+
+  /** 有章节才显示控制条上的「章节」按钮 */
+  function updateChapterControl() {
+    var art = state.art;
+    if (!art || !art.controls || !art.controls.chapters) return;
+    var el = art.controls.chapters;
+    el.style.display = state.kind === 'bili' && state.chapters.length ? '' : 'none';
+  }
+
   function sleep(ms) {
     return new Promise(function (resolve) { setTimeout(resolve, ms); });
   }
@@ -1438,6 +1503,15 @@ window.BiliNestPlayer = (function () {
     try {
       var v2 = await api.playerV2(bvid, cid, creds());
       if (mySeq !== subtitleSeq) return; // 已切到其它视频，丢弃过期结果
+      // 章节和字幕是同一份响应里的两件事：顺手一起处理，不额外请求
+      var points = (v2 && v2.view_points) || [];
+      applyChapters(points.map(function (p) {
+        return {
+          from: Number(p.from) || 0,
+          to: Number(p.to) || 0,
+          text: String(p.content || '').trim()
+        };
+      }));
       var subs = v2 && v2.subtitle && v2.subtitle.subtitles;
       if (subs && subs.length) {
         // B 站的语言码：普通 CC 是 zh-CN / zh-Hans，AI 字幕是 ai-zh —— 两种都算中文
@@ -1490,6 +1564,8 @@ window.BiliNestPlayer = (function () {
       var el = state.art.controls[name];
       if (el) el.style.display = show ? '' : 'none';
     });
+    // 章节按钮的显隐由"有没有章节"决定，但本地视频一律不显示（见 updateChapterControl）
+    updateChapterControl();
   }
 
   /**
@@ -1541,6 +1617,7 @@ window.BiliNestPlayer = (function () {
     state.urlIdx = 0;
     state.danmaku = [];
     state.pluginDanmaku = [];
+    state.chapters = [];        // 章节随视频走，换视频先清空（否则会短暂显示上一集的刻度）
     if (state.subtitleVttUrl) { try { URL.revokeObjectURL(state.subtitleVttUrl); } catch (e) {} }
     state.subtitleVttUrl = null;
     state.subtitleOn = false;
@@ -1611,6 +1688,22 @@ window.BiliNestPlayer = (function () {
       return Promise.resolve(true);
     },
     setEpisodeNavHandler: function (fn) { state.episodeNavHandler = fn; },
+    /** 应用层提供「章节」按钮的点击处理（负责弹菜单） */
+    setChapterHandler: function (fn) { state.chapterHandler = fn; },
+    /** 当前视频的章节列表（[{from,to,text}]，没有就是空数组） */
+    getChapters: function () { return state.chapters.slice(); },
+    /** 跳到指定秒数（章节菜单用） */
+    seekTo: function (seconds) {
+      var art = state.art;
+      if (!art) return;
+      var t = Number(seconds);
+      if (!isFinite(t) || t < 0) return;
+      // 用户主动跳转：把续播标记掉，否则清单里的续播逻辑会再把它拉回上次进度
+      state.resumeTarget = 0;
+      state.seekedResume = true;
+      try { art.currentTime = t; } catch (e) { /* 跳转失败忽略 */ }
+      art.play().catch(function () { /* 自动播放可能被浏览器拦截 */ });
+    },
     /** 设置里改了"默认清晰度"：正在播的话立刻切过去（详见 applyDefaultQuality） */
     applyDefaultQuality: function () { applyDefaultQuality(); },
     /** 设置里改了"默认显示弹幕"：立刻应用（控制条图标也会同步） */

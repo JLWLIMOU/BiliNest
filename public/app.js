@@ -6616,7 +6616,13 @@
     }).join('');
     document.body.appendChild(pop);
     var r = anchor.getBoundingClientRect();
-    pop.style.top = (r.bottom + 6) + 'px';
+    /*
+     * 先按"按钮下方"摆；下方放不下（控制条上的按钮就在窗口底部）就翻到上方 ——
+     * 章节菜单有几十条时尤其需要，否则一开就被窗口底边切掉。
+     */
+    var below = window.innerHeight - r.bottom;
+    var need = pop.offsetHeight + 12;
+    pop.style.top = (below >= need ? r.bottom + 6 : Math.max(8, r.top - pop.offsetHeight - 6)) + 'px';
     pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - pop.offsetWidth - 8)) + 'px';
     actionMenuEl = pop;
     var btns = pop.querySelectorAll('[data-menu-idx]');
@@ -7526,6 +7532,24 @@
         if (idx < 0) return;
         var target = dir === 'prev' ? idx - 1 : idx + 1;
         if (target >= 0 && target < state.episodes.length) playEpisodeAt(target);
+      });
+      /*
+       * 控制条上的「章节」：点开是一个贴着按钮的浮层（和卡片菜单同一套），列出这一集的
+       * 分节，当前所在的那段前面带 ▶。章节数据来自播放器（view_points），这里只负责画。
+       */
+      BiliNestPlayer.setChapterHandler(function (chapters, anchor) {
+        var v = BiliNestPlayer.getVideo();
+        var now = v ? Number(v.currentTime) || 0 : 0;
+        var cur = -1;
+        for (var i = 0; i < chapters.length; i++) {
+          if (now >= chapters[i].from) cur = i;
+        }
+        openActionMenu(anchor, chapters.map(function (c, i) {
+          return {
+            label: (i === cur ? '▶ ' : '') + fmtDuration(c.from) + '  ' + c.text,
+            onClick: function () { BiliNestPlayer.seekTo(c.from); }
+          };
+        }));
       });
       // 播放器穷尽重试/备用/换清晰度后仍失败（如该集文件在 CDN 缺失），
       // 自动切换到官方嵌入播放器兜底（官方走 DASH，通常可播）。
