@@ -1021,9 +1021,15 @@ async function fetchDanmakuUpstream(fullUrl, headers) {
  * 这里用手写的极简 protobuf 解码器解析为前端需要的 {elems:[...]} 结构，
  * 不依赖任何第三方库（protobuf wire 格式本身很简单）。
  * 字段对照（bilibili.community.service.dm.v1.DanmakuElem）：
- *   id(1) progress(3,ms) mode(4) fontsize(5) color(6,uint32 RGB)
- *   midHash(7) content(8) pool(12) idStr(13)
+ *   id(1) progress(2,ms) mode(3) fontsize(4) color(5,uint32 RGB)
+ *   midHash(6) content(7) ctime(8) weight(9) action(10) pool(11) idStr(12)
+ *   attr(13) animation(22) colorful(24)
  * 前端 fetchDanmakuSegments 已按 content/mode/progress/fontsize/color 读取。
+ *
+ * 注意：这里曾经**整体错位一位**（把 progress 读成字段 3、content 读成 8），
+ * 于是每条弹幕的 content 都是空字符串 —— 前端见空就跳过，弹幕一条都不显示，
+ * 而且 progress/mode/color 全是别的字段的值。是在对照官方 XML 弹幕接口
+ * （x/v1/dm/list.so，`<d p="时间,模式,字号,颜色,...">正文</d>`）逐条比对时发现的。
  * ------------------------------------------------------------------ */
 function readVarint(buf, pos) {
   let result = 0n;
@@ -1096,17 +1102,24 @@ function decodeDmSeg(buf) {
         return it && it.wireType === 2 ? Buffer.from(it.value).toString('utf8') : '';
       };
       const id = vInt(1);
-      const idStr = vStr(13);
+      const idStr = vStr(12);
       out.push({
         id: idStr || (id != null ? String(id) : ''),
-        progress: vInt(3) != null ? vInt(3) : 0,
-        mode: vInt(4) != null ? vInt(4) : 1,
-        fontsize: vInt(5) != null ? vInt(5) : 25,
-        color: vInt(6) != null ? vInt(6) : 16777215,
-        midHash: vStr(7),
-        content: vStr(8),
-        pool: vInt(12) != null ? vInt(12) : 0,
+        progress: vInt(2) != null ? vInt(2) : 0,
+        mode: vInt(3) != null ? vInt(3) : 1,
+        fontsize: vInt(4) != null ? vInt(4) : 25,
+        color: vInt(5) != null ? vInt(5) : 16777215,
+        midHash: vStr(6),
+        content: vStr(7),
+        // 下面几个目前前端用不到，一并解出来备用（弹幕权重 / 池 / 高级弹幕标记）
+        ts: vInt(8) != null ? vInt(8) : 0,
+        weight: vInt(9) != null ? vInt(9) : 0,
+        action: vStr(10),
+        pool: vInt(11) != null ? vInt(11) : 0,
         idStr: idStr,
+        attr: vInt(13) != null ? vInt(13) : 0,
+        animation: vStr(22),
+        colorful: vInt(24) != null ? vInt(24) : 0,
       });
     } catch (e) {
       /* 单条弹幕解析失败则跳过，避免整包失败 */

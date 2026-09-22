@@ -990,8 +990,12 @@ window.BiliNestPlayer = (function () {
         var text = String(e.content || '').trim();
         if (!text) continue;
         var mode = Number(e.mode) || 1;
-        // 高级/代码/BAS 弹幕（mode 8+）自研画布无法还原其特殊效果，跳过避免显示乱码
-        if (mode > 7) continue;
+        /*
+         * B 站弹幕模式：1/2/3 滚动、4 底部、5 顶部、6 逆向滚动、7 高级（正文是定位用的
+         * JSON 数组）、8 代码、9 BAS。7 起的正文不是给人读的文字，画布也还原不了它们
+         * 的特效，直接跳过（否则屏幕上会滚过一串 JSON）。
+         */
+        if (mode < 1 || mode > 6) continue;
         list.push({
           time: (Number(e.progress) || 0) / 1000, // 毫秒 → 秒
           mode: mode,
