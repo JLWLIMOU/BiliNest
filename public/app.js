@@ -876,6 +876,46 @@
     state.episodes = [];
     renderDashboard();
     syncActiveFolderTab();   // 打开主页时若停在收藏夹标签页，也补一次新增视频
+    refreshFolderCounts();   // 收藏夹库卡片上的数量：后台校准一次（见其注释）
+  }
+
+  /**
+   * 收藏夹库卡片上的「N 个视频」是**加入时的快照**，用户在 B 站往收藏夹里加/删视频之后
+   * 它不会变（实测：卡片 4 个，点进去 18 个）。这里用一次「我创建的收藏夹」列表把库里
+   * 所有数量校准一遍 —— 一次请求覆盖全部收藏夹，而且和「内容源」共用那份 10 分钟缓存，
+   * 正常情况下连请求都不多发。拿不到就保留旧数字，不弹任何提示。
+   */
+  async function refreshFolderCounts() {
+    var folders = store.get('studyFolders') || [];
+    if (!folders.length) return;
+    var login = store.get('login');
+    if (!login) return;
+    // 同一轮里别重复跑（loadDashboard 会被调用得比较频繁）
+    if (state.folderCountRefreshing) return;
+    state.folderCountRefreshing = true;
+    try {
+      if (!state.folders.length || Date.now() - state.foldersFetchedAt > 10 * 60 * 1000) {
+        state.folders = await api.folders(login.mid, creds());
+        state.foldersFetchedAt = Date.now();
+      }
+      var changed = false;
+      folders.forEach(function (f) {
+        var live = state.folders.find(function (x) { return String(x.id) === String(f.id); });
+        if (!live || live.media_count == null) return;   // 收藏的他人收藏夹不在这一份列表里，跳过
+        if (Number(live.media_count) !== Number(f.mediaCount)) {
+          f.mediaCount = Number(live.media_count);
+          changed = true;
+        }
+      });
+      if (changed) {
+        store.set({ studyFolders: folders });
+        if (state.currentView === 'dashboard') renderDashboard();
+      }
+    } catch (e) {
+      /* 校准失败就保留旧数字：这只是个数字，不值得打扰用户 */
+    } finally {
+      state.folderCountRefreshing = false;
+    }
   }
 
   /* ---------------- 主页标签页（系统标签 + 自定义标签） ---------------- */
