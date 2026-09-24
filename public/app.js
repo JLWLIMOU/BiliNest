@@ -3142,6 +3142,14 @@
       return;
     }
     var items = [{ label: '重命名', onClick: function () { startCardRename(anchor, kind, id); } }];
+    /*
+     * 本地文件夹列表：手动重新扫描一次。
+     * 本地列表是导入时的快照，之后往文件夹里加/删文件它不会自己更新（和收藏夹库不同，
+     * 那是服务端接口）。这里给一个显式入口，扫完会说明新增/移除了几个。
+     */
+    if (entry.kind === 'local' && entry.isSeries && entry.dirScannable) {
+      items.push({ label: '重新扫描文件夹', onClick: function () { rescanLocalFolder(entry); } });
+    }
     if (entry.customTitle) {
       items.push({
         label: '恢复原名',
@@ -4424,6 +4432,8 @@
       return;
     }
     var seriesId = 'locdir-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    // 目录句柄存下来：之后「⋯ → 重新扫描文件夹」才能重新遍历这个目录
+    if (res.dirHandle) local.saveDirHandle(seriesId, res.dirHandle);
     var item = {
       id: seriesId,
       kind: 'local',
@@ -4433,6 +4443,7 @@
       name: res.name,
       episodes: res.episodes,
       episodeCount: res.episodes.length,
+      dirScannable: !!res.dirHandle,   // 有没有目录句柄（决定菜单里显不显示"重新扫描"）
       addedAt: Date.now(),
       stars: 0
     };
@@ -4443,7 +4454,47 @@
     loadDashboard();
     toast('已添加文件夹「' + res.name + '」（' + res.episodes.length + ' 个视频' +
       (res.skipped ? '，跳过 ' + res.skipped + ' 个浏览器放不了的' : '') +
-      '）· 点卡片右上角 ⋯ 可改名', 'success', res.skipped ? 7000 : 5000);
+      '）· 点卡片右上角 ⋯ 可改名 / 重新扫描', 'success', res.skipped ? 7000 : 5000);
+  }
+
+  /**
+   * 手动重新扫描本地文件夹：新增的视频补进来、磁盘上没了的移除；
+   * 没变的条目沿用原来的 id，所以星级 / 观看进度 / 合集记忆都不会丢。
+   * 权限在"点这一下"的手势里申请 —— 跨会话后浏览器通常要求重新授权。
+   */
+  async function rescanLocalFolder(entry) {
+    if (!entry || !entry.dirScannable) return;
+    toast('正在扫描文件夹…', 'info', 5000);
+    var res = null;
+    try {
+      res = await local.rescanDirectory(entry.id, entry.episodes || []);
+    } catch (e) {
+      res = { ok: false, reason: 'read-failed' };
+    }
+    if (!res || !res.ok) {
+      var why = res && res.reason;
+      if (why === 'denied') toast('没有拿到文件夹的读取权限，可以删掉这个列表后重新添加一次', 'error', 7000);
+      else if (why === 'no-handle') toast('找不到这个列表的文件夹记录（浏览器可能清过站点数据，或列表是旧版本添加的），请重新添加一次', 'error', 8000);
+      else toast('重新扫描失败，稍后再试', 'error');
+      return;
+    }
+    var list = store.get('customVideos') || [];
+    var hit = list.find(function (x) { return String(x.id) === String(entry.id); });
+    if (hit) {
+      hit.episodes = res.episodes;
+      hit.episodeCount = res.episodes.length;
+      store.set({ customVideos: list });
+    }
+    renderDashboard();
+    if (state.currentView === 'browse') renderBrowse();
+    if (!res.added && !res.removed) {
+      toast('扫描完成：没有变化（共 ' + res.episodes.length + ' 个视频）', 'success');
+      return;
+    }
+    var parts = [];
+    if (res.added) parts.push('新增 ' + res.added + ' 个');
+    if (res.removed) parts.push('移除 ' + res.removed + ' 个');
+    toast('扫描完成：' + parts.join('、') + '，现在共 ' + res.episodes.length + ' 个视频', 'success', 5000);
   }
 
   async function onPickFolder() {
@@ -4501,6 +4552,7 @@
         item.episodes.forEach(function (ep) {
           try { local.removeEntry(ep); } catch (e) { /* ignore */ }
         });
+        try { local.deleteDirHandle(item.id); } catch (e) { /* ignore */ }
       } else {
         local.removeEntry(item);
       }

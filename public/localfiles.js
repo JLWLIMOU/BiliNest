@@ -16,6 +16,7 @@ window.BiliNestLocal = (function () {
   var STORE_NAME = 'handles';
   var urlMap = new Map(); // entryId -> 最近一次创建的 objectURL
   var fileMap = new Map(); // entryId -> File（input / webkitdirectory 这类只在本次会话有效的条目）
+  var dirMap = new Map();  // seriesId -> 目录句柄（本次会话，供"重新扫描"用；同时也会尽量写进 IndexedDB）
   var dbPromise = null;
   var legacyMigrated = false;
 
@@ -271,11 +272,13 @@ window.BiliNestLocal = (function () {
       ep.duration = it.duration;
       episodes.push(ep);
     }
-    return { name: dir.name, episodes: episodes, skipped: skipped };
+    // 目录句柄一并带回去：应用层把它存在这个列表条目上，之后才能"重新扫描"
+    return { name: dir.name, episodes: episodes, skipped: skipped, dirHandle: dir };
   }
 
   /**
    * 兜底：<input type="file" webkitdirectory> 的 FileList（Firefox / Safari 走这条路）。
+   * 注意：这条路上拿不到目录句柄，所以那种列表**没有**「重新扫描」。
    * 以 webkitRelativePath 的第一段为文件夹名，其余的同级视频作为列表项。
    */
   async function entriesFromDirFiles(fileList) {
@@ -344,6 +347,145 @@ window.BiliNestLocal = (function () {
     return entries;
   }
 
+  /* ------------------------------------------------------------------
+   * 重新扫描文件夹（手动）
+   *
+   * 本地文件夹列表是"导入那一刻的快照"：之后往文件夹里丢新视频，列表不会自己变化
+   * （收藏夹库那边是服务端接口，所以能随时校准；这里完全是另一套机制）。
+   * 所以这里提供一次**手动重扫**：
+   *   · 目录句柄在导入时存下来（内存 Map + 尽量写进 IndexedDB）；
+   *   · 按**文件名**认领老条目 —— 认领上的沿用原来的 id 与对象，因此**星级、观看进度、
+   *     合集记忆都不会丢**；只有大小 / 修改时间变了才重新探测时长（没变就直接沿用，快）；
+   *   · 新增的补进来，磁盘上已经没了的连句柄一起清掉。
+   * 跨会话后句柄通常要重新授权，而 requestPermission 必须在用户手势里调用 ——
+   * 正好就是"点重新扫描"这一下。
+   * ------------------------------------------------------------------ */
+
+  /** 记住某个本地列表对应的目录句柄（供之后重新扫描） */
+  async function saveDirHandle(seriesId, dirHandle) {
+    if (!seriesId || !dirHandle) return;
+    dirMap.set(seriesId, dirHandle);
+    try {
+      await putHandle('dir:' + seriesId, dirHandle);
+    } catch (e) {
+      /* 句柄存不下（隐私模式等）：本次会话内仍可用 */
+    }
+  }
+
+  async function deleteDirHandle(seriesId) {
+    dirMap.delete(seriesId);
+    try {
+      await deleteHandle('dir:' + seriesId);
+    } catch (e) { /* ignore */ }
+  }
+
+  /** 确认句柄可读；不足就先申请（必须在用户手势里调用，否则会被浏览器直接拒绝） */
+  async function ensureReadPermission(handle) {
+    try {
+      if (!handle || typeof handle.queryPermission !== 'function') return true;
+      var perm = await handle.queryPermission({ mode: 'read' });
+      if (perm === 'granted') return true;
+      perm = await handle.requestPermission({ mode: 'read' });
+      return perm === 'granted';
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /**
+   * 重新扫描一个本地列表所在目录。
+   * @returns {Promise<{ok:boolean, reason?:string, name?:string, episodes?:Array, kept?:number, added?:number, removed?:number}>}
+   *   reason: no-handle（这条列表是旧版本加的，或来自 input 兜底）/ denied / read-failed
+   */
+  async function rescanDirectory(seriesId, prevEpisodes) {
+    var handle = dirMap.get(seriesId) || null;
+    if (!handle) {
+      try { handle = await getHandle('dir:' + seriesId); } catch (e) { handle = null; }
+    }
+    if (!handle) return { ok: false, reason: 'no-handle' };
+    dirMap.set(seriesId, handle);
+    if (!(await ensureReadPermission(handle))) return { ok: false, reason: 'denied' };
+
+    var files = [];
+    try {
+      for await (var fh of handle.values()) {
+        if (!fh || fh.kind !== 'file') continue;
+        if (!VIDEO_RE.test(fh.name)) continue;
+        files.push(fh);
+      }
+    } catch (e) {
+      return { ok: false, reason: 'read-failed' };
+    }
+    files.sort(byName);
+
+    var prev = prevEpisodes || [];
+    var used = {};
+    var kept = [];
+    var added = [];
+    for (var i = 0; i < files.length; i++) {
+      var fh2 = files[i];
+      var old = null;
+      var oldIdx = -1;
+      for (var j = 0; j < prev.length; j++) {
+        if (used[j]) continue;
+        if (prev[j] && prev[j].name === fh2.name) { old = prev[j]; oldIdx = j; break; }
+      }
+      var file = null;
+      try { file = await fh2.getFile(); } catch (e) { continue; }   // 文件被移走/读不了：跳过
+      if (old) {
+        used[oldIdx] = true;
+        var unchanged = old.size === file.size && old.lastModified === file.lastModified && old.duration;
+        var ep = Object.assign({}, old);      // 沿用原 id：星级、进度、合集记忆都跟着
+        ep.size = file.size;
+        ep.lastModified = file.lastModified;
+        ep.handle = true;
+        if (!unchanged) {
+          var pu = URL.createObjectURL(file);
+          var pr = await probeVideo(pu);
+          URL.revokeObjectURL(pu);
+          if (!pr.ok) continue;               // 换成了浏览器放不了的格式：当作没有这个文件
+          ep.duration = pr.duration;
+        }
+        fileMap.set(ep.id, file);
+        try { await putHandle(ep.id, fh2); } catch (e) { /* ignore */ }
+        kept.push(ep);
+      } else {
+        var url = URL.createObjectURL(file);
+        var probe = await probeVideo(url);
+        URL.revokeObjectURL(url);
+        if (!probe.ok) continue;
+        var id = newId();
+        fileMap.set(id, file);
+        try { await putHandle(id, fh2); } catch (e) { /* ignore */ }
+        var nep = makeEntry(id, file.name, file.size, file.lastModified, true);
+        nep.duration = probe.duration;
+        added.push(nep);
+      }
+    }
+
+    // 没被认领的老条目 = 磁盘上已经没有了：把它的句柄也清掉
+    var removed = 0;
+    for (var k = 0; k < prev.length; k++) {
+      if (used[k]) continue;
+      var gone = prev[k];
+      removed++;
+      try { revoke(gone.id); } catch (e) { /* ignore */ }
+      fileMap.delete(gone.id);
+      if (gone.handle) { try { await deleteHandle(gone.id); } catch (e) { /* ignore */ } }
+    }
+
+    var episodes = kept.concat(added);
+    episodes.sort(byName);
+    return {
+      ok: true,
+      name: (handle && handle.name) || '',
+      episodes: episodes,
+      kept: kept.length,
+      added: added.length,
+      removed: removed
+    };
+  }
+
   /**
    * 取一个**全新的**可播放地址。
    *
@@ -398,6 +540,9 @@ window.BiliNestLocal = (function () {
     pickDirectory: pickDirectory,
     entriesFromDirFiles: entriesFromDirFiles,
     entriesFromFiles: entriesFromFiles,
+    saveDirHandle: saveDirHandle,
+    deleteDirHandle: deleteDirHandle,
+    rescanDirectory: rescanDirectory,
     freshUrl: freshUrl,
     getUrl: getUrl,
     removeEntry: removeEntry
