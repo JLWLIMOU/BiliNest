@@ -2706,8 +2706,15 @@
         title: ctx.title || '',
         finished: true
       };
-      // 优先用历史里"没看完的那一集"；没有就按当前选集列表取下一集（刚看完时通常走这条）
-      var next = seriesResume(rec.seriesKey || ctx.seriesKey) || nextEpisodeFromList(ctx);
+      /*
+       * 优先取"刚看完这一集的**下一集**"（按当前选集列表），这是用户的心理预期：
+       * 看完第 N 集，卡片就该显示第 N+1 集。
+       * 不能先问 seriesResume()：它按"进度最大的未看完集"挑，历史里只要躺着一集
+       * 很早以前看到 30% 的，就会被它挑中 —— 卡片于是显示成"前面好多集的那一集"，
+       * 看起来就像刚看完的这集没被记上（用户报过这个）。
+       * 只有"已经是最后一集"时，才退回 seriesResume()，把还没看完的旧集当作续播点。
+       */
+      var next = nextEpisodeFromList(ctx) || seriesResume(rec.seriesKey || ctx.seriesKey);
       if (next) {
         var nextEp = rec.episodes[next.bvid + ':' + next.cid] || null;
         rec.bvid = next.bvid;
@@ -2717,7 +2724,8 @@
         rec.progress = next.progress || 0;
         // 下一集的时长优先用选集列表里的（刚看完时的"下一集"还不在分集映射里）
         rec.duration = (nextEp && nextEp.duration) || next.duration || rec.duration || dur;
-        rec.episodeLabel = (nextEp && nextEp.title) || rec.episodeLabel || '';
+        // 分集标题优先用"下一集"自己的（选集中的 part 名），别留在刚看完那集的名字上
+        rec.episodeLabel = (nextEp && nextEp.title) || next.title || rec.episodeLabel || '';
         rec.watchedAt = finishedAt;
       } else {
         // 整季已全部看完
@@ -2804,6 +2812,25 @@
     var h = (store.get('watchHistory') || []).find(function (x) { return x.seriesKey === seriesKey; });
     if (!h) return null;
     if (h.episodes) {
+      /*
+       * ① 先认"记录当前指向的那一集" —— 那是应用最后一次写下的位置：你正在看的那一集，
+       *    或者刚看完上一集之后自动切过来的下一集。
+       *    必须放在最前面：历史里往往还留着"很早以前看了 30% 的某一集"，按进度挑的话
+       *    它会把卡片顶成"前面好多集的那一集"，看起来就像刚看的这一集没被记上。
+       */
+      var curKey0 = h.bvid + ':' + h.cid;
+      var curEp0 = h.episodes[curKey0] || null;
+      if (!curEp0 || !curEp0.finished) {
+        return {
+          bvid: h.bvid,
+          cid: h.cid,
+          page: h.page || 1,
+          progress: (curEp0 && curEp0.progress) || h.progress || 0,
+          title: (curEp0 && curEp0.title) || h.title,
+          finished: false
+        };
+      }
+      // ② 当前这一集已经看完（例如刚看完最后一集）：退回"最近看过、还没看完的那一集"
       var bestKey = '';
       var bestAt = -1;
       var bestScore = -1;
@@ -2829,18 +2856,8 @@
           finished: false
         };
       }
-      // 映射里没有可续播的集：只有记录当前指向的这集也没看完时才继续算可续播
-      var curKey = h.bvid + ':' + h.cid;
-      var curEp = h.episodes[curKey] || null;
-      if (curEp && curEp.finished) return null;
-      return {
-        bvid: h.bvid,
-        cid: h.cid,
-        page: h.page || 1,
-        progress: (curEp && curEp.progress) || h.progress || 0,
-        title: (curEp && curEp.title) || h.title,
-        finished: false
-      };
+      // ③ 整季都看完了 → 没有可续播的集
+      return null;
     }
     return { bvid: h.bvid, cid: h.cid, page: h.page || 1, progress: h.progress || 0, title: h.title, finished: false };
   }
