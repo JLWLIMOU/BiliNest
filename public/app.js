@@ -1897,9 +1897,24 @@
     function showable(h) {
       if (h.seriesKey) {
         var s = seriesResume(h.seriesKey);
-        return !!(s && s.progress >= 10);
+        if (!s) return false;
+        if (s.progress >= 10) return true;
+        /*
+         * 进度是 0 也要显示的一种情况：系列里已经有看完的集，而当前指向的下一集还没开始
+         * （刚看完一集就是这样）。不这么判的话，"看完一集整张卡片就消失" —— 数据里明明
+         * 有记录，继续学习栏里却什么都没有。
+         */
+        return hasFinishedEpisode(h) && !s.finished;
       }
       return h.progress >= 10 && (!h.duration || h.progress < h.duration - 10);
+    }
+
+    /** 这条系列记录里有没有"已看完"的分集 */
+    function hasFinishedEpisode(h) {
+      if (!h || !h.episodes) return false;
+      return Object.keys(h.episodes).some(function (k) {
+        return h.episodes[k] && h.episodes[k].finished;
+      });
     }
 
     // 组内挑选“最新且可续播”的一条（可显示的优先，其次 watchedAt 最新）
@@ -2691,7 +2706,8 @@
         title: ctx.title || '',
         finished: true
       };
-      var next = seriesResume(rec.seriesKey || ctx.seriesKey);
+      // 优先用历史里"没看完的那一集"；没有就按当前选集列表取下一集（刚看完时通常走这条）
+      var next = seriesResume(rec.seriesKey || ctx.seriesKey) || nextEpisodeFromList(ctx);
       if (next) {
         var nextEp = rec.episodes[next.bvid + ':' + next.cid] || null;
         rec.bvid = next.bvid;
@@ -2699,7 +2715,8 @@
         rec.page = next.page || 1;
         rec.title = next.title || rec.title;
         rec.progress = next.progress || 0;
-        rec.duration = (nextEp && nextEp.duration) || rec.duration || dur;
+        // 下一集的时长优先用选集列表里的（刚看完时的"下一集"还不在分集映射里）
+        rec.duration = (nextEp && nextEp.duration) || next.duration || rec.duration || dur;
         rec.episodeLabel = (nextEp && nextEp.title) || rec.episodeLabel || '';
         rec.watchedAt = finishedAt;
       } else {
@@ -2778,7 +2795,10 @@
 
   /**
    * 整季续播定位：在系列记录的分集映射里找“最近观看且未看完”的一集。
-   * 已看完的集跳过；没有分集映射时退回整季记录的当前集。
+   * 已看完的集跳过；映射里一集可续播的都没有时，再看记录**当前指向的那一集**：
+   *   · 它自己没被标记看完 → 就是"刚看完上一集、自动切过来的下一集"，仍然可续播；
+   *   · 它自己也是看完的（整季结束）→ 返回 null，卡片不再显示。
+   * 返回对象里的 finished 供调用方判断"这一集是不是已经看完了"。
    */
   function seriesResume(seriesKey) {
     var h = (store.get('watchHistory') || []).find(function (x) { return x.seriesKey === seriesKey; });
@@ -2805,13 +2825,52 @@
           cid: bestKey.slice(ci + 1),
           page: h.page || 1,
           progress: h.episodes[bestKey].progress || 0,
-          title: h.episodes[bestKey].title || h.title
+          title: h.episodes[bestKey].title || h.title,
+          finished: false
         };
       }
-      // 有分集映射但全部已看完（或全部无进度）→ 没有可续播的集
-      return null;
+      // 映射里没有可续播的集：只有记录当前指向的这集也没看完时才继续算可续播
+      var curKey = h.bvid + ':' + h.cid;
+      var curEp = h.episodes[curKey] || null;
+      if (curEp && curEp.finished) return null;
+      return {
+        bvid: h.bvid,
+        cid: h.cid,
+        page: h.page || 1,
+        progress: (curEp && curEp.progress) || h.progress || 0,
+        title: (curEp && curEp.title) || h.title,
+        finished: false
+      };
     }
-    return { bvid: h.bvid, cid: h.cid, page: h.page || 1, progress: h.progress || 0, title: h.title };
+    return { bvid: h.bvid, cid: h.cid, page: h.page || 1, progress: h.progress || 0, title: h.title, finished: false };
+  }
+
+  /**
+   * 当前这一集的**下一集**（按正在播的选集列表找）。
+   * 为什么要单独有它：刚看完一集时，"下一集"往往还没被看过、因此不在历史的分集映射里，
+   * seriesResume() 找不到它 —— 记录就只能停在刚看完的那一集上。
+   */
+  function nextEpisodeFromList(ctx) {
+    var eps = state.episodes || [];
+    if (!ctx || !eps.length) return null;
+    var idx = -1;
+    for (var i = 0; i < eps.length; i++) {
+      var ep = eps[i];
+      if (!ep || String(ep.cid) !== String(ctx.cid)) continue;
+      if (ep.bvid && ctx.bvid && String(ep.bvid) !== String(ctx.bvid)) continue;
+      idx = i;
+      break;
+    }
+    if (idx < 0 || idx + 1 >= eps.length) return null;
+    var nx = eps[idx + 1];
+    return {
+      bvid: nx.bvid || ctx.bvid,
+      cid: nx.cid,
+      page: nx.page || 1,
+      title: nx.title || '',
+      progress: 0,
+      duration: nx.duration || 0
+    };
   }
 
   /**
