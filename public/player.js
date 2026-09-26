@@ -30,6 +30,12 @@ window.BiliNestPlayer = (function () {
   var clickTimer = null;        // 挂起中的单击（双击窗口过去后才执行）
   var lastToggle = null;        // 已经执行过的那次单击切换（慢双击用它回滚）
   var DOUBLE_CLICK_MS = 300;    // 与 ArtPlayer 的 DBCLICK_TIME 对齐：第一下等多久
+  /*
+   * 第一下已经执行完之后，还容忍第二下晚到多久（见 bindClick）。
+   * 300ms（挂起窗口）+ 250ms ≈ 550ms，正好覆盖系统默认的双击阈值；
+   * 再长就会把"暂停之后隔一会儿再双击"里前面那一下也卷进来。
+   */
+  var SECOND_CLICK_MS = 250;
   // 弹幕分段：官方网页端每 6 分钟一包、每包最多 6000 条。
   // 上限 250 包 ≈ 25 小时视频，防止异常视频无限拉取。
   var MAX_DANMAKU_SEGMENTS = 250;
@@ -715,8 +721,21 @@ window.BiliNestPlayer = (function () {
         !!(e.target.closest && e.target.closest('.art-state') && !e.target.closest('.art-icon-error'));
       if (!onSurface) return;   // 控制条、报错图标等一律不接管
 
-      // 第二下：挂起中的单击还没执行（够快），或者浏览器自己数出来"这是第二下"
-      var isSecond = clickTimer !== null || e.detail === 2;
+      /*
+       * 第二下怎么认：**只看我们自己的手势状态，不看 e.detail**。
+       *
+       * 为什么不能用 detail：浏览器的点击计数是**跨手势累加**的 —— 你先点一下暂停（第 1 击），
+       * 紧接着双击，那两下就变成第 2、3 击。按 `detail === 2` 判，双击的**第一下**会被当成
+       * "第二下"：回滚掉刚才的暂停（变成继续播放）+ 切一次全屏；双击的第二下又被当成新单击，
+       * 300ms 后把播放切回来 —— 症状就是"暂停后双击，缩小了还在播；再双击，放大了又在暂停"。
+       *
+       * 所以只认这两种：
+       *   · 我们挂起的第一下还没执行（两下间隔 < DOUBLE_CLICK_MS）；
+       *   · 第一下刚执行完不久（≤ SECOND_CLICK_MS）—— 留给"稍微慢一点的双击"，
+       *     靠 undoLastToggle() 把已经发生的切换回滚掉。
+       */
+      var isSecond = clickTimer !== null ||
+        (!!lastToggle && Date.now() - lastToggle.at <= SECOND_CLICK_MS);
 
       e.preventDefault();
       e.stopImmediatePropagation();                    // 阻止事件到达 ArtPlayer 的 click 处理
@@ -754,14 +773,14 @@ window.BiliNestPlayer = (function () {
   /**
    * 回滚刚刚由"单击"造成的播放状态切换（双击的第二下用）。
    * 只在状态确实还停在"我们刚切到的那一边"时才回滚，避免推翻用户自己的操作；
-   * 隔得比较久（超过 SECONDS）就当那次单击已经成立，不再回滚。
+   * 隔得比较久（超过 SECOND_CLICK_MS，见 isSecond 判定）本来也走不到这里。
    */
   function undoLastToggle() {
     var art = state.art;
     if (!art || !lastToggle) return;
     var pending = lastToggle;
     lastToggle = null;
-    if (Date.now() - pending.at > 900) return;
+    if (Date.now() - pending.at > SECOND_CLICK_MS) return;
     var v = art.video;
     if (!v || v.paused === pending.wasPaused) return;
     var r = art.toggle();
