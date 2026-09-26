@@ -27,10 +27,8 @@ window.BiliNestPlayer = (function () {
   };
 
   // 视频画面区域的单击 / 双击判定（见 bindClick）
-  var clickTimer = null;        // 挂起中的单击（双击窗口过去后才执行）
-  var lastVideoClick = 0;       // 上一"第一下"的时间
-  var lastToggle = null;        // 已经执行过的单击切换（迟到的双击用它回滚）
-  var DOUBLE_CLICK_MS = 300;    // 与 ArtPlayer 的 DBCLICK_TIME 对齐
+  var lastToggle = null;        // 最近一次"单击切换"（双击的第二下用它回滚）
+  var SECOND_CLICK_MS = 400;    // 没拿到 detail=2 时的兜底：距上一次单击多近算同一次双击
   // 弹幕分段：官方网页端每 6 分钟一包、每包最多 6000 条。
   // 上限 250 包 ≈ 25 小时视频，防止异常视频无限拉取。
   var MAX_DANMAKU_SEGMENTS = 250;
@@ -623,10 +621,7 @@ window.BiliNestPlayer = (function () {
       hideEndOverlay();
       return;
     }
-    // 取消挂起的单击播放切换，避免结束后误触重播
-    clearTimeout(clickTimer);
-    clickTimer = null;
-    lastVideoClick = 0;
+    // 结束后清掉"上一次单击"的记录，避免浮层上紧接着的一下被当成双击
     lastToggle = null;
     var nextBtn = els.endOverlay.querySelector('[data-end-next]');
     var nextText = els.endOverlay.querySelector('[data-end-next-text]');
@@ -681,15 +676,15 @@ window.BiliNestPlayer = (function () {
   /**
    * 单击 / 双击手势（视频画面区域）。
    *
-   * 为什么不用 ArtPlayer 自带的那套：它按 DBCLICK_TIME(300ms) 自己数点击 —— 第一下
-   * 立即切播放状态，第二下才切全屏。于是"双击进全屏"必然先暂停一下；再慢一点的双击
-   * 会被算成两次单击，最后停在暂停上。
-   *
    * 这里在捕获阶段接管（stopImmediatePropagation 让事件到不了 ArtPlayer 的处理器）：
-   *   - 第一下：挂起 300ms，期间没有第二下才切播放状态（单击响应慢 300ms，换双击不碰播放状态）；
-   *   - 第二下在 300ms 内：取消挂起的动作，只切全屏；
-   *   - 第二下比 300ms 还慢（系统双击阈值默认 500ms）：那一下的切换已经执行了，回滚它再切全屏，
-   *     用户最多看到一闪，而不是"进了全屏还停着"。
+   *   - 第一下：**立刻**切播放 / 暂停；
+   *   - 第二下（浏览器认定是双击）：把第一下造成的状态变化**回滚**回去，然后切全屏 ——
+   *     所以双击结束时播放状态跟双击前一样，不会"进全屏还停着"（ArtPlayer 自带那套的毛病）。
+   *
+   * 为什么第一下不延迟：曾试过"挂起 300ms，确认没有第二下再切播放"，双击确实干净了，
+   * 但**每一次单击暂停都要等 300ms 才生效**，手感明显发钝（实测暂停发生在点击后 ~300ms，
+   * 用户反馈"更严重了"）。所以改成"立刻切 + 双击时回滚"：代价是双击时会有一次极短的
+   * 暂停-恢复（100ms 间隔约 0ms 察觉不到，480ms 间隔约 190ms），换来单击零延迟。
    *
    * 触屏 / 手写笔保留 ArtPlayer 原生的手势（滑动调音量等）。
    * 注意这里按 **pointerType** 判断而不是 navigator.maxTouchPoints：带触摸屏的笔记本
@@ -708,13 +703,17 @@ window.BiliNestPlayer = (function () {
 
       var now = Date.now();
       var onVideo = e.target === art.video;
-      // 第二下：挂起中的单击还没执行（够快），或者浏览器自己认定为双击（detail=2），
-      // 或者刚刚才执行过第一下的切换（慢一点的双击），都算双击
-      var isSecond = clickTimer !== null || e.detail >= 2 || (now - lastVideoClick <= DOUBLE_CLICK_MS);
+      /*
+       * 是不是双击的第二下？
+       *   · 浏览器自己数出来的点击次数（detail=2）最准，直接用；
+       *   · 兜底：上一次"单击切换"刚发生在极短时间内（说明这两下挨得够近）也算 ——
+       *     万一浏览器因为两次点击落在不同元素上而没把 detail 累计上去，也不至于丢全屏。
+       */
+      var isSecond = e.detail >= 2 || (!!lastToggle && now - lastToggle.at <= SECOND_CLICK_MS);
 
       /*
        * 第二下没落在 <video> 上、而是落在画面中央那个播放按钮（.art-state）上 —— 这是
-       * 第一下的延迟切换把画面暂停、按钮冒出来接住了第二下。也算双击处理，否则观感是
+       * 第一下立刻暂停、按钮冒出来接住了第二下。也算双击处理，否则观感是
        * "暂停一下又自己播起来，还没进全屏"。控制条上的点击不接管：双击进度条是找位置，
        * 不是要全屏。
        */
@@ -722,8 +721,6 @@ window.BiliNestPlayer = (function () {
         if (!isSecond || !e.target.closest || !e.target.closest('.art-state')) return;
         e.preventDefault();
         e.stopImmediatePropagation();
-        clickTimer = null;
-        lastVideoClick = 0;
         undoLastToggle();
         if (typeof art.fullscreen === 'boolean') {
           art.fullscreen = !art.fullscreen;
@@ -735,49 +732,36 @@ window.BiliNestPlayer = (function () {
       e.stopImmediatePropagation();                    // 阻止事件到达 ArtPlayer 的 click 处理
 
       if (isSecond) {
-        // 双击：取消挂起的单击动作 + 回滚已经执行过的那次切换，仅切换全屏
-        clearTimeout(clickTimer);
-        clickTimer = null;
-        lastVideoClick = 0;
+        // 双击：回滚第一下已经执行过的那次切换，然后只切全屏
         undoLastToggle();
         if (typeof art.fullscreen === 'boolean') {
           art.fullscreen = !art.fullscreen;
         }
-      } else {
-        lastVideoClick = now;
-        clearTimeout(clickTimer);
-        // 播放结束浮层（下一集 / 重温）显示时：单击不响应，避免误触重播；
-        // 只保留双击全屏 / 退出全屏。
-        if (isEndOverlayVisible()) {
-          clickTimer = null;
-          return;
-        }
-        clickTimer = setTimeout(function () {
-          clickTimer = null;
-          lastVideoClick = 0;
-          if (!state.art) return;
-          if (isEndOverlayVisible()) return; // 浮层显示期间不执行播放切换
-          var v = state.art.video;
-          var wasPaused = !!(v && v.paused);
-          var r = state.art.toggle();
-          lastToggle = { at: Date.now(), wasPaused: wasPaused };
-          if (r && typeof r.catch === 'function') r.catch(function () { /* 自动播放可能被拦截 */ });
-        }, DOUBLE_CLICK_MS);
+        return;
       }
+
+      // 播放结束浮层（下一集 / 重温）显示时：单击不响应，避免误触重播；只保留双击全屏。
+      if (isEndOverlayVisible()) return;
+      // 第一下：立刻切播放 / 暂停（不等待双击判定，见上方注释）
+      var v = art.video;
+      var wasPaused = !!(v && v.paused);
+      var r = art.toggle();
+      lastToggle = { at: now, wasPaused: wasPaused };
+      if (r && typeof r.catch === 'function') r.catch(function () { /* 自动播放可能被拦截 */ });
     }, true);
   }
 
   /**
-   * 回滚刚刚由"单击"造成的播放状态切换（迟到的双击用）。
+   * 回滚刚刚由"单击"造成的播放状态切换（双击的第二下用）。
    * 只在状态确实还停在"我们刚切到的那一边"时才回滚，避免推翻用户自己的操作；
-   * 超过 600ms 就当那次单击已经成立，不再回滚。
+   * 隔得比较久（超过 SECONDS）就当那次单击已经成立，不再回滚。
    */
   function undoLastToggle() {
     var art = state.art;
     if (!art || !lastToggle) return;
     var pending = lastToggle;
     lastToggle = null;
-    if (Date.now() - pending.at > 600) return;
+    if (Date.now() - pending.at > 900) return;
     var v = art.video;
     if (!v || v.paused === pending.wasPaused) return;
     var r = art.toggle();
