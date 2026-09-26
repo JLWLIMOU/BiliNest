@@ -704,28 +704,19 @@ window.BiliNestPlayer = (function () {
       var pointer = e.pointerType;
       if (pointer && pointer !== 'mouse' && pointer !== 'pen') return;  // 触屏保留 ArtPlayer 原生手势
 
-      var now = Date.now();
-      var onVideo = e.target === art.video;
+      /*
+       * "画面区域"= 视频本身 **以及暂停时浮在画面正中的那个播放按钮（.art-state）**。
+       * 为什么必须带上按钮：暂停时按钮就盖在画面中间，用户双击时第一下点到的往往是它 ——
+       * 交给 ArtPlayer 原生处理会**立刻恢复播放**，第二下才落到视频上，于是"暂停状态双击"
+       * 最后变成"播放 + 全屏"（用户报的就是这个，而且是"有时"：点画面中间才复现，点偏上就好）。
+       * 统一接管后，两边的手势完全一致。
+       */
+      var onSurface = e.target === art.video ||
+        !!(e.target.closest && e.target.closest('.art-state') && !e.target.closest('.art-icon-error'));
+      if (!onSurface) return;   // 控制条、报错图标等一律不接管
+
       // 第二下：挂起中的单击还没执行（够快），或者浏览器自己数出来"这是第二下"
       var isSecond = clickTimer !== null || e.detail === 2;
-
-      /*
-       * 第二下没落在 <video> 上、而是落在画面中央那个播放按钮（.art-state）上 —— 这是
-       * 第一下立刻暂停、按钮冒出来接住了第二下。也算双击处理，否则观感是
-       * "暂停一下又自己播起来，还没进全屏"。控制条上的点击不接管：双击进度条是找位置，
-       * 不是要全屏。
-       */
-      if (!onVideo) {
-        if (!isSecond || !e.target.closest || !e.target.closest('.art-state')) return;
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        clickTimer = null;
-        undoLastToggle();
-        if (typeof art.fullscreen === 'boolean') {
-          art.fullscreen = !art.fullscreen;
-        }
-        return;
-      }
 
       e.preventDefault();
       e.stopImmediatePropagation();                    // 阻止事件到达 ArtPlayer 的 click 处理
