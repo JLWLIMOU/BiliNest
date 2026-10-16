@@ -209,7 +209,13 @@
 
           <!-- 选集：多P / 合集（右侧栏，可滚动） -->
           <div id="episodePanel" class="episode-panel" hidden>
-            <h3 class="episode-title">选集</h3>
+            <div class="episode-head">
+              <h3 class="episode-title">选集</h3>
+              <span id="episodeCount" class="episode-count"></span>
+            </div>
+            <!-- 选集多了才显示（少于 6 集时搜索没意义，面板也太小） -->
+            <input id="episodeSearch" class="episode-search" type="search" autocomplete="off"
+                   placeholder="搜索选集" aria-label="搜索选集" hidden>
             <div id="episodeList" class="episode-list"></div>
           </div>
         </div>

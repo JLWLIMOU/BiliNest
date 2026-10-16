@@ -1716,12 +1716,54 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
   max-height: calc(100dvh - var(--topbar-h) - 104px);
 }
 .episode-title {
-  margin: 0 0 12px;
+  margin: 0;
   padding: 0 4px;
   font-size: 13px;
   font-weight: 600;
   color: var(--text-2);
 }
+
+/* 选集面板的表头：标题 + 匹配计数（只有搜索时才显示数字） */
+.episode-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+.episode-count {
+  flex: none;
+  padding-right: 4px;
+  font-size: 12px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 选集搜索：和内容源那边的搜索框同一语言（浅底、无描边、聚焦才点亮） */
+.episode-search {
+  width: 100%;
+  margin: 0 0 10px;
+  padding: 7px 10px;
+  border: 1px solid var(--separator);
+  border-radius: var(--r-2);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  -webkit-appearance: none;
+  appearance: none;
+  transition: border-color var(--dur-2) var(--ease-state), background var(--dur-2) var(--ease-state);
+}
+.episode-search::placeholder { color: var(--text-2); }
+.episode-search:hover { border-color: var(--border-strong); }
+.episode-search:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--surface);
+}
+
+.episode-empty { padding: 16px 6px; font-size: 13px; color: var(--text); }
+.episode-empty .muted { display: block; margin-top: 4px; color: var(--text-2); }
 .episode-list {
   display: flex;
   flex-direction: column;

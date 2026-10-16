@@ -59,6 +59,8 @@
     shareUrlBox: document.getElementById('shareUrlBox'),
     episodePanel: document.getElementById('episodePanel'),
     episodeList: document.getElementById('episodeList'),
+    episodeSearch: document.getElementById('episodeSearch'),
+    episodeCount: document.getElementById('episodeCount'),
     fileInput: document.getElementById('fileInput'),
     dirInput: document.getElementById('dirInput'),
     modalRoot: document.getElementById('modalRoot'),
@@ -79,6 +81,7 @@
     hasMore: false,
     activeVideo: null,      // 当前正在播放的视频条目
     activeEpisode: null,    // { bvid, cid, page }
+    episodeQuery: '',       // 右侧选集列表的搜索词（换视频时清空）
     episodes: [],
     currentView: 'dashboard',
     dashQuery: '',          // 首页“视频库”搜索关键字
@@ -3632,6 +3635,7 @@
   async function playVideo(v, sourceKind) {
     state.activeVideo = v;
     state.episodes = [];
+    resetEpisodeSearch();   // 新视频：清掉上一个列表的搜索词
     updateEpisodeNav(); // 新视频开始时先隐藏上一集/下一集
     state.seriesInfo = null;
     state.prevView = state.currentView;
@@ -3683,6 +3687,7 @@
             entry: ep
           };
         });
+        resetEpisodeSearch();   // 本地文件夹列表：搜索词同样不继承
         var pickIdx = 0;
         var newestAt = -1;
         for (var ei = 0; ei < state.episodes.length; ei++) {
@@ -3916,6 +3921,7 @@
     // 旧版“每集一条”记录归并为整季一条（保留各集独立进度）
     normalizeHistory();
     state.episodes = episodes;
+    resetEpisodeSearch();   // 换系列 / 换合集的选集列表：搜索词不继承
     els.episodePanel.hidden = false;
     els.playerLayout.classList.add('has-episodes');
     sizeEpisodePanel();
@@ -4009,9 +4015,13 @@
   }
 
   function renderEpisodeList(currentCid, currentPage, scrollToActive) {
+    var q = (state.episodeQuery || '').trim().toLowerCase();
     var html = '';
     var lastSection = null;
+    var shown = 0;
     state.episodes.forEach(function (ep, i) {
+      if (!episodeMatches(ep, i, q)) return;
+      shown++;
       if (ep.section && ep.section !== lastSection) {
         html += '<div class="episode-section">' + esc(ep.section) + '</div>';
         lastSection = ep.section;
@@ -4026,8 +4036,48 @@
           '<span class="ep-dur">' + fmtDuration(ep.duration) + '</span>' +
         '</button>';
     });
+    if (!shown) {
+      html = '<div class="episode-empty">没有匹配的选集<span class="muted">（换个关键词，或清空搜索）</span></div>';
+    }
     els.episodeList.innerHTML = html;
+    updateEpisodeSearchUi(shown, q);
     if (scrollToActive) requestAnimationFrame(scrollEpisodeToActive);
+  }
+
+  /**
+   * 这一集是否匹配搜索词。
+   * 集号（"55"）、集名、分组名都能搜到 —— 合集里按"第几集"找是最常见的用法。
+   */
+  function episodeMatches(ep, i, q) {
+    if (!q) return true;
+    var hay = (i + 1) + ' ' + (ep.title || '') + ' ' + (ep.section || '');
+    return hay.toLowerCase().indexOf(q) >= 0;
+  }
+
+  /** 搜索框的显隐与"匹配 N / 总数"那行小字 */
+  function updateEpisodeSearchUi(shown, q) {
+    if (els.episodeSearch) {
+      els.episodeSearch.hidden = state.episodes.length < 6;   // 选集太少就没必要搜
+    }
+    if (els.episodeCount) {
+      els.episodeCount.textContent = q ? (shown + ' / ' + state.episodes.length) : '';
+    }
+  }
+
+  /** 按当前正在播的那一集重画列表（搜索框输入时用） */
+  function rerenderEpisodesForSearch() {
+    var ae = state.activeEpisode || {};
+    renderEpisodeList(ae.cid, ae.page, false);
+  }
+
+  /** 换视频 / 换系列时把搜索词清掉，避免新列表一进来就是被筛过的空状态 */
+  function resetEpisodeSearch() {
+    state.episodeQuery = '';
+    if (els.episodeSearch) {
+      els.episodeSearch.value = '';
+      els.episodeSearch.hidden = true;
+    }
+    if (els.episodeCount) els.episodeCount.textContent = '';
   }
 
   function scrollEpisodeToActive() {
@@ -5994,6 +6044,32 @@
 
   /* ---------------- 事件绑定 ---------------- */
   function bindEvents() {
+    /*
+     * 右侧选集的搜索：输入即筛选（集号 / 集名 / 分组名都能搜）；
+     * 回车直接播第一条匹配，Esc 清空。按键不再往外冒，避免和播放器快捷键打架。
+     */
+    if (els.episodeSearch) {
+      els.episodeSearch.addEventListener('input', function () {
+        state.episodeQuery = els.episodeSearch.value || '';
+        rerenderEpisodesForSearch();
+      });
+      els.episodeSearch.addEventListener('keydown', function (e) {
+        e.stopPropagation();
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          els.episodeSearch.value = '';
+          state.episodeQuery = '';
+          rerenderEpisodesForSearch();
+          els.episodeSearch.blur();
+          return;
+        }
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          var first = els.episodeList.querySelector('.episode-row');
+          if (first) first.click();
+        }
+      });
+    }
     // 播放页的分享链接：展开看链接 / 点「复制」直接复制（折叠态也能复制）
     if (els.btnShareToggle) els.btnShareToggle.addEventListener('click', toggleShareExpanded);
     if (els.btnShareCopy) els.btnShareCopy.addEventListener('click', copyPlayerShare);

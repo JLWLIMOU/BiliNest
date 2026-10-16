@@ -21,6 +21,12 @@
 
 （下一版的内容写在这里）
 
+### 新增
+
+- **播放页的选集列表可以搜索了**：右侧选集面板多了一个搜索框（选集 ≥ 6 个才出现），输入即筛选 —— **集号、集名、分组名都能搜**（合集里"第 55 集"这种按集号找是最常见的用法）；标题右侧实时显示「匹配数 / 总数」，没有匹配时给一句提示而不是一片空白；**回车直接播第一条匹配**，Esc 清空。切换到别的视频 / 系列时搜索词自动清空，新列表不会一进来就是被筛过的空状态。
+  - 涉及文件：`public/index.html`（`.episode-head` / `#episodeSearch` / `#episodeCount`）、`public/app.js`（`renderEpisodeList` 过滤、新增 `episodeMatches` / `updateEpisodeSearchUi` / `rerenderEpisodesForSearch` / `resetEpisodeSearch`，以及搜索框的 input / Enter / Esc 处理）、`public/styles.css`（`.episode-search` 等）。
+  - 验证：在 110 分 P 的视频上实测 —— 初始 110 行、搜索框可见；搜「琴女」→ 1 行、计数「1 / 110」；搜不存在的词 → 0 行 + 空状态提示；Esc → 恢复 110 行、输入框清空；搜「55」并回车 → 直接播第 55 集（面板高亮、正在播放）；点第一条结果同样切换成功；换到另一个视频后搜索框为空、列表完整。
+
 ---
 
 ## [1.4.10] - 2026-10-09
