@@ -211,11 +211,23 @@
           <div id="episodePanel" class="episode-panel" hidden>
             <div class="episode-head">
               <h3 class="episode-title">选集</h3>
-              <span id="episodeCount" class="episode-count"></span>
+              <div class="episode-head-right">
+                <span id="episodeCount" class="episode-count"></span>
+                <!-- 常驻的只有这枚小按钮；点开才在下面展开搜索框（选集 ≥ 6 个时才显示） -->
+                <button id="btnEpisodeSearch" class="icon-btn episode-search-btn" type="button"
+                        aria-label="搜索选集" aria-expanded="false" title="搜索选集" hidden>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="11" cy="11" r="7"/>
+                    <path d="M20 20l-3.6-3.6"/>
+                  </svg>
+                </button>
+              </div>
             </div>
-            <!-- 选集多了才显示（少于 6 集时搜索没意义，面板也太小） -->
-            <input id="episodeSearch" class="episode-search" type="search" autocomplete="off"
-                   placeholder="搜索选集" aria-label="搜索选集" hidden>
+            <div id="episodeSearchWrap" class="episode-search-wrap">
+              <input id="episodeSearch" class="episode-search" type="search" autocomplete="off"
+                     placeholder="搜索集号 / 集名" aria-label="搜索选集">
+            </div>
             <div id="episodeList" class="episode-list"></div>
           </div>
         </div>

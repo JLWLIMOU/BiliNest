@@ -1699,6 +1699,9 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
 .episode-panel {
   position: sticky;
   top: calc(var(--topbar-h) + 14px);
+  /* 面板本身不滚：表头（标题 + 搜索）固定，只有下面的列表滚（见 .episode-list） */
+  display: flex;
+  flex-direction: column;
   /* 选集是"一块表面"，和卡片同一语言：不要描边 */
   border: none;
   border-radius: var(--radius);
@@ -1726,6 +1729,7 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
 /* 选集面板的表头：标题 + 匹配计数（只有搜索时才显示数字） */
 .episode-head {
   display: flex;
+  flex: none;
   align-items: baseline;
   justify-content: space-between;
   gap: 8px;
@@ -1739,10 +1743,30 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
   font-variant-numeric: tabular-nums;
 }
 
+.episode-head-right { display: inline-flex; align-items: center; gap: 2px; flex: none; }
+.episode-search-btn { width: 24px; height: 24px; }
+.episode-search-btn svg { width: 15px; height: 15px; }
+.episode-search-btn[aria-expanded="true"] { color: var(--accent); background: var(--accent-soft); }
+
+/* 搜索框默认收起（max-height: 0），点放大镜才展开 —— 既不会跟着列表滚走，
+   也不会像常驻输入框那样一直抢注意力。 */
+.episode-search-wrap {
+  display: flex;
+  /* 面板是纵向 flex，列表会抢空间：这里必须 flex: none，否则展开后会被压扁 */
+  flex: none;
+  overflow: hidden;
+  max-height: 0;
+  opacity: 0;
+  margin-bottom: 0;
+  transition: max-height var(--dur-3) var(--ease-out), opacity var(--dur-2) var(--ease-state),
+              margin-bottom var(--dur-3) var(--ease-out);
+}
+.episode-search-wrap.open { max-height: 52px; opacity: 1; margin-bottom: 10px; }
+
 /* 选集搜索：和内容源那边的搜索框同一语言（浅底、无描边、聚焦才点亮） */
 .episode-search {
   width: 100%;
-  margin: 0 0 10px;
+  margin: 0;
   padding: 7px 10px;
   border: 1px solid var(--separator);
   border-radius: var(--r-2);
@@ -1769,6 +1793,10 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
   flex-direction: column;
   gap: 6px;
   padding-right: 4px;
+  /* 只有列表滚：表头和搜索框永远留在原位 */
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .episode-row {

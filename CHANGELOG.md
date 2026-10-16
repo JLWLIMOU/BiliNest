@@ -23,9 +23,10 @@
 
 ### 新增
 
-- **播放页的选集列表可以搜索了**：右侧选集面板多了一个搜索框（选集 ≥ 6 个才出现），输入即筛选 —— **集号、集名、分组名都能搜**（合集里"第 55 集"这种按集号找是最常见的用法）；标题右侧实时显示「匹配数 / 总数」，没有匹配时给一句提示而不是一片空白；**回车直接播第一条匹配**，Esc 清空。切换到别的视频 / 系列时搜索词自动清空，新列表不会一进来就是被筛过的空状态。
-  - 涉及文件：`public/index.html`（`.episode-head` / `#episodeSearch` / `#episodeCount`）、`public/app.js`（`renderEpisodeList` 过滤、新增 `episodeMatches` / `updateEpisodeSearchUi` / `rerenderEpisodesForSearch` / `resetEpisodeSearch`，以及搜索框的 input / Enter / Esc 处理）、`public/styles.css`（`.episode-search` 等）。
-  - 验证：在 110 分 P 的视频上实测 —— 初始 110 行、搜索框可见；搜「琴女」→ 1 行、计数「1 / 110」；搜不存在的词 → 0 行 + 空状态提示；Esc → 恢复 110 行、输入框清空；搜「55」并回车 → 直接播第 55 集（面板高亮、正在播放）；点第一条结果同样切换成功；换到另一个视频后搜索框为空、列表完整。
+- **播放页的选集列表可以搜索了**：选集标题右侧常驻一枚**放大镜按钮**（选集 ≥ 6 个才出现），点开才在下面展开搜索框 —— 这样它既不会随列表滚走，也不会像常驻输入框那样一直抢注意力；再点一次（或连按两下 Esc）收起。输入即筛选，**集号、集名、分组名都能搜**（合集里"第 55 集"这种按集号找是最常见的用法）；计数处实时显示「匹配数 / 总数」，没有匹配时给一句提示而不是一片空白；**回车直接播第一条匹配**；切换视频 / 系列时自动清空并收起。
+  - 顺带把"面板滚动"改成"**列表滚动**"：标题与搜索框固定在面板顶部，不再被列表带走（实测列表滚到底 `scrollTop = 5229` 时，表头位置与滚动前完全一致）。
+  - 涉及文件：`public/index.html`（`.episode-head` + `#btnEpisodeSearch` + `#episodeSearchWrap` / `#episodeSearch` / `#episodeCount`）、`public/app.js`（`renderEpisodeList` 过滤，新增 `episodeMatches` / `updateEpisodeSearchUi` / `setEpisodeSearchOpen` / `rerenderEpisodesForSearch` / `resetEpisodeSearch`，搜索框的 input / Enter / Esc 处理，`scrollEpisodeToActive` 改成按矩形差值滚列表，悬浮提示的滚动监听挂到列表上）、`public/styles.css`（面板改纵向 flex、列表成为唯一滚动区、搜索框的展开收起动画）。
+  - 验证：110 分 P 的视频实测 —— 初始 110 行、放大镜可见且搜索框收起；列表滚到底后表头位置不变；点放大镜 → 展开（高度 33px）且自动聚焦；搜「琴女」→ 1 行、计数「1 / 110」；搜不存在的词 → 0 行 + 空状态提示；Esc 一次清空、再一次收起；搜「55」并回车 → 直接播第 55 集（面板高亮、正在播放）；点第一条结果同样切换成功；换到另一个视频后输入框为空且收起、列表完整。
 
 ---
 

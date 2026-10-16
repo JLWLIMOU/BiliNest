@@ -61,6 +61,8 @@
     episodeList: document.getElementById('episodeList'),
     episodeSearch: document.getElementById('episodeSearch'),
     episodeCount: document.getElementById('episodeCount'),
+    episodeSearchWrap: document.getElementById('episodeSearchWrap'),
+    btnEpisodeSearch: document.getElementById('btnEpisodeSearch'),
     fileInput: document.getElementById('fileInput'),
     dirInput: document.getElementById('dirInput'),
     modalRoot: document.getElementById('modalRoot'),
@@ -82,6 +84,7 @@
     activeVideo: null,      // 当前正在播放的视频条目
     activeEpisode: null,    // { bvid, cid, page }
     episodeQuery: '',       // 右侧选集列表的搜索词（换视频时清空）
+    episodeSearchOpen: false, // 选集搜索框是否展开（默认收起，只留一枚放大镜按钮）
     episodes: [],
     currentView: 'dashboard',
     dashQuery: '',          // 首页“视频库”搜索关键字
@@ -4054,13 +4057,31 @@
     return hay.toLowerCase().indexOf(q) >= 0;
   }
 
-  /** 搜索框的显隐与"匹配 N / 总数"那行小字 */
+  /** 放大镜按钮的显隐（选集太少不显示）与"匹配 N / 总数"那行小字 */
   function updateEpisodeSearchUi(shown, q) {
-    if (els.episodeSearch) {
-      els.episodeSearch.hidden = state.episodes.length < 6;   // 选集太少就没必要搜
-    }
+    if (els.btnEpisodeSearch) els.btnEpisodeSearch.hidden = state.episodes.length < 6;
     if (els.episodeCount) {
       els.episodeCount.textContent = q ? (shown + ' / ' + state.episodes.length) : '';
+    }
+  }
+
+  /**
+   * 展开 / 收起选集搜索框。
+   * 常驻的只有标题右侧那枚放大镜：点开才在下面展开输入框（这样它既不会随列表滚走，
+   * 也不会像常驻输入框那样一直抢注意力）；收起时顺手清空搜索词，列表回到完整状态。
+   */
+  function setEpisodeSearchOpen(open) {
+    state.episodeSearchOpen = !!open;
+    if (els.episodeSearchWrap) els.episodeSearchWrap.classList.toggle('open', !!open);
+    if (els.btnEpisodeSearch) els.btnEpisodeSearch.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (!open) {
+      if (els.episodeSearch) els.episodeSearch.value = '';
+      state.episodeQuery = '';
+      rerenderEpisodesForSearch();
+      return;
+    }
+    if (els.episodeSearch) {
+      setTimeout(function () { try { els.episodeSearch.focus(); } catch (e) { /* ignore */ } }, 0);
     }
   }
 
@@ -4073,22 +4094,24 @@
   /** 换视频 / 换系列时把搜索词清掉，避免新列表一进来就是被筛过的空状态 */
   function resetEpisodeSearch() {
     state.episodeQuery = '';
-    if (els.episodeSearch) {
-      els.episodeSearch.value = '';
-      els.episodeSearch.hidden = true;
-    }
+    state.episodeSearchOpen = false;
+    if (els.episodeSearchWrap) els.episodeSearchWrap.classList.remove('open');
+    if (els.btnEpisodeSearch) els.btnEpisodeSearch.setAttribute('aria-expanded', 'false');
+    if (els.episodeSearch) els.episodeSearch.value = '';
     if (els.episodeCount) els.episodeCount.textContent = '';
   }
 
   function scrollEpisodeToActive() {
-    var panel = els.episodePanel;
-    if (!panel || panel.hidden) return;
-    var active = panel.querySelector('.episode-row.active');
+    var list = els.episodeList;
+    if (!list || !els.episodePanel || els.episodePanel.hidden) return;
+    var active = list.querySelector('.episode-row.active');
     if (!active) return;
     var rowH = active.offsetHeight || 40;
-    var target = Math.max(0, active.offsetTop - rowH * 2);
-    if (Math.abs(panel.scrollTop - target) > rowH) {
-      panel.scrollTop = target;
+    // 现在滚动的是列表本身（表头固定），所以用矩形差值算，别依赖 offsetTop
+    var delta = active.getBoundingClientRect().top - list.getBoundingClientRect().top;
+    var target = Math.max(0, list.scrollTop + delta - rowH * 2);
+    if (Math.abs(list.scrollTop - target) > rowH) {
+      list.scrollTop = target;
     }
   }
 
@@ -6049,6 +6072,11 @@
      * 回车直接播第一条匹配，Esc 清空。按键不再往外冒，避免和播放器快捷键打架。
      */
     if (els.episodeSearch) {
+      if (els.btnEpisodeSearch) {
+        els.btnEpisodeSearch.addEventListener('click', function () {
+          setEpisodeSearchOpen(!state.episodeSearchOpen);
+        });
+      }
       els.episodeSearch.addEventListener('input', function () {
         state.episodeQuery = els.episodeSearch.value || '';
         rerenderEpisodesForSearch();
@@ -6057,10 +6085,15 @@
         e.stopPropagation();
         if (e.key === 'Escape') {
           e.preventDefault();
+          // 有内容先清空（留在搜索态），已经是空的就整个收起来
+          if (!els.episodeSearch.value) {
+            setEpisodeSearchOpen(false);
+            els.episodeSearch.blur();
+            return;
+          }
           els.episodeSearch.value = '';
           state.episodeQuery = '';
           rerenderEpisodesForSearch();
-          els.episodeSearch.blur();
           return;
         }
         if (e.key === 'Enter') {
@@ -6582,7 +6615,8 @@
       var row = e.target && e.target.closest ? e.target.closest('.episode-row') : null;
       if (row) hideEpisodeTooltip();
     });
-    if (els.episodePanel) els.episodePanel.addEventListener('scroll', hideEpisodeTooltip);
+    // 滚动的是列表本身（表头固定），悬浮提示跟着它收
+    if (els.episodeList) els.episodeList.addEventListener('scroll', hideEpisodeTooltip);
     window.addEventListener('resize', hideEpisodeTooltip);
   }
 
