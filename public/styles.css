@@ -1350,7 +1350,19 @@ body.tab-sorting { cursor: grabbing; user-select: none; -webkit-user-select: non
 }
 .card-remove:hover { background: rgba(229, 72, 77, 0.14); color: #e5484d; }
 .card-menu-icon { width: 16px; height: 16px; fill: currentColor; display: block; }
-.card-menu:hover { background: rgba(255, 255, 255, 0.28); }
+/*
+ * 悬停是"加深"而不是"提亮"：原来悬停把底色换成 28% 白，白点压在浅色封面
+ * （或本来就是浅底的卡片）上就看不见了。加深则任何底色下都读得出来。
+ */
+.card-menu:hover { background: rgba(15, 15, 20, 0.74); }
+
+/*
+ * 没有封面的卡片（例如不带封面的收藏夹）：按钮压的是卡片自己的底色而不是图片，
+ * "半透明深底 + 白点"在这里会变成白底白点 —— 换成主题自适应的材质（浅色主题深点、
+ * 深色主题亮点），悬停再加深一档。
+ */
+.card--flat .card-menu { background: var(--fill); color: var(--text); }
+.card--flat .card-menu:hover { background: var(--border-strong); }
 
 /* ---------- 播放页 ---------- */
 /*
